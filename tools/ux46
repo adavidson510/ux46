@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+if sys.version_info < (3, 10):
+    raise SystemExit('UX46 requires Python 3.10+. Run with python3.11 or newer if macOS python3 is older.')
+from ux46_local import main
+raise SystemExit(main())

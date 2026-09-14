@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06101d">
+  <title>Atlas</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell" id="app">
+    <aside class="project-rail" aria-label="Atlas navigation">
+      <a class="brand" href="/" aria-label="Atlas home">
+        <img src="/assets/atlas-lockup.svg" alt="Atlas">
+      </a>
+
+      <button class="workspace-picker" id="workspacePicker" type="button" aria-haspopup="menu" aria-label="Choose workspace">
+        <span class="icon">◎</span><span id="workspaceName">Morning Build</span><span class="chevron">⌄</span>
+      </button>
+
+      <nav class="primary-nav" aria-label="Primary">
+        <button class="active" type="button" data-route="workspace" aria-label="Workspace"><span>▦</span><b>Workspace</b></button>
+        <button type="button" data-route="projects" aria-label="Projects"><span>□</span><b>Projects</b></button>
+        <button type="button" data-route="sessions" aria-label="Sessions"><span>◯</span><b>Sessions</b></button>
+        <button type="button" data-route="attention" aria-label="User Attention"><span>♧</span><b>User Attention</b><em id="navAttentionCount" hidden>0</em></button>
+        <button type="button" data-route="memory" aria-label="Memory"><span>▤</span><b>Memory</b></button>
+      </nav>
+
+      <div class="project-heading"><span>Projects</span><button id="allProjectsButton" type="button" aria-label="Browse all projects">＋</button></div>
+      <nav class="project-shortcuts" id="projectList" aria-label="Project shortcuts"></nav>
+
+      <div class="rail-footer">
+        <button class="settings-button" type="button" id="settingsButton" aria-label="Settings"><span>⚙</span><b>Settings</b></button>
+        <div class="user-presence"><span class="avatar">A</span><span><b>User</b><small><i></i> Online</small></span></div>
+      </div>
+    </aside>
+
+    <main class="atlas-main">
+      <header class="command-zone">
+        <form class="atlas-command" id="commandForm" role="search">
+          <span class="command-icon" aria-hidden="true">↻</span>
+          <input id="commandInput" autocomplete="off" aria-label="Atlas command" placeholder="Ask Atlas for a project, session, layout, artifact, or workspace…">
+          <kbd>⌘K</kbd>
+          <button type="submit" aria-label="Run Atlas command">➤</button>
+        </form>
+        <p>Atlas command layer — manages projects, sessions, and workspace.</p>
+        <section class="command-results" id="commandResults" aria-live="polite" hidden></section>
+      </header>
+
+      <section class="workspace-toolbar">
+        <div class="save-state"><i></i><span><b>Workspace saved</b><small id="workspaceRestore">Restored just now</small></span></div>
+        <div class="toolbar-actions">
+          <button id="undoButton" type="button" title="Undo the last workspace change">↶ Undo</button>
+          <button id="layoutButton" type="button" aria-haspopup="menu">▦ <span>Layout</span></button>
+          <button id="focusButton" type="button">Focus: <span id="focusLabel">Workspace</span><i></i></button>
+        </div>
+      </section>
+
+      <section class="workspace-canvas" id="workspaceCanvas" aria-label="Session workspace" aria-live="polite"></section>
+
+      <section class="voice-dock" id="voiceDock" aria-label="Voice target">
+        <button type="button" id="voiceToggle" aria-pressed="false">●</button>
+        <span><b id="voiceTarget">No voice target</b><small id="voiceStatus">Click a session’s Listen action</small></span>
+        <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <button class="hangup" type="button" id="voiceStop" aria-label="Stop listening">×</button>
+      </section>
+    </main>
+
+    <aside class="attention-rail" id="attentionRail" aria-label="User Attention" data-state="collapsed">
+      <button class="attention-tab" id="attentionToggle" type="button" aria-expanded="false">
+        <span class="bell">♧</span><span class="vertical-label">User Attention</span><em id="attentionTotal">0</em>
+      </button>
+      <div class="attention-drawer">
+        <header>
+          <div><h2>User Attention <em id="drawerAttentionCount">0</em></h2><p id="attentionSummary">Nothing needs you</p></div>
+          <button id="attentionClose" type="button" aria-label="Collapse Attention">×</button>
+        </header>
+        <div class="attention-list" id="attentionList"></div>
+        <footer><button id="quietHours" type="button">☾ Quiet hours <span>Turn on</span></button></footer>
+      </div>
+    </aside>
+  </div>
+
+  <dialog id="sessionPicker" class="atlas-dialog">
+    <form method="dialog">
+      <header><div><small>Add to workspace</small><h2>Choose a session</h2></div><button value="cancel" aria-label="Close">×</button></header>
+      <input id="sessionFilter" placeholder="Search session names, projects, and re-entry context…" autocomplete="off">
+      <div id="sessionOptions" class="session-options"></div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="atlas-dialog detail-dialog">
+    <article>
+      <header><div><small id="detailKicker">Session memory</small><h2 id="detailTitle">Session</h2></div><button id="detailClose" type="button" aria-label="Close">×</button></header>
+      <div id="detailBody" class="detail-body"></div>
+    </article>
+  </dialog>
+
+  <div class="attention-toast" id="attentionToast" role="alert" hidden>
+    <span class="toast-dot"></span><div><b id="attentionToastTitle">A session needs you</b><small id="attentionToastBody"></small></div><button id="attentionToastOpen" type="button">Open</button><button id="attentionToastDismiss" type="button" aria-label="Dismiss">×</button>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

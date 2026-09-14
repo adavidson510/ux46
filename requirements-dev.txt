@@ -1,0 +1,2 @@
+# Test-only dependency. The local application uses the Python standard library.
+pytest>=8,<10

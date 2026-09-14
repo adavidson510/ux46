@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark light" />
+<title>UX46</title>
+<!-- The mark below is the UX46 symbol, carried inline so the console ships no
+     extra request and no remote asset. Geometry is copied from
+     UX46-UX-POLISH-v1.0.0/assets/UX46-SYMBOL-color-*.svg (archive sha256
+     bd80ff8e…0cff06). That SVG is the package's interface recreation of the
+     approved brand raster, not a separately approved final master. The fills
+     are theme variables rather than fixed hex, so one mark serves the dark and
+     light palettes; the rules live on #m-ux46 itself because a <use> clone
+     takes its paint from the referenced definition, not from the referrer. -->
+<link rel="icon" type="image/png" sizes="32x32" href="/brand/ux46-icon-32-1.png" />
+<link rel="icon" type="image/svg+xml" sizes="any" href="/brand/ux46-icon-1.svg" />
+<link rel="apple-touch-icon" sizes="180x180" href="/brand/ux46-apple-touch-icon-1.png" />
+<meta name="application-name" content="UX46" />
+<meta name="apple-mobile-web-app-title" content="UX46" />
+<meta name="theme-color" content="#090D14" />
+<meta name="description" content="Your agents. Your work. Your space. The workspace around your AI." />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="UX46" />
+<meta property="og:title" content="UX46 — Your agents. Your work. Your space." />
+<meta property="og:description" content="The workspace around your AI." />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="UX46 logo in lavender and white on blue-black. Your agents. Your work. Your space." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="UX46 — Your agents. Your work. Your space." />
+<meta name="twitter:description" content="The workspace around your AI." />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/workspace.css" />
+<link rel="stylesheet" href="/tell.css" />
+</head>
+<body>
+<!-- Icons are static, trusted markup defined once here and referenced by <use>.
+     Nothing from a transcript or a record ever becomes markup. -->
+<svg class="icon-defs" aria-hidden="true" focusable="false">
+  <defs>
+    <g id="i-gear"><path d="m8 2-.6 2-2 .9L3.5 4l-2 3 1.6 1.5v3L1.5 13l2 3 1.9-.9 2 .9.6 2h4l.6-2 2-.9 1.9.9 2-3-1.6-1.5v-3L18.5 7l-2-3-1.9.9-2-.9-.6-2Z"/><circle cx="10" cy="10" r="3"/></g>
+    <g id="i-archive"><path d="M4 7v10h12V7M2 3h16v4H2zM8 11h4"/></g>
+    <g id="i-hex"><path d="m10 2 7 4v8l-7 4-7-4V6Z"/></g>
+    <g id="i-refresh"><path d="M17 8A7 7 0 0 0 4 6M3 2v5h5M3 12a7 7 0 0 0 13 2m1 4v-5h-5"/></g>
+    <g id="i-book"><path d="M10 5v13M10 5C7 2 4 3 2 4v12c3-1 5-1 8 2 3-3 5-3 8-2V4c-2-1-5-2-8 1Z"/></g>
+    <g id="i-usage" fill="currentColor" stroke="none"><rect x="1" y="12" width="3" height="6" rx="1.5"/><rect x="6" y="8" width="3" height="10" rx="1.5"/><rect x="11" y="5" width="3" height="13" rx="1.5"/><rect x="16" y="1" width="3" height="17" rx="1.5"/></g>
+    <g id="i-spark"><path d="M10 1Q12 8 19 10Q12 12 10 19Q8 12 1 10Q8 8 10 1Z"/></g>
+    <g id="i-email"><rect x="2" y="4" width="16" height="12" rx="2"/><path d="m3 5 7 6 7-6"/></g>
+    <g id="i-device-computer"><rect x="2" y="3" width="16" height="11" rx="1.3"/><path d="M10 14v3M6 17h8"/></g>
+    <g id="i-device-phone"><rect x="5.5" y="2" width="9" height="16" rx="1.7"/><path d="M8 4h4M9 16h2"/></g>
+    <g id="i-desktop-stack"><path d="M6 3h12v10M2 7h12v10H2z"/></g>
+    <g id="i-tell" fill="currentColor" stroke="none"><circle cx="1.5" cy="12.5" r="1.5"/><rect x="4" y="5" width="3" height="12" rx="1.5"/><rect x="8.5" y="1" width="3" height="18" rx="1.5"/><rect x="13" y="6" width="3" height="9" rx="1.5"/><circle cx="18.5" cy="11" r="1.5"/></g>
+    <g id="i-console"><path d="M2 5h16M2 10h12M2 15h8" /></g>
+    <g id="i-board"><path d="M2.5 2.5h6v6h-6zM11.5 2.5h6v6h-6zM2.5 11.5h6v6h-6zM11.5 11.5h6v6h-6z" /></g>
+    <g id="i-projects"><path d="M2.5 5.5a1 1 0 0 1 1-1h3.4l1.4 1.8h6.2a1 1 0 0 1 1 1v7.2a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z" /></g>
+    <g id="i-rail"><path d="M3 3.5h14v13H3zM7.5 3.5v13" /></g>
+    <g id="i-dock"><path d="M3 3.5h14v13H3zM12.5 3.5v13" /></g>
+    <g id="i-close"><path d="M5 5l10 10M15 5L5 15" /></g>
+    <g id="i-menu"><path d="M3 5h14M3 10h14M3 15h14" /></g>
+    <g id="i-turns"><path d="M4 4.5h12M4 9h12M4 13.5h7" /></g>
+    <g id="i-updates"><path d="M10 3.5l1.9 4.2 4.6.5-3.4 3.1.9 4.5L10 13.6l-4 2.2.9-4.5-3.4-3.1 4.6-.5z" /></g>
+    <g id="i-source"><path d="M7.5 6L4 10l3.5 4M12.5 6L16 10l-3.5 4" /></g>
+    <g id="i-room"><path d="M10 2.8l6.5 3.6v7.2L10 17.2 3.5 13.6V6.4z" /></g>
+    <g id="i-plus"><path d="M10 4.5v11M4.5 10h11" /></g>
+    <g id="i-mic"><path d="M10 2.6a2.1 2.1 0 0 0-2.1 2.1v4.2a2.1 2.1 0 1 0 4.2 0V4.7A2.1 2.1 0 0 0 10 2.6zM4.8 8.9a5.2 5.2 0 0 0 10.4 0M10 14.1v3" /></g>
+    <g id="i-send"><path d="M10 16V4.6M5.2 9.4L10 4.6l4.8 4.8" /></g>
+    <g id="i-check"><path d="M4.5 10.5l3.4 3.4 7.6-7.8" /></g>
+    <g id="i-dots"><path d="M5 10h.01M10 10h.01M15 10h.01" /></g>
+    <g id="i-chev"><path d="M8 5l5 5-5 5" /></g>
+    <g id="i-bell"><path d="M10 2.8a4.6 4.6 0 0 0-4.6 4.6c0 4-1.6 5.2-1.6 5.2h12.4s-1.6-1.2-1.6-5.2A4.6 4.6 0 0 0 10 2.8zM8.6 15.2a1.6 1.6 0 0 0 2.8 0" /></g>
+    <g id="i-sort"><path d="M5.5 4.5v11M3 13l2.5 2.5L8 13M14.5 15.5v-11M12 7l2.5-2.5L17 7" /></g>
+    <g id="i-arrow"><path d="M4 10h11M11 6l4 4-4 4" /></g>
+    <g id="i-alert"><path d="M10 3.4 2.8 16.2h14.4zM10 8v3.6M10 13.8v.01" /></g>
+    <g id="i-desk"><path d="M2.5 4.5h15v9h-15zM7 16.5h6M10 13.5v3" /></g>
+    <g id="i-grip"><path d="M7.5 5.5h.01M7.5 10h.01M7.5 14.5h.01M12.5 5.5h.01M12.5 10h.01M12.5 14.5h.01" /></g>
+    <g id="i-clock"><path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM10 5v5h4" /></g>
+    <g id="i-notes"><path d="M4 3h12v10l-4 4H4zM12 17v-4h4M7 7h6M7 10h4" /></g>
+    <g id="i-settings"><path d="M3 6h5m4 0h5M3 14h9m4 0h1" /><circle cx="10" cy="6" r="2" /><circle cx="14" cy="14" r="2" /></g>
+    <!-- UX46 symbol · approved vector, recoloured by theme -->
+    <g id="m-ux46">
+      <path class="mark-a" d="M18 0v7L8 12v16l6 3v7L0 31V9Z" />
+      <path class="mark-b" d="m21 8 13 6v18l-16 8v-7l9-5V18l-6-3Z" />
+      <circle class="mark-a" cx="17" cy="21.5" r="4.15" />
+    </g>
+  </defs>
+</svg>
+
+<div class="app" id="app" data-left="wide" data-dock="closed">
+
+  <!-- left drawer: navigation, collapsible to an icon rail -->
+  <nav class="side" id="side" aria-label="UX46 navigation">
+    <div class="side-head">
+      <!-- The mark is a way in, not decoration: it opens the conversation this
+           workspace designated as the one about UX46 itself. -->
+      <button class="markbtn" id="btnYourUx" type="button" aria-label="New conversation"
+              title="Start a conversation">
+        <svg class="brand" viewBox="0 0 34 40" aria-hidden="true">
+          <use href="#m-ux46" />
+        </svg>
+        <span class="mark-name">UX46</span>
+      </button>
+      <button class="iconbtn side-collapse" id="btnLeftToggle" type="button"
+              aria-expanded="true" aria-controls="side" title="Collapse navigation">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-rail" /></svg>
+        <span class="sr-only">Collapse navigation</span>
+      </button>
+    </div>
+
+    <!-- which agent's sessions the list below is showing. Choosing one here
+         browses it; it does not move the conversation you are in, which is the
+         selected tab above. Opening one of its sessions is what moves you. -->
+    <div class="agent-pick" id="agentPicker" role="group"
+         aria-label="Agents" hidden></div>
+
+    <!-- Start something. It is the first thing in the drawer because it is the
+         one action that does not depend on what is already open. -->
+    <div class="side-new">
+      <button class="newbtn" id="btnNewConv" type="button" aria-haspopup="dialog"
+              title="New conversation">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+        <span class="lbl">New conversation</span>
+      </button>
+    </div>
+
+    <div class="side-nav">
+      <button class="navbtn" id="btnConsole" type="button" aria-pressed="true" title="Console">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-console" /></svg>
+        <span class="lbl">Console</span>
+      </button>
+      <button class="navbtn" id="btnBoard" type="button" aria-pressed="false" title="Command center">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-board" /></svg>
+        <span class="lbl">Command center</span>
+        <span class="count" id="needsCount" hidden>0</span>
+      </button>
+      <button class="navbtn" id="btnTell" type="button" aria-pressed="false" title="Signals">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-tell" /></svg>
+        <span class="lbl">Signals</span>
+        <span class="count" id="tellCount" hidden>0</span>
+      </button>
+      <button class="navbtn" id="btnEmail" type="button" aria-pressed="false" title="Email">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-email"/></svg><span class="lbl">Email</span><span class="count" id="emailCount" hidden>0</span>
+      </button>
+      <button class="navbtn" id="btnConstellation" type="button" aria-pressed="false" title="Constellation">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-spark"/></svg><span class="lbl">Constellation</span>
+      </button>
+      <button class="navbtn" id="btnSchedule" type="button" aria-pressed="false" title="Scheduled tasks">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-clock"/></svg><span class="lbl">Scheduled</span><span class="count" id="scheduleCount" hidden>0</span>
+      </button>
+      <button class="navbtn" id="btnUsage" type="button" aria-pressed="false" title="Project usage">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-usage"/></svg><span class="lbl">Usage</span>
+      </button>
+      <button class="navbtn" id="btnDesktops" type="button" title="Desktops">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-desk" /></svg>
+        <span class="lbl">Desktops</span>
+      </button>
+      <button class="navbtn rail-only" id="btnRailBrowse" type="button" title="Projects and sessions">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-projects" /></svg>
+        <span class="lbl">Projects</span>
+      </button>
+    </div>
+
+    <div class="side-browse" id="sideBrowse">
+      <div class="side-title">
+        <h2>Projects and sessions</h2>
+        <p class="sub" id="roomsSub"></p>
+      </div>
+      <input class="side-search" id="roomSearch" type="search" autocomplete="off"
+             placeholder="Search every project and session…" aria-label="Search rooms" />
+      <div class="filters">
+        <span class="fltlabel">Search:</span>
+        <label class="tick"><input type="checkbox" id="fltComplete" checked /> include complete</label>
+        <label class="tick"><input type="checkbox" id="fltWorkers" /> include agent work</label>
+      </div>
+      <div class="side-list" id="roomList"></div>
+      <p class="sr-only" id="roomFoot"></p>
+    </div>
+    <div class="side-settings">
+      <button class="navbtn" id="btnWorkspaceSettings" type="button"
+              popovertarget="workspaceMenu" aria-haspopup="dialog" title="Settings">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-gear" /></svg>
+        <span class="lbl">Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- centre: tabs, the session heading, the console itself -->
+  <div class="frame">
+    <header class="topbar">
+      <!-- One strip of open sessions across every configured agent. -->
+      <div class="tabs" role="tablist" aria-label="Open sessions" id="tabs"></div>
+      <div class="mobile-tabs" id="mobileTabs">
+        <span class="mobile-tab-name" id="mobileTabName" aria-hidden="true">Choose conversation</span>
+        <span class="mobile-tab-chevron" aria-hidden="true">⌄</span>
+        <select id="mobileTabSelect" aria-label="Switch open conversation"></select>
+      </div>
+      <span class="chip-state" id="connState" role="status">connecting…</span>
+      <button class="iconbtn bell" id="btnAttention" type="button" aria-expanded="false"
+              aria-controls="dock" title="Attention">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-bell" /></svg>
+        <span class="count" id="attnCount" hidden>0</span>
+        <span class="sr-only">Attention</span>
+      </button>
+      <button class="iconbtn" id="btnDock" type="button" aria-expanded="false" aria-controls="dock"
+              title="Supporting panel">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-dock" /></svg>
+        <span class="sr-only">Supporting panel</span>
+      </button>
+    </header>
+
+    <!-- The session heading carries the destination and its real connection
+         state, so the composer below can be one field and nothing else. -->
+    <div class="subbar">
+      <button class="iconbtn narrow-only" id="btnMenu" type="button"
+              aria-expanded="false" aria-controls="side" title="Navigation">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-menu" /></svg>
+        <span class="sr-only">Navigation</span>
+      </button>
+      <!-- The same action as the drawer's, one tap away when the drawer is shut. -->
+      <button class="iconbtn narrow-only" id="btnNewConvPhone" type="button"
+              aria-haspopup="dialog" title="New conversation">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+        <span class="sr-only">New conversation</span>
+      </button>
+      <div class="focus-rooms" id="focusRooms" role="tablist" aria-label="Sessions (focus mode)"></div>
+      <div class="sess" id="sessHead">
+        <div class="session-title-row">
+          <div class="session-title-identity"><p class="crumb" id="crumb">Loading rooms…</p>
+            <button class="iconbtn session-refresh" id="btnSessionRefresh" type="button" hidden aria-label="Refresh this conversation’s connection" title="Refresh this conversation’s connection. An active turn will be preserved; no message is resent.">
+              <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><path d="M16 7a6.3 6.3 0 1 0 .3 5M16 3v4h-4" /></svg>
+            </button>
+          </div>
+          <span class="session-title-actions"><button class="goal-badge" id="btnGoal" type="button" hidden aria-haspopup="dialog" aria-expanded="false" aria-controls="commandPopover">Goal</button></span>
+        </div>
+        <p class="submeta">
+          <button type="button" class="cap agent-name-action" id="sessCap" aria-haspopup="dialog"></button>
+          <span class="kind" id="sessKind"></span>
+          <span class="proj-phone" id="sessProject"></span>
+          <span class="ownership" id="ownState"></span>
+          <button type="button" class="linkbtn" id="btnContinue" hidden>Continue here</button>
+        </p>
+      </div>
+      <div class="spacer"></div>
+      <button type="button" class="model-chip" id="btnModel" aria-haspopup="dialog"
+              aria-expanded="false" aria-controls="commandPopover" hidden></button>
+      <button class="tool wide-only" id="btnFold" type="button"
+              aria-pressed="false" aria-expanded="false">Show work</button>
+      <button class="tool wide-only" id="btnEarlier" type="button">Load earlier</button>
+      <button class="tool wide-only" id="btnFocus" type="button" aria-pressed="false"><span id="focusLabel">Focus</span></button>
+      <button class="iconbtn" id="btnDetails" type="button" title="Session options and connection details">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-dots" /></svg>
+        <span class="sr-only">Session options and connection details</span>
+      </button>
+    </div>
+
+    <div class="main">
+      <!-- The one control focus mode keeps. It floats in the corner over
+           reserved space, so it never covers a line of the conversation. -->
+      <button class="focus-exit" id="btnFocusExit" type="button">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg>
+        <span>Exit focus</span>
+      </button>
+
+      <section class="view" id="viewConsole" aria-label="Native session">
+        <div class="stream" id="stream" tabindex="0" role="log" aria-label="Native session history">
+          <div class="thread" id="thread"></div>
+        </div>
+
+        <!-- Native session settings open under the control that names them. -->
+        <section class="command-popover" id="commandPopover" hidden aria-label="Session commands">
+          <div class="command-head"><strong id="commandTitle">Session commands</strong><button type="button" class="ghost closebtn" id="commandClose" aria-label="Close commands"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg></button></div>
+          <div id="commandOptions" class="command-options"></div>
+        </section>
+
+        <!-- reading and jump controls sit above the composer, never on it -->
+        <div class="floaters" id="floaters" hidden>
+          <div class="selnav" id="selNav" hidden role="group" aria-label="Selected entry">
+            <span class="pos" id="selPos"></span>
+            <button class="step-btn" id="selPrev" type="button" aria-label="Previous">&#8249;</button>
+            <button class="step-btn" id="selNext" type="button" aria-label="Next">&#8250;</button>
+            <button class="pillbtn" id="selLive" type="button">Back to live</button>
+          </div>
+          <div class="newpill" id="newPill" hidden role="status">
+            <span class="lbl" id="newLbl"></span>
+            <button class="pillbtn" id="newJump" type="button">Back to live</button>
+          </div>
+        </div>
+
+        <!-- one line that says what this session is doing, in the flow so it
+             can never sit on top of the composer -->
+        <div class="activity" id="activity" hidden role="status" aria-live="polite"
+             aria-label="Session activity"></div>
+
+        <p class="flash" id="flash" hidden role="status"></p>
+        <div class="conflict" id="conflict" hidden></div>
+        <div class="conflict recovery" id="recovery" hidden role="status"></div>
+        <!-- Why an attempt to take this session did not work. It stays until it
+             is acted on, because a routine state refresh must not erase the one
+             thing that explains why Send is still disabled. -->
+        <div class="conflict attach" id="attachNote" hidden role="alert"></div>
+
+        <!-- One field. Everything a message can carry is behind +, and the
+             only permanent chrome is the field itself. -->
+        <form class="composer" id="composer">
+          <section class="plus-menu" id="plusMenu" hidden aria-label="Add to this message">
+            <div class="command-head"><strong>Add to this message</strong><button type="button" class="ghost closebtn" id="plusClose" aria-label="Close menu"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg></button></div>
+            <div class="command-options" id="plusOptions"></div>
+          </section>
+          <div class="composer-inner">
+            <div class="cchips" id="cchips" aria-live="polite"></div>
+            <p class="cstate" id="sendState" role="status" aria-live="polite" hidden></p>
+            <div class="cbox">
+              <button type="button" class="cbtn" id="btnPlus" aria-haspopup="dialog"
+                      aria-expanded="false" aria-controls="plusMenu" title="Add photos or files">
+                <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+                <span class="sr-only">Add photos or files</span>
+              </button>
+              <label class="sr-only" for="draft" id="draftLabel">Draft</label>
+              <textarea id="draft" rows="1" placeholder="Message this session…" spellcheck="true"></textarea>
+              <button type="button" class="cbtn" id="btnListen" hidden
+                      aria-pressed="false" title="Dictate">
+                <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-mic" /></svg>
+                <span class="sr-only">Dictate</span>
+              </button>
+              <button type="submit" class="cbtn csend" id="btnSend" title="Send · Enter sends, Shift+Enter starts a line">
+                <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-send" /></svg>
+                <span class="sr-only">Send</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="view" id="viewBoard" hidden aria-label="Command center">
+        <div class="cc" id="ccBody"></div>
+      </section>
+
+      <section class="view workspace-view" id="viewSchedule" hidden aria-label="Scheduled tasks"><div class="workspace-surface" id="scheduleBody"></div></section>
+      <section class="view workspace-view" id="viewUsage" hidden aria-label="Project usage"><div class="workspace-surface" id="usageBody"></div></section>
+      <section class="view workspace-view" id="viewEmail" hidden aria-label="Email"><div class="workspace-surface" id="emailBody"></div></section>
+      <section class="view workspace-view" id="viewConstellation" hidden aria-label="Constellation"><div class="workspace-surface" id="constellationBody"></div></section>
+      <section class="view tell-view" id="viewTell" hidden aria-label="Tell boards">
+        <div class="tell" id="tellBody"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- right drawer: one supporting panel at a time -->
+  <aside class="dock" id="dock" hidden aria-labelledby="dockTitle">
+    <div class="dock-head">
+      <h2 id="dockTitle">My turns</h2>
+      <button class="iconbtn" id="dockClose" type="button" title="Close panel">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg>
+        <span class="sr-only">Close panel</span>
+      </button>
+    </div>
+    <div class="dock-tabs" id="dockTabs" role="tablist" aria-label="Supporting panels">
+      <button class="dock-tab" type="button" role="tab" data-panel="attention" aria-selected="false">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-bell" /></svg>
+        <span>Attention</span>
+      </button>
+      <button class="dock-tab" type="button" role="tab" data-panel="turns" aria-selected="false">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-turns" /></svg>
+        <span>Turns</span>
+      </button>
+      <button class="dock-tab" type="button" role="tab" data-panel="updates" aria-selected="false">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-updates" /></svg>
+        <span>Updates</span>
+      </button>
+      <button class="dock-tab" type="button" role="tab" data-panel="board" aria-selected="false">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-board" /></svg>
+        <span>Canvas</span>
+      </button>
+      <button class="dock-tab" type="button" role="tab" data-panel="notes" aria-selected="false">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-notes" /></svg>
+        <span>Notes</span>
+      </button>
+    </div>
+
+    <div class="dock-body">
+      <section class="panel" id="panelAttention" hidden>
+        <div class="attn-summary">
+          <p class="attn-count" id="attnSummary">Reading your workspace…</p>
+          <button class="attn-sort" id="attnSort" type="button" aria-pressed="false"
+                  title="Order these by urgency instead of by project">
+            <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-sort" /></svg>
+            <span id="attnSortLabel">Project order</span>
+          </button>
+        </div>
+        <div class="panel-list attn-list" id="attnList"></div>
+        <div class="panel-acts">
+          <button class="attn-open-cc" id="attnCommandCenter" type="button">
+            <span>Open command center</span>
+            <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-arrow" /></svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="panel" id="panelNav" hidden>
+        <p class="panel-sub" id="navSub"></p>
+        <input class="panel-search" id="navSearch" type="search" placeholder="Search…"
+               autocomplete="off" aria-label="Search this session" />
+        <div class="panel-list" id="navList"></div>
+        <p class="panel-foot" id="navFoot"></p>
+      </section>
+
+      <section class="panel" id="panelSource" hidden>
+        <p class="panel-sub" id="srcOrigin">No message opened yet.</p>
+        <div class="panel-scroll"><pre class="out" id="srcText"></pre></div>
+        <div class="panel-acts" id="srcActs"></div>
+      </section>
+
+      <section class="panel" id="panelBoard" hidden>
+        <div class="board-headline">
+          <p class="board-context" id="boardContext"></p>
+          <button class="linkbtn" id="boardEdit" type="button">Edit</button>
+        </div>
+        <p class="board-note" id="boardNote" role="status"></p>
+        <div class="board-scroll" id="boardBody"></div>
+        <div class="panel-acts" id="boardActs"></div>
+      </section>
+
+      <section class="panel" id="panelNotes" hidden>
+<div class="panel-scroll notes-body">
+  <p class="notes-sub">Little things to come back to. Shared across your devices.</p>
+  <form class="desk-save notes-add" id="notesForm">
+    <label class="sr-only" for="noteText">New note</label>
+    <input id="noteText" maxlength="1000" placeholder="Make a note…" autocomplete="off" required />
+    <button class="iconbtn" type="submit" aria-label="Add note" title="Add note">
+      <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+    </button>
+  </form>
+  <p id="notesStatus" class="notes-sub" role="status"></p>
+  <div id="notesList" class="notes-list"></div>
+  <details id="notesCompleted"><summary id="notesCompletedTitle">Completed</summary><div id="notesDoneList" class="notes-list"></div></details>
+
+</div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<!-- One tab's own options. Tucked away: it opens from the tab's own control,
+     a right-click, or the keyboard, and never adds chrome to the strip. -->
+<div class="tabmenu" id="tabMenu" role="menu" aria-label="Session tab options" hidden></div>
+
+
+
+<dialog class="agent-actions-dialog" id="agentActionsDialog" aria-labelledby="agentActionsTitle">
+  <div class="agent-actions-head"><span id="agentActionsMark"></span><div><h2 id="agentActionsTitle">Agent</h2><p id="agentActionsAbout"></p></div><button class="iconbtn" type="button" id="agentActionsClose" aria-label="Close agent menu"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close"/></svg></button></div>
+  <div class="agent-actions-list"><button type="button" id="agentActionsNew"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus"/></svg><span>New exploration<small>Start a quick, blank session with this agent.</small></span></button>
+  <button type="button" id="agentActionsRefresh"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-refresh"/></svg><span>Refresh all sessions<small id="agentActionsHelp"></small></span></button>
+  <button type="button" id="agentActionsBrowse"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-projects"/></svg><span>Browse sessions</span></button></div>
+  <div id="agentRefreshStatus" role="status" aria-live="polite"></div>
+</dialog>
+
+<dialog class="desk-dialog settings-dialog" id="roomSettingsDialog" aria-labelledby="roomSettingsTitle">
+  <div class="desk-head settings-head">
+    <svg class="ic settings-mark" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-settings" /></svg>
+    <div><h2 id="roomSettingsTitle">Room settings</h2><p class="settings-lede" id="settingsRoomName">Make this workspace feel right for you.</p></div>
+    <button class="iconbtn closebtn" id="roomSettingsClose" type="button" aria-label="Close settings"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg></button>
+  </div>
+  <div class="settings-grid options">
+    <section class="settings-card" aria-labelledby="appearanceTitle">
+      <h3 id="appearanceTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-desk" /></svg>Appearance</h3><p class="settings-note">Choose how your workspace looks.</p>
+      <div class="segmented" id="themePick" role="group" aria-label="Appearance">
+        <button type="button" data-theme="system" aria-pressed="false">System</button>
+        <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+        <button type="button" data-theme="light" aria-pressed="false">Light</button>
+      </div>
+      <p class="settings-note settings-footnote">Follow your device or set a theme for this browser.</p>
+    </section>
+    <section class="settings-card settings-wide" aria-labelledby="readingTitle">
+      <h3 id="readingTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-tell"/></svg>Reading</h3><p class="settings-note">Customize how you listen and focus.</p>
+      <div class="settings-reading-pair"><div><label for="voiceSelect">Reading voice</label><div class="voicepick" id="voicePick" hidden><select id="voiceSelect"></select><p class="rm" id="voiceNote"></p></div></div>
+      <div><button class="roomrow" id="moreFocus" type="button" aria-pressed="false"></button></div></div>
+      <details class="settings-reading-more"><summary>Conversation display</summary><button class="roomrow" id="moreFold" type="button" aria-pressed="true"></button><button class="roomrow" id="moreEarlier" type="button"></button></details>
+    </section>
+    <section class="settings-card settings-wide" aria-labelledby="connectionTitle">
+      <h3 id="connectionTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-hex" /></svg>Connection</h3><p class="settings-note">Your account and runtime status.</p>
+      <div class="settings-connection-row"><div id="connectionSummary" class="connection-summary"></div><button type="button" class="settings-action" id="settingsRefresh"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-refresh"/></svg>Refresh connection</button></div>
+      <div class="details" id="connDetails" tabindex="0"></div>
+    </section>
+    <section class="settings-card settings-wide settings-room"><div><h3><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-archive"/></svg>This room</h3><p class="settings-note">Disconnect this room from the agent. Its history is kept.</p></div><div id="roomReleaseActions"></div></section>
+    <details class="settings-service-more"><summary>Service recovery</summary>    <section class="settings-card settings-wide service-recovery" aria-labelledby="serviceTitle">
+      <div class="service-heading"><div><h3 id="serviceTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-settings" /></svg>Console service</h3><p class="settings-note">Restart UX46’s console on this host.</p></div>
+        <button type="button" class="settings-action" id="btnServiceRestart" disabled>Restart service</button></div>
+      <p class="settings-note">All sessions connected through this console will briefly disconnect. Active console-owned turns may be interrupted.</p>
+      <p class="settings-service-status" id="serviceStatus" role="status" aria-live="polite">Checking service recovery availability…</p>
+      <div class="service-confirm" id="serviceConfirm" hidden>
+        <p id="serviceConfirmNote"></p><div class="acts"><button type="button" class="settings-action" id="btnServiceConfirm">Restart and interrupt active work</button><button type="button" class="linkbtn" id="btnServiceCancel">Cancel</button></div>
+      </div>
+    </section></details>
+  </div>
+</dialog>
+
+<!-- Choose a workspace here; snapshots and association controls stay in management. -->
+<dialog class="desk-dialog" id="deskDialog" aria-labelledby="deskTitle" aria-describedby="deskSubtitle">
+  <div class="desk-head">
+    <svg class="desk-hero-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-device-computer" /></svg>
+    <div><h2 id="deskTitle">Desktops</h2><p id="deskSubtitle">Choose which desktop you’re using on this device.</p></div>
+    <button class="iconbtn" id="deskClose" type="button" aria-label="Close desktops"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg></button>
+  </div>
+  <p class="desk-lede" id="deskLede"></p>
+  <div class="desk-cards" id="deskLive" role="radiogroup" aria-label="Choose desktop"></div>
+  <section class="desk-device-section" aria-labelledby="deskThisLabel"><h3 id="deskThisLabel">This device</h3><div id="deskThisDevice"></div></section>
+  <section class="desk-device-section" id="deskOtherSection" aria-labelledby="deskOtherLabel"><h3 id="deskOtherLabel">Other devices</h3><div id="deskOtherDevices"></div></section>
+  <p class="desk-note" id="deskNote" role="status" hidden></p>
+  <p class="desk-note" id="deskChoiceNote" role="status" hidden></p>
+  <p class="desk-help" id="deskDeviceNote" role="status" hidden></p>
+  <section id="deskManage" class="desk-manage" hidden>
+    <h3>Manage desktops</h3><div id="deskManageLive"></div>
+    <form id="deskNewLive" class="desk-create-form">
+      <label>New desktop<input id="deskNewName" type="text" maxlength="80" autocomplete="off" placeholder="Desktop name" required /></label>
+      <label>Description <span class="desk-optional">optional</span><input id="deskNewDescription" type="text" maxlength="240" placeholder="What you use it for" /></label>
+      <button class="primary" id="deskLiveBtn" type="submit">Create desktop</button>
+    </form>
+    <h3>Device name &amp; browser</h3><div id="deskDeviceSettings"></div>
+    <h3>Saved layouts</h3><p class="desk-help">Snapshots you can restore into a desktop or use to create another one.</p>
+    <div class="desk-list" id="deskList"></div>
+    <form class="desk-save" id="deskSave">
+      <label class="sr-only" for="deskName">Name for this saved layout</label>
+      <input id="deskName" type="text" maxlength="80" autocomplete="off" placeholder="Name this layout" />
+      <button class="primary" id="deskSaveBtn" type="submit">Save layout</button>
+    </form>
+    <details class="desk-advanced"><summary>Workspace options</summary><div class="desk-scope">
+      <label class="tick"><input type="checkbox" id="deskLocalOnly" /> Keep this browser’s layout separate</label>
+      <p class="desk-scope-note" id="deskScopeNote"></p><div class="desk-shared" id="deskShared"></div>
+    </div></details>
+  </section>
+  <div class="desk-footer">
+    <button class="desk-manage-toggle" id="deskManageToggle" type="button" aria-expanded="false" aria-controls="deskManage">⚙ <span>Manage desktops</span></button>
+    <div class="desk-footer-actions"><button class="linkbtn" id="deskCancel" type="button">Cancel</button><button class="primary" id="deskApply" type="button">Save</button></div>
+  </div>
+</dialog>
+
+<!-- New conversation: choose an agent, then a project or nothing at all.
+     One small dialog on a desktop, a sheet on a phone. It creates a session
+     and opens it; it never sends a first message, and nothing it does touches
+     the tabs, drafts or reading positions already on screen unless it
+     succeeds. -->
+<dialog class="nc-dialog" id="newDialog" aria-labelledby="newTitle">
+  <form class="nc-form" id="newForm">
+    <div class="nc-head">
+      <h2 id="newTitle">New conversation</h2>
+      <button class="iconbtn" id="newClose" type="button" title="Close">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg>
+        <span class="sr-only">Close</span>
+      </button>
+    </div>
+
+    <p class="nc-step">Agent</p>
+    <div class="nc-agents" id="newAgents" role="group" aria-label="Agent"></div>
+
+    <p class="nc-step" id="newWhereStep">Where</p>
+    <label class="sr-only" for="newSearch">Search projects</label>
+    <input class="nc-search" id="newSearch" type="search" autocomplete="off"
+           placeholder="Search projects…" />
+    <div class="nc-list" id="newList" role="group" aria-label="Project"></div>
+
+    <label class="nc-name" for="newName">Name <span class="nc-opt">optional</span></label>
+    <input class="nc-input" id="newName" type="text" maxlength="120" autocomplete="off"
+           placeholder="Optional conversation name" />
+
+    <p class="nc-note" id="newNote" role="status" hidden></p>
+
+    <div class="nc-acts" id="newActs">
+      <button type="button" class="ghost" id="newCancel">Cancel</button>
+      <button type="button" class="ghost" id="newReset" hidden>Start over</button>
+      <button type="submit" class="primary" id="newStart">Start conversation</button>
+      <button type="button" class="primary" id="newRetry" hidden>Check and retry</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="workspace-menu" id="workspaceMenu" popover="auto" role="dialog"
+     aria-label="Workspace settings">
+  <p class="workspace-menu-title">Your workspace</p>
+  <button type="button" data-settings="room" autofocus>Room settings</button>
+  <button type="button" data-settings="appearance">Appearance &amp; voice</button>
+  <button type="button" data-settings="desktops">Desktops &amp; sync</button>
+  <button type="button" data-settings="efficiency">Usage &amp; continuity</button>
+  <button type="button" data-settings="skills">Skills basket</button>
+  <div class="workspace-menu-separator"></div>
+  <button type="button" data-settings="connections">Account &amp; connection<span id="settingsAgent"></span></button>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+
+<script src="/app.js"></script>
+<script src="/modules.js"></script>
+<script src="/tell.js"></script>
+<script src="/workspace.js"></script>
+<script src="/efficiency.js"></script>
+</body>
+</html>

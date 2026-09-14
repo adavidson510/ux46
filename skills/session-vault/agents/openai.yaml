@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session Vault"
+  short_description: "Shared project memory and session continuity"
+  default_prompt: "Use $session-vault to checkpoint shared project context or find and resume a project session."
