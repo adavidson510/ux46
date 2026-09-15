@@ -19,7 +19,7 @@ def initialize(root):
     defaults = {
         'registry.json': {'schema_version': 1, 'node_id': 'local', 'projects': []},
         'agents.json': {'schema_version': 1, 'agents': []},
-        'config.json': {'schema_version': 1, 'agent_label': 'Codex', 'port': 8877,
+        'config.json': {'schema_version': 1, 'agent_label': 'Codex', 'agent': 'codex', 'port': 8877,
                        'modules': {'constellation': True, 'email': False, 'tell': False}},
     }
     for name, value in defaults.items():
@@ -33,18 +33,40 @@ def initialize(root):
     return json.loads((root/'config.json').read_text())
 
 
-def run(root, config, port=None):
+def run(root, config, port=None, open_browser=False):
     os.environ['ATLAS_REGISTRY'] = str(root/'registry.json')
     import atlas_console as console
     from ux46_workspace_api import WorkspaceAPI
     from constellation_store import Conflict, Unavailable
     modules = config.get('modules', {})
+    selected = config.get('agent', 'codex')
     args = console.build_parser().parse_args([
         '--port', str(port or config.get('port', 8877)),
         '--state-dir', str(root/'state'), '--registry', str(root/'registry.json'),
         '--agents-config', str(root/'agents.json'),
         '--local-agent-label', config.get('agent_label', 'Codex')])
+    if selected == 'codex':
+        args.codex_command = [config.get('cli') or 'codex', 'app-server']
     service = console.ConsoleService(args)
+    claude_server = None
+    if selected == 'claude':
+        import atlas_claude as claude
+        import atlas_remote as remote
+        import threading
+        c = claude.build_parser().parse_args(['--agent-id','local','--agent-name',config.get('agent_label','Claude'),
+            '--node','local','--registry',str(root/'registry.json'),'--state-dir',str(root/'claude'),
+            '--cli',config.get('cli') or 'claude','--permission-mode','default','--quiet','--fresh-only'])
+        service_claude=claude.ClaudeService(c)
+        claude_server=claude.ClaudeServer(('127.0.0.1',0),service_claude)
+        c.port=claude_server.server_port
+        threading.Thread(target=claude_server.serve_forever,daemon=True).start()
+        cp=claude_server.server_port
+        service.agents.agents['local']=remote.Agent(agent_id='local',label=config.get('agent_label','Claude'),
+            kind='remote',runtime='claude-code',node='local',console=remote.RemoteConsole(remote.DirectPort(cp),cp),
+            capabilities=remote.DEFAULT_CAPABILITIES,transport_kind='in-process')
+    elif selected == 'none':
+        service.agents.agents.pop('local',None)
+
     workspace = WorkspaceAPI(root/'workspace', modules=modules)
     import mimetypes
     for asset in (console.APP_DIR/'brand').iterdir():
@@ -58,6 +80,16 @@ def run(root, config, port=None):
                 return self._json(HTTPStatus.OK, modules)
             if path.startswith('/api/tell') and not modules.get('tell'):
                 raise console.ApiError(HTTPStatus.NOT_FOUND, 'module_disabled', 'Tell is not configured')
+            if selected == 'claude' and path != '/api/bootstrap':
+                import atlas_remote as remote
+                from urllib.parse import urlsplit
+                if any(method in methods and pattern.fullmatch(path) for methods,pattern in remote.PROXY_ALLOWLIST):
+                    return self._agent_api(method,'local',path,urlsplit(self.path).query,query,decision)
+            if selected == 'none' and path == '/api/session-options':
+                return self._json(HTTPStatus.OK, {'available':False,'blank':False,'projects':[],
+                    'message':'Connect an agent with ux46 setup or ux46 connect.'})
+            if selected == 'none' and method != 'GET' and path in ('/api/sessions','/api/connection/refresh'):
+                raise console.ApiError(HTTPStatus.CONFLICT,'not_configured','Connect an agent first')
             if not path.startswith(('/api/constellation/', '/api/email/', '/api/schedule/',
                                     '/api/usage-report/', '/api/desktop-devices/')):
                 return super()._api(method, path, query, decision)
@@ -81,6 +113,9 @@ def run(root, config, port=None):
 
     server = console.ConsoleServer(('127.0.0.1', args.port), LocalHandler, service)
     print(f'UX46: http://127.0.0.1:{server.server_port}/', flush=True)
+    if open_browser:
+        import threading, webbrowser
+        threading.Timer(.4,lambda:webbrowser.open(f'http://127.0.0.1:{server.server_port}/')).start()
     print(f'Private data: {root}', flush=True)
     try:
         server.serve_forever()
@@ -90,6 +125,8 @@ def run(root, config, port=None):
         server.server_close()
         service.workers.shutdown()
         service.agents.close()
+        if claude_server:
+            claude_server.shutdown();claude_server.server_close();service_claude.close()
     return 0
 
 
@@ -99,7 +136,14 @@ def main(argv=None):
     commands.add_parser('init', help='Create private configuration; never overwrite it')
     launch = commands.add_parser('run', help='Run the local browser workspace')
     launch.add_argument('--port', type=int)
+    launch.add_argument('--open',action='store_true',help='Open the local workspace in your browser')
     commands.add_parser('doctor', help='Check prerequisites without starting an agent')
+    setup = commands.add_parser('setup', help='Configure this agent without importing history')
+    setup.add_argument('--agent',choices=['auto','codex','claude','none'],default='auto')
+    setup.add_argument('--name');setup.add_argument('--cli');setup.add_argument('--json',action='store_true')
+    link=commands.add_parser('connect',help='Register a trusted local UX46-compatible adapter')
+    link.add_argument('--id',required=True);link.add_argument('--name',required=True)
+    link.add_argument('--runtime',required=True);link.add_argument('--port',required=True,type=int)
     add = commands.add_parser('project-add', help='Explicitly register a project directory')
     add.add_argument('path', type=Path)
     add.add_argument('--name')
@@ -111,6 +155,14 @@ def main(argv=None):
                           'config_exists': (root/'config.json').exists(), 'platform': sys.platform}, indent=2))
         return 0
     config = initialize(root)
+    if args.command in ('setup','connect'):
+        from ux46_setup import configure, connect
+        try:
+            result=(configure(root,config,agent=args.agent,name=args.name,cli=args.cli) if args.command=='setup'
+                    else connect(root,identity=args.id,name=args.name,runtime=args.runtime,port=args.port))
+        except ValueError as exc:parser.error(str(exc))
+        print(json.dumps(result,indent=2))
+        return 0
     if args.command == 'init':
         print(f'Ready: {root}. Start with: python3 tools/ux46 run')
         return 0
@@ -137,4 +189,4 @@ def main(argv=None):
         temporary.replace(registry_path)
         print(f'Registered {identity}. New sessions will be saved in {target}/sessions.')
         return 0
-    return run(root, config, args.port)
+    return run(root, config, args.port, args.open)

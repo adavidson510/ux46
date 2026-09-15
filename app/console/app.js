@@ -9043,6 +9043,7 @@ async function boot() {
   if (!wantedAgent) {
     try { wantedAgent = window.localStorage.getItem("atlas.agent") || ""; } catch (e) { wantedAgent = ""; }
   }
+  if (!wantedAgent && !state.agents.some(a => a.id === DEFAULT_AGENT) && state.agents.length) wantedAgent=state.agents[0].id;
 
   state.tabs = readTabs();
   // Display names and the workspace's own arrangement both come from the

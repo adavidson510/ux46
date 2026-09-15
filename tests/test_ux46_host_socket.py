@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"tools"))
 import http.client
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path

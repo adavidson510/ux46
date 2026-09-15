@@ -6,6 +6,7 @@ session ownership and input/output; they do not replace provider authentication.
 
 | Area | Source |
 | --- | --- |
+| Installer and local setup | install.sh, tools/ux46_setup.py |
 | Standalone init/run | tools/ux46_local.py |
 | Browser workspace | app/console/ |
 | Codex console and workers | tools/atlas_console.py, atlas_native.py, atlas_workers.py |
@@ -19,6 +20,11 @@ session ownership and input/output; they do not replace provider authentication.
 The standalone launcher separates source from private configuration and state.
 The registry starts empty. Native metadata enriches explicitly filed sessions;
 there is no sweep of historical transcripts during initialization.
+The setup record in private `connection.json` gives an agent a small entrypoint
+to this installation's tool commands and memory. Standalone Claude runs behind
+an internal loopback adapter; the browser uses the same front origin. With no
+provider selected, the workspace starts without a local runtime. Custom adapters
+are registered explicitly and verified separately.
 
 Constellation uses bounded SQLite queries and sourced, revisioned records.
 An agent retrieves a short brief, follows specific evidence when useful, and

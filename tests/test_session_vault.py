@@ -146,7 +146,10 @@ class SessionVaultCliTests(VaultCliHarness, unittest.TestCase):
             )
             transcript.parent.mkdir(parents=True)
             transcript.write_text("{}\n", encoding="utf-8")
+            fake_bin=base/'bin';fake_bin.mkdir()
+            fake_cli=fake_bin/'codex';fake_cli.write_text('#!/bin/sh\nexit 91\n');fake_cli.chmod(0o755)
             environment = {
+                "PATH":str(fake_bin)+os.pathsep+os.environ.get('PATH',''),
                 "CODEX_HOME": str(codex_home),
                 "CODEX_THREAD_ID": session_id,
             }

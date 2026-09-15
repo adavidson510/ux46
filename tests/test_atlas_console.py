@@ -1065,11 +1065,10 @@ class JournalUnitTests(unittest.TestCase):
         self.assertEqual(sum(1 for r in results if r), 1)
 
 
-@unittest.skipUnless(os.environ.get('UX46_TEST_REAL_RUNTIME') == '1', 'Explicit native-runtime test opt-in required')
+@unittest.skipUnless(os.environ.get('UX46_TEST_REAL_RUNTIME') == '1' and os.environ.get('UX46_TEST_THREAD'),
+                     'Explicit native-runtime opt-in and a dedicated test thread required')
 class RealNativeReadTests(unittest.TestCase):
     """One read-only look at a real local session: no resume, no send."""
-
-    BUILDER_HUB = "00000000-0000-4000-8000-000000000099"
 
     def test_read_one_existing_session_metadata_only(self):
         codex = os.environ.get("ATLAS_CODEX_BIN") or str(Path.home() / ".local/bin/codex")
@@ -1078,12 +1077,7 @@ class RealNativeReadTests(unittest.TestCase):
         server = native.AppServer(command=[codex, "app-server"])
         try:
             server.start()
-            listing = server.request("thread/list", {"limit": 5}, timeout=30)
-            threads = listing.get("data") or []
-            self.assertTrue(threads, "the local runtime reported no threads")
-            candidate = next((t for t in threads if t.get("id") != self.BUILDER_HUB), None)
-            self.assertIsNotNone(candidate, "no non-builder thread to read")
-            thread_id = candidate["id"]
+            thread_id = os.environ['UX46_TEST_THREAD']
             read = server.request("thread/read", {"threadId": thread_id}, timeout=30)
             thread = read.get("thread") or {}
             self.assertEqual(thread.get("id"), thread_id)

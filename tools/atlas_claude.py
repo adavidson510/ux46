@@ -620,10 +620,18 @@ class Catalog:
         # no transcript to be found by.
         self._reserved: dict[str, Room] = {}
         self._scan_cache = {}
+        self.fresh_path = Path(config.state_dir).expanduser()/'fresh-sessions.json'
+        if getattr(config,'fresh_only',False) and self.fresh_path.exists():
+            for data in json.loads(self.fresh_path.read_text()):
+                data['transcript']=None
+                room=Room(**data);self._reserved[room.native_id]=room
 
     def reserve(self, room: Room) -> None:
         with self._lock:
             self._reserved[room.native_id] = room
+            if getattr(self.config,'fresh_only',False):
+                from ux46_setup import save
+                save(self.fresh_path,[dict(vars(r),transcript=None) for r in self._reserved.values()])
             self._at = 0.0
 
     def refresh(self, force: bool = False) -> None:
@@ -640,9 +648,14 @@ class Catalog:
             for directory in self.projects_dir.iterdir():
                 if not directory.is_dir():
                     continue
-                found.extend(directory.glob("*.jsonl"))
+                candidates=directory.glob("*.jsonl")
+                if getattr(self.config,'fresh_only',False):
+                    allowed=set(links)|set(self._reserved)
+                    candidates=(p for p in candidates if p.stem in allowed)
+                found.extend(candidates)
         except OSError as exc:
-            error = f"the Claude Code transcript directory could not be read: {exc}"
+            if not (isinstance(exc,FileNotFoundError) and getattr(self.config,'fresh_only',False)):
+                error = f"the Claude Code transcript directory could not be read: {exc}"
         found.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
         for path in found[:SCAN_LIMIT]:
             try:
@@ -2075,8 +2088,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="private journal and attachments (not Git, Vault or Tell)")
     parser.add_argument("--unfiled-project", default=DEFAULT_UNFILED_PROJECT,
                         help="namespace for conversations with no verified Vault origin")
-    parser.add_argument("--permission-mode", default="bypassPermissions",
-                        choices=("acceptEdits", "auto", "bypassPermissions", "manual",
+    parser.add_argument("--fresh-only", action="store_true", help="Read only explicitly linked or newly created sessions")
+    parser.add_argument("--permission-mode", default="default",
+                        choices=("default", "acceptEdits", "auto", "bypassPermissions", "manual",
                                  "dontAsk", "plan"),
                         help="passed to the CLI for every turn")
     parser.add_argument("--model", default="",

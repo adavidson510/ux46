@@ -256,16 +256,19 @@ class KeepAliveTests(unittest.TestCase):
             h.close()
 
 
+@unittest.skipUnless(os.environ.get('UX46_TEST_REAL_RUNTIME') == '1' and os.environ.get('UX46_TEST_THREAD'),
+                     'Explicit native-runtime opt-in and a dedicated test thread required')
 class RealNativeFallbackTests(unittest.TestCase):
     """The adapter's read path against the installed binary, no model call."""
 
-    TEST_THREAD = "01a07566-fac1-7ee2-9139-e6b4f113d5bd"
+    TEST_THREAD = os.environ.get('UX46_TEST_THREAD', '')
 
     def setUp(self):
         codex = os.environ.get("ATLAS_CODEX_BIN") or str(Path.home() / ".local/bin/codex")
         if not Path(codex).exists():
             self.skipTest("local Codex CLI not present")
         self.server = native.AppServer(command=[codex, "app-server"])
+        self.addCleanup(self.server.stop)
         self.server.start()
         self.sessions = native.NativeSessions(self.server)
 

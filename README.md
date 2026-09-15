@@ -6,39 +6,42 @@ A browser workspace around native coding agents: conversations, projects,
 portable Session Vault records, and useful connections through Constellation.
 Tell it what you need; shape your copy around how you work.
 
-This is the first standalone **source alpha**. The workspace is substantial;
-the friendly installer and first-run experience are still being built.
+This is a standalone **alpha** for macOS and Linux. You get the complete editable
+source and a fresh private workspace. There is no GitHub account or sharing requirement.
 
-## Start locally
-
-On macOS or Linux, install Python 3.10+ and your preferred native agent CLI.
-The current single-command launcher uses an already installed and authenticated
-Codex CLI. It does not install a provider, sign you in, or start a paid turn.
-
-Download this repository as a ZIP and unpack it. No GitHub account or Git is
-required. In the unpacked folder:
+## Install it yourself
 
 ```sh
-python3 tools/ux46 doctor
-python3 tools/ux46 run
+curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh
 ```
 
-Open **http://127.0.0.1:8877**. Stop with Ctrl+C. If that port is occupied,
-use `python3 tools/ux46 run --port 8878`.
+The installer selects a detected Codex or Claude CLI, lets you choose when needed,
+or lets you skip and connect another system later. Missing CLIs link to official
+provider setup; login stays with the provider. Missing Python can be installed
+privately. Nothing replaces an existing installation.
 
-The launcher creates a fresh private `~/.ux46` directory. Use `UX46_HOME` to
-choose another location. Existing CLI authentication stays with the CLI.
-Nothing imports your old project history or configures remote agents.
-Use **New conversation** to begin an exploration. To register a project:
+[Human install guide](docs/install.md) · [Security and privacy](SECURITY.md)
+
+## Ask your AI to put it on
+
+Give your agent this request:
+
+> Install my own UX46 workspace using
+> https://github.com/adavidson510/ux46/blob/main/docs/ai-install.md.
+> Configure yourself as my agent, begin with a fresh Vault, and verify the
+> connection. Keep my source and memory private. Do not import my old history.
+
+The AI path installs without starting a background job, configures its actual
+runtime, and receives a small `connection.json` containing local tool paths and
+memory entrypoints. It can then start the workspace and shape it around your work.
+[AI setup guide](docs/ai-install.md) · [Other runtime adapters](docs/adapter-contract.md)
+
+Prefer a ZIP or an existing checkout? With Python 3.10+:
 
 ```sh
-python3 tools/ux46 project-add /path/to/my-project --name "My project"
+python3 tools/ux46 setup --agent auto
+python3 tools/ux46 run --open
 ```
-
-Registration adds a small `project.json` if absent; subsequent project sessions
-use that project's `sessions/` directory. Registration refuses a nonempty old
-`sessions/` directory rather than silently importing it. Keep those private
-records out of any repository you publish.
 
 ## Make it yours
 
@@ -56,10 +59,9 @@ of arbitrary modifications is not promised.
 
 | Component | Standalone default |
 | --- | --- |
-| Workspace and native Codex adapter | On; runtime starts when needed |
+| Workspace and native Codex / Claude adapters | Choose at setup; no model turn during installation |
 | Session Vault | Fresh local registry; project-owned Markdown and native pointers |
 | Constellation | Empty local learning store; can be disabled |
-| Claude adapter | Included; separate adapter setup, not yet one-click onboarding |
 | Tell / Signals | Optional; separate Tell service required |
 | Email | Off; explicit account/OAuth configuration required |
 | Scheduled and usage views | Local projections; collectors must be configured |
@@ -70,7 +72,7 @@ preserves its data. No module is connected to anyone else's knowledge store.
 See [architecture](docs/architecture.md) and [development](docs/development.md).
 
 Native Windows installation, a signed desktop installer, automatic updates,
-and turnkey multi-agent onboarding are not included in this alpha. Additional
+and remote multi-agent onboarding are not included in this alpha. Additional
 runtime adapters are experimental source, not a promise of verified support.
 Optional local voice needs separately obtained models and dependencies.
 Vendor visualization kits and agent binaries are not redistributed.
