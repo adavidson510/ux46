@@ -23,11 +23,23 @@ skills when relevant; do not require loading every guide or memory on every turn
 
 ## Give the project a recognizable hand
 
-Reuse its real logo, palette and visual vocabulary. For UX46, use midnight,
-violet and soft white with the working-notebook motif in `docs/assets/`. An
-occasional paper note or offset detail can add character; it is not a requirement
-for every panel. Art should orient the reader or demonstrate something. Label
-illustrations when they could be mistaken for actual product evidence.
+Reuse its real logo, palette and visual vocabulary. For UX46, use the layered
+workspace direction in `docs/assets/`: near-black depth, luminous violet accents,
+strong white typography and connected interface panels. Keep light and texture
+subtle. The owner found flat panels and a paper note dated; don't equate
+"curated" with faux stationery or retro corporate styling. Use a supplied
+reference directly when it already fits, rather than approximating it poorly.
+Art should orient the reader or demonstrate something. Label concept interfaces
+when they could be mistaken for actual product evidence.
+
+Lead with the person's need: tell the AI what would help, try the result, and
+shape the workspace through use. "Build your own agent" is one possible outcome,
+not a prerequisite or the whole promise. Existing tools and patterns are means
+to the person's goal; avoid making package taxonomy their first learning task.
+Describe working capabilities separately from the desired effortless experience.
+Models, native agent runtimes, the workspace, and the owner's configured agent
+are distinct. Codex CLI and Claude Code already provide agent behavior; don't
+describe them as bare LLMs or imply UX46 replaces their execution loop.
 
 Use concrete language and examples with a purpose. A little self-aware humor is
 welcome when the task is not serious or frustrating. Don't manufacture a human

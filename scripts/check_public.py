@@ -10,6 +10,8 @@ import subprocess
 import sys
 ROOT=Path(__file__).resolve().parents[1]
 DENIED_NAMES={'.env','auth.json','credentials.json','google_token.json','registry.json','agents.json','config.json'}
+# Reviewed documentation artwork is allowed by exact path, not an entire upload folder.
+DOC_ART={'docs/assets/ux46-workspace-2.png'}
 DENIED_DIRS={'sessions','artifacts','state','credentials','.ux46','node_modules','__pycache__'}
 PATTERNS=[re.compile(x) for x in (
     r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
@@ -34,7 +36,7 @@ def check():
         data=subprocess.check_output(['git','show',':'+name],cwd=ROOT) if git else source.read_bytes()
         try:text=data.decode('utf-8')
         except UnicodeDecodeError:
-            if not (p.parts[:3]==('app','console','brand') and p.suffix=='.png'):
+            if not ((p.parts[:3]==('app','console','brand') and p.suffix=='.png') or name in DOC_ART):
                 bad.append((name,'unexpected binary'))
             continue
         if any(rx.search(text) for rx in PATTERNS):bad.append((name,'credential pattern'))

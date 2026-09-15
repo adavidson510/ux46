@@ -1,17 +1,38 @@
 <p align="center">
-  <img src="docs/assets/ux46-workshop-1.svg" alt="UX46 — Make it your own. A workspace for the way you think." width="960">
+  <img src="docs/assets/ux46-workspace-2.png" alt="UX46 — Make it your own. Concept illustration of a layered local AI workspace." width="960">
+  <br><sub>Workspace concept illustration.</sub>
 </p>
 
 # A place to work with your AI. And work on it.
 
-UX46 puts a browser workspace around Codex and Claude Code: named conversations,
-projects, a Session Vault for useful context, and Constellation for lessons worth
-finding again. The agent still does the thinking and coding. UX46 gives that work
-somewhere to live.
+Tell your AI what you need. Make the workspace yours as you go.
+
+Start with a useful place to work: conversations, projects, and memory that helps
+you pick things up again. When something doesn't fit, describe what would help.
+You and your AI can change your local copy, try it in real work, and keep shaping
+it. You don't need to design an agent or learn the codebase before you begin.
+
+UX46 supplies an editable starting point around Codex CLI or Claude Code. Your
+AI can use existing tools, adapt a pattern, or build something for your needs.
+You decide what belongs in your workspace and how you want to work with it.
+Customization currently means working with your coding AI to change the source
+or configuration; this alpha doesn't promise that every request becomes a
+finished feature automatically.
+
+<details>
+<summary>Where the model, runtime, and your agent fit</summary>
+
+A model supplies the underlying language and reasoning capabilities. Codex CLI
+and Claude Code are native agent runtimes: software that lets a model use tools
+and carry out work. UX46 provides the editable workspace, project continuity,
+and memory entrypoints around that runtime. The identity, instructions, tools
+and habits you develop together can become an agent of your own. UX46 doesn't
+replace the provider's execution loop or require a new agent identity to get started.
+
+</details>
 
 You get the editable source and a fresh, private workspace on your computer.
-Start using it, then tell your AI what would make it more useful to you. That is
-an intended way to develop your copy.
+No GitHub account or contribution is required to make it yours.
 
 **macOS & Linux · local-first · alpha · MIT licensed**
 
