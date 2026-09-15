@@ -1,3 +1,5 @@
+[← UX46](../README.md) · **AI installation path** · [Human guide](install.md)
+
 # Put this workspace on
 
 This guide is for the AI helping its human install and shape UX46. The intended
@@ -87,6 +89,11 @@ choice. Follow source pointers when needed. Capture sourced discoveries that
 change future work, distinguish human choices from your inferences, and report
 observed outcomes after reuse. See `skills/constellation/SKILL.md`. No per-turn
 extraction quota, transcript sweep or model polling is required.
+
+For documentation, code explanations or the first customization, use
+[the vibe-craft skill](../skills/vibe-craft/SKILL.md). It keeps the human learning
+path welcoming and the operational AI path small. It is an on-demand guide, not
+another always-loaded instruction layer.
 
 Customize any of this source to fit the human. Save a local snapshot or use local
 Git history before substantial edits. There is no upstream contribution obligation,

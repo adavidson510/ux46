@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# This is the front door, not the app itself. Keeping it small makes it easy to
+# find the command implementation in ux46_local.py. See docs/code-tour.md.
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))

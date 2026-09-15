@@ -1,4 +1,6 @@
-# Architecture
+[← UX46](../README.md) · [Code tour](code-tour.md) · **Architecture** · [AI setup](ai-install.md)
+
+# The pieces and their boundaries
 
 UX46 wraps native agent runtimes rather than providing another reasoning loop.
 The browser uses a loopback Python service. Runtime adapters handle native
@@ -6,16 +8,16 @@ session ownership and input/output; they do not replace provider authentication.
 
 | Area | Source |
 | --- | --- |
-| Installer and local setup | install.sh, tools/ux46_setup.py |
-| Standalone init/run | tools/ux46_local.py |
-| Browser workspace | app/console/ |
-| Codex console and workers | tools/atlas_console.py, atlas_native.py, atlas_workers.py |
-| Claude adapter | tools/atlas_claude.py |
-| Project registry and portable sessions | tools/session_vault.py, atlas.py |
-| Learning, retrieval and feedback | tools/constellation_store.py, constellation_learning.py |
-| Human workspace projections | tools/ux46_workspace_api.py |
-| Optional remote agents | tools/atlas_remote.py |
-| Optional private access gateway | tools/ux46_access_gateway.py |
+| Installer and local setup | [install.sh](../install.sh), [ux46_setup.py](../tools/ux46_setup.py) |
+| Standalone init/run | [ux46_local.py](../tools/ux46_local.py) |
+| Browser workspace | [app/console/](../app/console/) |
+| Codex console and workers | [atlas_console.py](../tools/atlas_console.py), [atlas_native.py](../tools/atlas_native.py), [atlas_workers.py](../tools/atlas_workers.py) |
+| Claude adapter | [atlas_claude.py](../tools/atlas_claude.py) |
+| Project registry and portable sessions | [session_vault.py](../tools/session_vault.py), [atlas.py](../tools/atlas.py) |
+| Learning, retrieval and feedback | [constellation_store.py](../tools/constellation_store.py), [constellation_learning.py](../tools/constellation_learning.py) |
+| Human workspace projections | [ux46_workspace_api.py](../tools/ux46_workspace_api.py) |
+| Optional remote agents | [atlas_remote.py](../tools/atlas_remote.py) |
+| Optional private access gateway | [ux46_access_gateway.py](../tools/ux46_access_gateway.py) |
 
 The standalone launcher separates source from private configuration and state.
 The registry starts empty. Native metadata enriches explicitly filed sessions;
@@ -31,7 +33,7 @@ An agent retrieves a short brief, follows specific evidence when useful, and
 reports outcomes after reuse. It does not load the whole archive into context.
 Human preferences, agent discoveries, and hypotheses need distinct attribution.
 Low usefulness can demote or retire knowledge without deleting source history.
-See the Constellation skill for local access.
+See the [Constellation skill](../skills/constellation/SKILL.md) for local access.
 
 Shared learning, Tell, email and remote access require explicit configuration.
 Tell's implementation is not bundled. Its adapter can connect to an installed

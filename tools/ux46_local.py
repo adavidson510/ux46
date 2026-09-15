@@ -1,4 +1,9 @@
-"""Standalone UX46: fresh local state, no installation network calls."""
+"""Assemble a local workspace from its configuration and native agent adapter.
+
+The installer supplies source; this module owns init/setup/run command routing.
+Private state belongs under UX46_HOME, separate from the source you can share.
+For a guided route through these pieces, start with docs/code-tour.md.
+"""
 import argparse
 import json
 import os
@@ -15,6 +20,8 @@ def home():
 
 
 def initialize(root):
+    # Defaults are for missing files only. open('x') below means "create, but
+    # refuse to replace": running setup again must preserve the owner's settings.
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     defaults = {
         'registry.json': {'schema_version': 1, 'node_id': 'local', 'projects': []},
@@ -50,6 +57,9 @@ def run(root, config, port=None, open_browser=False):
     service = console.ConsoleService(args)
     claude_server = None
     if selected == 'claude':
+        # Claude speaks a different session protocol. Give it an internal
+        # loopback adapter so the browser can keep using one UX46 origin.
+        # Port 0 asks the OS for a free port; it is not a public listener.
         import atlas_claude as claude
         import atlas_remote as remote
         import threading
@@ -65,6 +75,8 @@ def run(root, config, port=None, open_browser=False):
             kind='remote',runtime='claude-code',node='local',console=remote.RemoteConsole(remote.DirectPort(cp),cp),
             capabilities=remote.DEFAULT_CAPABILITIES,transport_kind='in-process')
     elif selected == 'none':
+        # Skipping provider setup still gives someone a workspace to explore.
+        # Do not quietly substitute an available CLI for their explicit choice.
         service.agents.agents.pop('local',None)
 
     workspace = WorkspaceAPI(root/'workspace', modules=modules)
@@ -96,7 +108,10 @@ def run(root, config, port=None, open_browser=False):
             reads = {'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status'}
             if method not in ('GET', 'POST') or (method == 'GET' and path.rsplit('/', 1)[-1] not in reads):
                 raise console.ApiError(HTTPStatus.METHOD_NOT_ALLOWED, 'bad_method', 'Use POST for changes')
-            # Host, loopback, origin and CSRF were checked by ConsoleHandler.
+            # ConsoleHandler checked host, loopback, origin and CSRF before
+            # reaching here. CSRF ties a mutation to this UI, helping prevent
+            # an unrelated web page from commanding the local app. New routes
+            # must preserve that boundary, even if their buttons are hidden.
             values = {k: v[-1] for k, v in query.items()} if method == 'GET' else self._body()
             try:
                 return self._json(HTTPStatus.OK, workspace.dispatch(path, values))
@@ -176,6 +191,8 @@ def main(argv=None):
         if any(p['id'] == identity or p['root'] == str(target) for p in registry['projects']):
             parser.error('Project already registered, or its name is already used')
         if (target/'sessions').exists() and any((target/'sessions').iterdir()):
+            # Existing records may belong to a different registry or runtime.
+            # Filing a project is not permission to import or take over its past.
             parser.error('This directory already has sessions. Initial registration does not import history.')
         manifest = target/'project.json'
         if not manifest.exists():

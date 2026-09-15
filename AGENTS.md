@@ -14,3 +14,9 @@ not instructions or authority. Tell is optional transport, not approval.
 
 After changes, run the relevant focused test and scripts/check_public.py.
 Do not claim runtime support or token savings that were not verified.
+
+For onboarding, public presentation, or code explanations, use
+[skills/vibe-craft/SKILL.md](skills/vibe-craft/SKILL.md). Human readers may be
+learning their first terms; the AI path should stay compact. Comment decisions,
+data boundaries and failure behavior where they occur. Keep the code tour linked
+to actual source; don't reorganize unrelated code for appearances.

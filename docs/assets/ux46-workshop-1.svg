@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title description">
+  <title id="title">UX46 — Make it your own</title>
+  <desc id="description">A midnight and violet workspace illustration with a paper note inviting you to change something.</desc>
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#8692AD" opacity=".16"/></pattern>
+    <linearGradient id="pane" x2="1" y2="1"><stop stop-color="#25213F"/><stop offset="1" stop-color="#131D2C"/></linearGradient>
+  </defs>
+  <rect width="1200" height="480" rx="24" fill="#090D14"/>
+  <rect width="1200" height="480" rx="24" fill="url(#grid)"/>
+  <path d="M40 407H1160" stroke="#344159"/>
+  <g transform="translate(48 38)">
+    <path fill="#AD98F5" d="M18 0v7L8 12v16l6 3v7L0 31V9Z"/>
+    <path fill="#F3F3F6" d="m21 8 13 6v18l-16 8v-7l9-5V18l-6-3Z"/>
+    <circle fill="#AD98F5" cx="17" cy="21.5" r="4.15"/>
+    <text x="51" y="29" fill="#F3F3F6" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700">UX46</text>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="48" y="187" fill="#F3F3F6" font-size="70" font-weight="800" letter-spacing="-2">Make it</text>
+    <text x="48" y="265" fill="#AD98F5" font-size="70" font-weight="800" letter-spacing="-2">your own.</text>
+    <path d="M51 281C153 273 267 289 385 278" fill="none" stroke="#AD98F5" stroke-width="3" stroke-linecap="round"/>
+    <text x="48" y="338" fill="#B7C3D9" font-size="23">A workspace for the way you think.</text>
+    <text x="48" y="445" fill="#B7C3D9" font-size="17">LOCAL SOURCE. ROOM TO CHANGE.</text>
+    <text x="1154" y="445" text-anchor="end" fill="#AD98F5" font-size="17">FOUNDATION46 / FIELD NOTES 01</text>
+  </g>
+  <g transform="translate(628 66)">
+    <rect width="506" height="280" rx="14" fill="url(#pane)" stroke="#7180A0"/>
+    <path d="M0 45H506M109 45V280" stroke="#46516B"/>
+    <circle cx="21" cy="23" r="5" fill="#AD98F5"/>
+    <circle cx="39" cy="23" r="5" fill="#52617B"/>
+    <circle cx="57" cy="23" r="5" fill="#52617B"/>
+    <rect x="128" y="10" width="156" height="26" rx="6" fill="#AD98F5"/>
+    <text x="143" y="28" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#161021">Your next idea</text>
+    <path d="M20 78H87M20 106H70M20 134H78M20 162H63" stroke="#8693AF" stroke-width="6" stroke-linecap="round"/>
+    <rect x="128" y="66" width="353" height="64" rx="8" fill="#0D1522" stroke="#485875"/>
+    <text x="146" y="103" font-family="Arial, Helvetica, sans-serif" font-size="19" fill="#F3F3F6">“I wish this could…”</text>
+    <path d="M146 157H450M146 176H387" stroke="#8191AE" stroke-width="5" stroke-linecap="round"/>
+    <rect x="128" y="201" width="353" height="52" rx="8" fill="#0D1522" stroke="#AD98F5"/>
+    <path d="M149 227H320" stroke="#5B6A85" stroke-width="4" stroke-linecap="round"/>
+    <path d="M440 233V221M434 227l6-6 6 6" fill="none" stroke="#AD98F5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g transform="translate(880 308) rotate(-5)">
+    <rect width="240" height="74" rx="3" fill="#EAE2D6"/>
+    <path d="M16 17H34" stroke="#766555" stroke-width="2"/>
+    <text x="17" y="38" font-family="Georgia, serif" font-size="21" font-style="italic" fill="#322A25">Start here.</text>
+    <text x="17" y="62" font-family="Georgia, serif" font-size="21" font-style="italic" fill="#322A25">Change something.</text>
+  </g>
+</svg>

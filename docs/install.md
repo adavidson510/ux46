@@ -1,91 +1,197 @@
-# Install UX46
+[← UX46](../README.md) · **Install** · [Your first change →](first-change.md) · [AI path](ai-install.md)
 
-On macOS or Linux (including WSL), paste this into Terminal:
+# From this page to your first conversation
+
+You need a Mac or Linux computer, an internet connection for installation, and a
+coding agent to talk to. **Codex CLI** and **Claude Code** are the supported setup
+choices. A CLI is a program you can run from a terminal; UX46 gives that program
+a browser workspace. It doesn't include a model or a provider subscription.
+
+If you already have an AI that can run commands on your computer, give it the
+command below. It will be pointed to [its own setup guide](ai-install.md). You can
+also do the install yourself. Both paths start here.
+
+## 1 · Paste this
+
+On a Mac, open **Terminal** from Spotlight. On Linux, open your terminal app.
+A terminal is a window where you type instructions to your computer. Copy this
+whole line, paste it there, and press Enter:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh
 ```
 
-The installer downloads a checked release into `~/ux46`, creates private settings
-in `~/.ux46`, and opens the workspace in your browser. You do not need Git, a
-GitHub account, a server, or a subscription to UX46. Your agent provider's account
-and usage terms still apply.
+`curl` downloads the installer. The `|` passes it to `sh`, which runs it. This
+executes downloaded code on your computer, so it should come from a source you
+trust. If you'd rather read it first, [open the installer](../install.sh), or
+use the download-and-inspect option at the bottom of this guide.
 
-You can paste **that same command into your AI**. The script points it to the
-AI installation guide and its local connection record. With captured output,
-installation returns control without prompts or a foreground server, so the AI
-can finish configuration, verify it, and start the workspace for you. In a normal
-terminal it opens the workspace. Use `--start` or `--no-start` to override this.
+Setup downloads a checked release into `~/ux46` and creates separate private
+settings in `~/.ux46`. The `~` means your home folder. If a suitable Python is
+missing, it can install a private Python 3.12 using
+[Astral uv](https://docs.astral.sh/uv/guides/install-python/); it doesn't replace
+system Python, ask for sudo, or edit your shell profile.
 
-If Python 3.10+ is missing, the installer obtains a private Python 3.12 using
-[Astral uv](https://docs.astral.sh/uv/guides/install-python/). It does not use sudo,
-replace system Python, or edit your shell profile.
+You don't need Git or a GitHub account. Installing UX46 doesn't publish your
+work or sign you up for a shared service.
 
-## Choose an agent
+## 2 · Choose what you'll talk to
 
-- **Only Codex or Claude is found:** that CLI is selected.
-- **Both or neither are found:** choose Codex, Claude, or **Skip / connect my own later**.
-- **The selected CLI is missing:** installation finishes and points you to its
-  official setup guide. Install it, sign in there, then start UX46.
-- **Skip:** the workspace and local Constellation are available. Conversations
-  need a configured native agent or compatible adapter.
+If setup finds only Codex or only Claude, it selects that CLI. If it finds both
+or neither, it lets you choose. **Skip / connect my own later** is also valid:
+that gets you a workspace, but conversations still need an agent connection.
 
-Official setup guides: [Codex CLI](https://developers.openai.com/codex/cli) and
-[Claude Code](https://code.claude.com/docs/en/setup). UX46 never asks you to paste
-provider passwords, API keys or authentication files into its installer.
+If your chosen CLI is missing, setup finishes and points to the official
+[Codex CLI](https://developers.openai.com/codex/cli) or
+[Claude Code](https://code.claude.com/docs/en/setup) instructions. Install it and
+sign in there, then start UX46. Your provider's charges and usage limits apply.
+UX46 doesn't ask you to paste provider passwords or authentication files into it.
 
-To choose explicitly and install without starting a server:
+> **If your AI is doing the install:** captured output returns instructions instead
+> of opening a server that would occupy its command tool. The AI should configure
+> its actual runtime and start the workspace for you. A completed download alone
+> doesn't prove the provider is signed in.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh -s -- --agent claude --no-start
-```
+## 3 · Open a conversation
 
-Use `--agent codex` or `--agent none` instead if preferred.
-Without an interactive terminal, ambiguous detection selects none; `--agent auto`
-refuses to guess when both CLIs are available.
+In a normal terminal, setup starts UX46 and opens your browser at a local address
+such as `http://127.0.0.1:8877/`. “Local” means the app is served by your computer.
+The address is not a public website other people can visit.
 
-## Start, stop, and change your agent
+If the browser doesn't open, use the address printed in Terminal. If installation
+returned without starting the app, run:
 
 ```sh
 ~/.local/bin/ux46 run --open
-~/.local/bin/ux46 setup --agent claude --name "My helper"
-~/.local/bin/ux46 doctor
 ```
 
-Stop the foreground server with Ctrl+C. Restart after configuration changes.
-If port 8877 is occupied, use `run --port 8878 --open`.
-No background service is installed. Your local source remains fully editable.
+Click the **UX46 symbol** or **New conversation**. Start with something small and
+useful, for example:
 
-The command also works as `ux46` if `~/.local/bin` is already on your PATH.
-Custom locations use `UX46_INSTALL_DIR`, `UX46_HOME`, and `UX46_BIN_DIR`. Set them
-on the `sh` side of a curl pipeline, or download the script before running it.
-Use separate absolute directories for source and private data.
+> Help me plan a small project. Ask what I want to make before creating files.
 
-Existing source, launchers or configuration are never replaced by reinstalling.
-Choose a new location to try a second independent copy. To update a customized
-copy, compare it with a newer release and bring across the changes you want.
+Name the conversation so you can find it again. Your agent's own permissions
+still control its actions. You don't need to organize your old work before
+starting something new here.
 
-## Begin fresh
+## 4 · Know how to leave and come back
 
-Click the UX46 symbol or **New conversation**. Name conversations as you go.
-Register only projects you want in this workspace:
+For now, keep the Terminal window running while you use UX46. To stop the app,
+return to that window and press **Control+C**. Closing a browser tab alone doesn't
+stop the server. There is no background service installed by default.
+
+Next time, start it with the same command:
+
+```sh
+~/.local/bin/ux46 run --open
+```
+
+Stopping the server doesn't remove your saved settings or memories. Before
+stopping during active agent work, let that work finish or stop it in the interface.
+
+## Where your things live
+
+| Location | What's there | What you can do with it |
+| :--- | :--- | :--- |
+| `~/ux46` | Source: the interface, tools, docs, and skills | Let your AI edit your copy |
+| `~/.ux46` | Private settings, registry, and local workspace stores | Back it up; keep it out of public contributions |
+| Your project's `sessions/` folder | Portable Session Vault records | Keep useful project context; treat it as private |
+| Provider-managed storage | Native conversations and authentication | Leave ownership with Codex or Claude |
+
+A **project** is a folder for a piece of work. The **registry** is UX46's list of
+projects you've chosen to include. A **Session Vault record** saves useful context
+and pointers; it isn't a second copy of the entire provider transcript.
+
+To add a project, ask your AI to register the folder you choose. Or run this,
+replacing the example path with the real folder on your computer:
 
 ```sh
 ~/.local/bin/ux46 project-add /path/to/my-project --name "My project"
 ```
 
-That adds `project.json` if absent. Future records live in the project's
-`sessions/` directory; exclude those private records from public commits.
-An existing nonempty sessions directory is refused instead of silently imported.
-Both standalone adapters begin with explicitly registered or newly created
-sessions. They do not sweep old conversations into your new Vault.
+The folder must already exist. Registration adds `project.json` if absent; future
+records go in `sessions/`. Keep those private records out of public code uploads.
+An existing nonempty `sessions/` directory is refused rather than imported without
+review. The fresh install doesn't search through and reorganize your old chats.
 
-## Inspect first, or remove it
+## If something gets stuck
 
-Prefer to read the script before running it? Download `install.sh`, inspect it,
-and run `sh install.sh`. It verifies the source archive checksum before extraction.
-See [security and privacy](../SECURITY.md) for the scope of that protection.
+| What you see | What to try |
+| :--- | :--- |
+| “Your copy already exists” or “Private data already exists” | Start the existing copy using the command above. Re-running the installer is not an update; it refuses to replace your work. |
+| “Address already in use” | Another process may be using the port. Try `~/.local/bin/ux46 run --port 8878 --open`. |
+| Browser opens, but the agent can't respond | Check that the selected CLI is installed and signed in using its official guide. `ux46 doctor` checks executable availability, not your login or quota. |
+| `ux46: command not found` | Use the full `~/.local/bin/ux46` command. Your shell may not search that folder automatically. |
+| Setup cannot download a file | Keep the exact error. Check your connection; ask your AI to inspect any partial installation before retrying. Don't delete a folder just because its name appears in an error. |
 
-To uninstall, stop UX46 and remove its launcher and source directory. Keep
-`~/.ux46` and project `sessions/` folders if you want your settings and memories.
-The installer does not alter provider CLI installations or authentication.
+For a small diagnostic report that doesn't start an agent:
+
+```sh
+~/.local/bin/ux46 doctor
+```
+
+Share the error and what you were trying to do when asking for help. Don't include
+passwords, private conversation contents, or authentication files.
+
+<details>
+<summary><strong>More control: agent name, install options, and existing source</strong></summary>
+
+To change the configured agent and its display name:
+
+```sh
+~/.local/bin/ux46 setup --agent claude --name "My helper"
+```
+
+Use `codex` instead for Codex. Stop and restart UX46 after configuration changes.
+If you're simply changing a name, keep the same agent selection.
+
+To install without starting a server:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh -s -- --agent claude --no-start
+```
+
+Use `--agent codex` or `--agent none` instead if preferred. Captured output defaults
+to no prompts and no server start; `--start` overrides that. Without a terminal,
+ambiguous detection selects none; explicitly choosing `--agent auto` refuses to
+pick when both CLIs are available.
+
+Custom locations use `UX46_INSTALL_DIR`, `UX46_HOME`, and `UX46_BIN_DIR`. Set them
+on the `sh` side of a curl pipeline, or download the script before running it.
+Use separate absolute directories for source and private data. An existing
+launcher is also protected; a second copy needs separate locations for all three.
+
+Already downloaded or cloned the source? With Python 3.10+ and a terminal in that
+source folder:
+
+```sh
+python3 tools/ux46 setup --agent auto
+python3 tools/ux46 run --open
+```
+
+For another runtime, choose none and read [the adapter contract](adapter-contract.md).
+A model endpoint alone isn't a session adapter. This is an extension path rather
+than a guided install option for every model.
+
+</details>
+
+<details>
+<summary><strong>Read before running, update your copy, or uninstall</strong></summary>
+
+Download the installer to a new file, read it in an editor, then run
+`sh install.sh` from that folder. It verifies a pinned source archive checksum
+before extraction. [The security guide](../SECURITY.md) explains what that check
+covers and what it doesn't.
+
+There is no automatic updater. Before bringing in a newer release, back up your
+copy and ask your AI to compare the changes with your local edits. A fresh install
+in separate directories is another way to try a release without replacing yours.
+
+To uninstall, stop UX46 and remove only its launcher and source directory after
+checking their actual locations. Keep `~/.ux46` and project `sessions/` folders
+if you want your settings and memories. The installer doesn't alter provider CLI
+installations or authentication.
+
+</details>
+
+**Next: [Make one small change of your own →](first-change.md)**

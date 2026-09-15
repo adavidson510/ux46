@@ -21,6 +21,9 @@
   --hover:#1D2532;
   --line:#2D3748; --line-soft:#1C2431; --control-line:#67758D;
   --text:#F3F3F6; --text-dim:#DDE0E8; --text-mute:#A8B1C2; --text-faint:#929DB0;
+  /* Named colors let several controls share a palette. Selection means the
+     current choice; focus means where the keyboard is. Keep both distinguishable
+     when customizing, and check the light-theme values below as well. */
   --lav:#AD98F5; --lav-dim:#7C6AB8; --lav-wash:#342750; --selection-bg:#7952C7; --selection-text:#FFFFFF; --focus:#C6B7FF; --on-accent:#151024;
   --good:#8ACDA7; --wait:#E4C46E; --stop:#F29EAC; --attention-amber:#F2BE62;
   /* Documented fallbacks: no binaries ship with the console and nothing is fetched. */

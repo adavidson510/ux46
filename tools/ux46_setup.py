@@ -10,10 +10,15 @@ PROVIDER_DOCS = {'codex':'https://developers.openai.com/codex/cli',
 
 
 def detected():
+    # Finding an executable answers "installed?", not "signed in?". Provider
+    # authentication stays with the provider; setup never reads its credentials.
     return {name: shutil.which(name) for name in PROVIDER_DOCS}
 
 
 def save(path, value):
+    # Write a complete replacement beside the current file, then rename it.
+    # Readers should see the old JSON or the new JSON, not half a write. This
+    # does not coordinate two simultaneous writers; setup has one writer.
     temporary=path.with_suffix('.pending')
     with temporary.open('w') as out:
         os.chmod(temporary,0o600)
@@ -36,6 +41,9 @@ def configure(root, config, *, agent='auto', name=None, cli=None):
     config['cli']=chosen or (agent if agent!='none' else '')
     save(root/'config.json',config)
     source=Path(__file__).resolve().parents[1]
+    # A small map for the agent's next context window. Command arrays keep
+    # paths (including spaces) as arguments rather than executable shell text.
+    # The environment points memory tools at this copy's private data.
     connection={'schema_version':1,'agent':agent,'name':config['agent_label'],
         'cli_available':bool(chosen),'login':'provider-managed; not inspected',
         'source':str(source),'data':str(root),'registry':str(root/'registry.json'),
@@ -59,4 +67,6 @@ def connect(root, *, identity, name, runtime, port):
     payload['agents'].append({'id':identity,'label':name,'runtime':runtime,'node':'local',
                              'transport':'loopback','remote_port':port})
     save(path,payload)
+    # Registration records an intended connection. Only a later request to the
+    # adapter can tell us whether it is actually reachable and compatible.
     return {'id':identity,'configured':True,'verified':False,'restart_required':True}

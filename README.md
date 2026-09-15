@@ -1,85 +1,134 @@
-# UX46
+<p align="center">
+  <img src="docs/assets/ux46-workshop-1.svg" alt="UX46 — Make it your own. A workspace for the way you think." width="960">
+</p>
 
-**Your agents. Your work. Your space.**
+# A place to work with your AI. And work on it.
 
-A browser workspace around native coding agents: conversations, projects,
-portable Session Vault records, and useful connections through Constellation.
-Tell it what you need; shape your copy around how you work.
+UX46 puts a browser workspace around Codex and Claude Code: named conversations,
+projects, a Session Vault for useful context, and Constellation for lessons worth
+finding again. The agent still does the thinking and coding. UX46 gives that work
+somewhere to live.
 
-This is a standalone **alpha** for macOS and Linux. You get the complete editable
-source and a fresh private workspace. There is no GitHub account or sharing requirement.
+You get the editable source and a fresh, private workspace on your computer.
+Start using it, then tell your AI what would make it more useful to you. That is
+an intended way to develop your copy.
 
-## Install it yourself, or give this to your AI
+**macOS & Linux · local-first · alpha · MIT licensed**
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### Human path
+
+Start with the install, open a conversation, and learn the pieces as you need them.
+You don't need to know GitHub.
+
+**[Take the human path →](docs/install.md)**
+
+</td>
+<td width="50%" valign="top">
+
+### AI path
+
+Configure your actual runtime, verify the local connection, and leave your human
+with a working workspace.
+
+**[Take the AI path →](docs/ai-install.md)**
+
+</td>
+</tr>
+</table>
+
+## One command. Either of you can use it.
+
+Paste this into your AI, or into Terminal on your Mac or Linux computer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh
 ```
 
-The installer selects a detected Codex or Claude CLI, lets you choose when needed,
-or lets you skip and connect another system later. Missing CLIs link to official
-provider setup; login stays with the provider. Missing Python can be installed
-privately. Nothing replaces an existing installation.
+In a normal terminal, the installer helps choose an agent and opens UX46 in your
+browser. When an AI runs it with captured output, it returns setup instructions
+so the AI can finish the connection and start it. The same command serves both.
 
-[Human install guide](docs/install.md) · [Security and privacy](SECURITY.md)
+You'll need **Codex CLI or Claude Code** to talk to an agent. If neither is
+installed, setup points to the provider's instructions; you can also skip that
+step and connect an agent later. No GitHub account is required. UX46 has no
+subscription; your agent provider's account and usage terms still apply.
 
-## Ask your AI to put it on
+[What the command does, where files go, and how to stop it](docs/install.md)
+ · [Prefer to inspect the installer first?](install.sh)
 
-Paste the **same curl command above** into your AI. The installer points it to
-the AI guide and, when run with captured output, returns control for setup
-instead of opening a foreground server. No separate installation prompt is needed.
+## Start with something that bothers you
 
-The AI path installs without starting a background job, configures its actual
-runtime, and receives a small `connection.json` containing local tool paths and
-memory entrypoints. It can then start the workspace and shape it around your work.
-[AI setup guide](docs/ai-install.md) · [Other runtime adapters](docs/adapter-contract.md)
+“I lose track of which conversations need me.”
 
-Prefer a ZIP or an existing checkout? With Python 3.10+:
+“Make the selected tab easier to see.”
 
-```sh
-python3 tools/ux46 setup --agent auto
-python3 tools/ux46 run --open
-```
+“When we finish a piece of work, help me keep the useful lesson.”
 
-## Make it yours
+Those are useful starting points. Describe what happens and what you wish happened
+instead. Your AI can find the relevant code, make a small change, and help you
+check it. You don't have to arrive with a specification or learn the whole
+codebase before changing one thing.
 
-You have the complete source. Ask your AI to change the interface, workflow,
-features, or code. There is no required upstream connection, sharing account,
-or contribution step. Back up your working copy before substantial edits.
-Git is useful local undo history, but optional.
+**[Try your first change →](docs/first-change.md)**
 
-Base updates are optional. There is no automatic updater overwriting your
-changes. For a heavily customized copy, let your AI compare a new release with
-your current source and bring across the changes you want. Automatic merging
-of arbitrary modifications is not promised.
+> A note from the AI at the keyboard: yes, AI helped write this project and these
+> docs. “The model said it was fine” is still not a test result. You'll find the
+> checks, limitations, and reasons for the less obvious code alongside the work.
 
-## What's included
+## What's in your copy?
 
-| Component | Standalone default |
-| --- | --- |
-| Workspace and native Codex / Claude adapters | Choose at setup; no model turn during installation |
-| Session Vault | Fresh local registry; project-owned Markdown and native pointers |
-| Constellation | Empty local learning store; can be disabled |
-| Tell / Signals | Optional; separate Tell service required |
-| Email | Off; explicit account/OAuth configuration required |
-| Scheduled and usage views | Local projections; collectors must be configured |
-| Remote access and multiple machines | Optional; no hosted service supplied |
+| Piece | What it's for | Where it begins |
+| :--- | :--- | :--- |
+| **Workspace** | Conversations, tabs, projects, and views of your work | Choose Codex or Claude at setup |
+| **Session Vault** | Keep a project's useful context with a pointer to its native conversation | A fresh registry; no sweep of old chats |
+| **Constellation** | Find and reuse sourced lessons without loading the whole history | An empty local store |
+| **Signals / Tell** | Connect to a separate Tell messaging service | Optional; service not bundled |
+| **Email** | Bring configured mail into a workspace view | Off; needs account/OAuth setup |
+| **Scheduled & Usage** | See configured tasks and collected usage | Collectors need configuration |
 
-Change module flags in `~/.ux46/config.json` and restart. Disabling a module
-preserves its data. No module is connected to anyone else's knowledge store.
-See [architecture](docs/architecture.md) and [development](docs/development.md).
+Remote access, more machines, and local voice are further setup projects. They
+aren't silently connected during installation. Your copy does not join someone
+else's memory store. [See the boundaries and component map →](docs/architecture.md)
 
-Native Windows installation, a signed desktop installer, automatic updates,
-and remote multi-agent onboarding are not included in this alpha. Additional
-runtime adapters are experimental source, not a promise of verified support.
-Optional local voice needs separately obtained models and dependencies.
-Vendor visualization kits and agent binaries are not redistributed.
+This is an **alpha you can shape**, with rough edges to discover. Native Windows
+packaging, a signed desktop installer, automatic updates, and guided remote
+multi-agent onboarding aren't included. Other runtime adapters in the source
+are experimental; Codex and Claude are the primary install paths.
 
-## Contribute if you want
+## A small map for the curious
 
-Use your own copy privately for as long as you like. To offer a reusable
-improvement, fork the public repository, make a focused branch, and open a
-pull request. Maintainers review and test before merging into the base.
-See [CONTRIBUTING.md](CONTRIBUTING.md). No personal configuration, conversations,
-credentials, or Constellation records belong in a contribution.
+You are looking at a **repository**: the project's source folder, displayed on
+GitHub. The files above this page are the software and its instructions. You can
+read them without an account or permission from us. Reading a file won't change it.
 
-MIT licensed; see [LICENSE](LICENSE).
+| If you're wondering… | Go here |
+| :--- | :--- |
+| “How do I get this running?” | [Install and your first conversation](docs/install.md) |
+| “How do I ask my AI to change it?” | [Your first change](docs/first-change.md) |
+| “What am I looking at in these files?” | [A tour of the code](docs/code-tour.md) |
+| “How do the pieces connect?” | [Architecture](docs/architecture.md) |
+| “How do I check a change?” | [Development and testing](docs/development.md) |
+| “What stays private?” | [Security and privacy](SECURITY.md) |
+| “Could someone else use my improvement?” | [Optional contributions](CONTRIBUTING.md) |
+
+## Your copy gets to be different
+
+Customize locally for as long as you like. You don't need a GitHub account, a
+public fork, or our approval. Keep a backup before substantial edits. Git can
+give you local undo history, but it is optional and doesn't require an account.
+
+Base updates are optional too. There is no automatic updater replacing your
+changes. Your AI can compare a later release with your copy and help bring over
+the improvements you want; merging every possible customization automatically
+isn't promised.
+
+If you want to share an improvement, [here's how](CONTRIBUTING.md). If you'd
+rather keep building your own slightly peculiar workspace, that works too.
+
+---
+
+<sub>UX46 · Tell it what you need; it shapes itself around you. · [MIT license](LICENSE)</sub>

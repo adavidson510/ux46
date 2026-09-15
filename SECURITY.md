@@ -1,6 +1,32 @@
-# Security and privacy
+[← UX46](README.md) · [Install](docs/install.md) · **Security and privacy**
 
-## Publication audit
+# Your source is shareable. Your work is private.
+
+A fresh UX46 install creates a local workspace for you. It does not enroll you
+in a shared memory service or upload your changes to this repository. You can
+publish a code improvement without publishing the work you used it for.
+
+Keep the distinction when customizing: source lives in `~/ux46`; settings and
+local stores live in `~/.ux46`; portable session records live with your projects.
+An AI asked to “upload my project” should check which files that includes.
+Private settings and conversations should not come along for the ride.
+
+## What the installer and app protect
+
+The installer refuses to replace an existing copy or private settings. It checks
+the downloaded source against a pinned checksum: a fingerprint of the expected
+file. This catches a different or damaged archive before extraction. It is not
+an independent signature if the publishing account itself is compromised.
+
+The app listens on **loopback**, an address reached from your own computer. That
+doesn't mean a native coding agent runs in a sandbox: its tools retain the
+permissions you give the provider. Your model provider still receives the work
+you send it according to its account settings and terms.
+
+For the exact runtime boundaries and audit scope, keep reading.
+
+<details>
+<summary><strong>Public source audit · what was checked</strong></summary>
 
 The initial public root commit `2b6e37d` was scanned with the repository's
 publication guard and a separate private-marker check. A follow-up full-history
@@ -13,6 +39,8 @@ files, configured email accounts, host addresses, session transcripts, personal
 Constellation records, deployment receipts and runtime databases were not included.
 Some tests contain deliberately synthetic credentials and identifiers to verify
 redaction and rejection. They are not usable accounts.
+
+</details>
 
 ## Installation and runtime boundaries
 
