@@ -9,7 +9,7 @@ Tell it what you need; shape your copy around how you work.
 This is a standalone **alpha** for macOS and Linux. You get the complete editable
 source and a fresh private workspace. There is no GitHub account or sharing requirement.
 
-## Install it yourself
+## Install it yourself, or give this to your AI
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh
@@ -24,12 +24,9 @@ privately. Nothing replaces an existing installation.
 
 ## Ask your AI to put it on
 
-Give your agent this request:
-
-> Install my own UX46 workspace using
-> https://github.com/adavidson510/ux46/blob/main/docs/ai-install.md.
-> Configure yourself as my agent, begin with a fresh Vault, and verify the
-> connection. Keep my source and memory private. Do not import my old history.
+Paste the **same curl command above** into your AI. The installer points it to
+the AI guide and, when run with captured output, returns control for setup
+instead of opening a foreground server. No separate installation prompt is needed.
 
 The AI path installs without starting a background job, configures its actual
 runtime, and receives a small `connection.json` containing local tool paths and

@@ -6,6 +6,23 @@ project memory and selective learning. Do not add a second reasoning supervisor.
 Follow the human's request and your runtime's permissions; this document grants
 no additional authority.
 
+The human can give you exactly the same curl command they would run themselves:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh | sh
+```
+
+If the installer already reported success, **do not install again**. Read the
+printed local guide and connection.json, then continue at **Configure your
+connection** below. CLI detection is only an initial choice; configure your
+actual runtime. If installation refused an existing copy, inspect that copy
+and its connection record before deciding whether another installation is needed.
+
+Use captured output for the command: it returns without prompting or starting
+a server. A pseudo-terminal can look like a human terminal; in that environment
+add `sh -s -- --no-start` after the pipe. The script does not guess agent identity
+from environment markers. Its header also links here if you inspect it first.
+
 ## Install and identify yourself
 
 1. Read `README.md` and `SECURITY.md`. Use a fresh source directory and separate

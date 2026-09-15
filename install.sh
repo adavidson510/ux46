@@ -1,17 +1,24 @@
 #!/bin/sh
 # UX46 installer. No sudo, GitHub account, repository remote or provider login.
+# AI assistants: use this same command, then follow the AI installation guide:
+# https://github.com/adavidson510/ux46/blob/main/docs/ai-install.md
+# Captured output installs without prompting or starting a foreground server.
 # Release values are set by the maintainer after packaging the tested source.
 set -eu
 main() {
-  release='v0.2.0-alpha.1'
-  archive_sha='c5da6192ad3f1e3bb36e14c927e5420131c5b2470c2626ed3bde5fd91c2f64f2'
-  agent=''; start=1; bootstrap_python=1
+  release='v0.2.0-alpha.2'
+  archive_sha='b05030962da2fc42f696a23db80b720aa0d6e0c870973aa56f4b644af745fe34'
+  agent=''; start=auto; bootstrap_python=1; interactive=0
+  if [ -t 1 ]; then interactive=1; fi
+  printf '%s\n' 'UX46: install here, or give this same curl command to your AI.' \
+    'AI installation guide: https://github.com/adavidson510/ux46/blob/main/docs/ai-install.md'
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --agent) agent=${2:?Choose codex, claude, none or auto}; shift 2;;
       --no-start) start=0; shift;;
+      --start) start=1; shift;;
       --no-python-download) bootstrap_python=0; shift;;
-      --help) printf '%s\n' 'Usage: sh install.sh [--agent codex|claude|none|auto] [--no-start] [--no-python-download]' 'UX46_INSTALL_DIR, UX46_HOME and UX46_BIN_DIR customize user-owned locations.'; return;;
+      --help) printf '%s\n' 'Usage: sh install.sh [--agent codex|claude|none|auto] [--start|--no-start] [--no-python-download]' 'Terminal output opens the workspace; captured output returns an AI setup handoff.' 'UX46_INSTALL_DIR, UX46_HOME and UX46_BIN_DIR customize user-owned locations.'; return;;
       *) printf 'Unknown option: %s\n' "$1" >&2; exit 2;;
     esac
   done
@@ -90,14 +97,14 @@ PY
     command -v claude >/dev/null 2>&1 && claude_found=1
     if [ "$codex_found$claude_found" = '10' ]; then agent=codex
     elif [ "$codex_found$claude_found" = '01' ]; then agent=claude
-    elif ( : </dev/tty ) 2>/dev/null; then
+    elif [ "$interactive" -eq 1 ] && ( : </dev/tty ) 2>/dev/null; then
       printf '\nChoose your agent: 1) Codex  2) Claude  3) Skip / connect my own later\nChoice [3]: ' >/dev/tty
       read -r choice </dev/tty
       case "$choice" in 1) agent=codex;; 2) agent=claude;; *) agent=none;; esac
     else agent=none; fi
   fi
   "$bin_dir/ux46" setup --agent "$agent" --json > "$staging/setup.json"
-  "$python" - "$staging/setup.json" <<'PY'
+  "$python" - "$staging/setup.json" "$state_dir" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
 print('\nUX46 is installed. Your copy is yours to change.')
@@ -105,9 +112,13 @@ if r['agent']=='none':print('No local agent selected. You can connect one later 
 elif not r['cli_available']:print('Install '+r['agent']+' and sign in using its official guide: '+r['provider_setup'])
 else:print('Using '+r['name']+'. If not already signed in, complete login in the provider CLI.')
 print('AI setup guide: '+r['instructions'])
+print('AI connection record: '+sys.argv[2]+'/connection.json')
+print('AI next step: read the guide, configure your actual runtime, verify the connection, then start the workspace for your human.')
+print('Installation is complete: continue at "Configure your connection"; do not reinstall.')
 PY
   printf '\nStart any time: %s/ux46 run --open\n' "$bin_dir"
   printf 'Editable source: %s\nPrivate data: %s\n' "$install_dir" "$state_dir"
+  if [ "$start" = auto ]; then start=$interactive; fi
   if [ "$start" -eq 1 ]; then
     "$bin_dir/ux46" run --open
   fi

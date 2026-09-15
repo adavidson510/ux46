@@ -11,6 +11,12 @@ in `~/.ux46`, and opens the workspace in your browser. You do not need Git, a
 GitHub account, a server, or a subscription to UX46. Your agent provider's account
 and usage terms still apply.
 
+You can paste **that same command into your AI**. The script points it to the
+AI installation guide and its local connection record. With captured output,
+installation returns control without prompts or a foreground server, so the AI
+can finish configuration, verify it, and start the workspace for you. In a normal
+terminal it opens the workspace. Use `--start` or `--no-start` to override this.
+
 If Python 3.10+ is missing, the installer obtains a private Python 3.12 using
 [Astral uv](https://docs.astral.sh/uv/guides/install-python/). It does not use sudo,
 replace system Python, or edit your shell profile.
