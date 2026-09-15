@@ -23,8 +23,8 @@ main() {
   for directory in "$install_dir" "$state_dir" "$bin_dir"; do
     case "$directory" in /*) ;; *) echo 'Install locations must be absolute paths.' >&2; exit 2;; esac
   done
-  if [ -e "$state_dir/config.json" ] || [ -L "$state_dir/config.json" ]; then
-    echo "Existing private configuration at $state_dir. Use a different UX46_HOME for a new copy." >&2; exit 2
+  if [ -e "$state_dir" ] || [ -L "$state_dir" ]; then
+    echo "Private data already exists at $state_dir. Use a new UX46_HOME for a fresh copy." >&2; exit 2
   fi
   # Refuse replacements before downloading or changing any existing install.
   if [ -e "$install_dir" ] || [ -L "$install_dir" ]; then
@@ -59,8 +59,8 @@ from pathlib import Path,PurePosixPath
 archive,expected,destination,binaries,state=sys.argv[1:]
 p=Path(archive)
 if hashlib.sha256(p.read_bytes()).hexdigest()!=expected:raise SystemExit('Archive checksum failed. Nothing was installed.')
-target=Path(destination).expanduser().absolute();bindir=Path(binaries).expanduser().absolute()
-state=Path(state).expanduser().absolute()
+target=Path(destination).expanduser().resolve();bindir=Path(binaries).expanduser().resolve()
+state=Path(state).expanduser().resolve()
 if target==state or target in state.parents or state in target.parents:raise SystemExit('Source and private data must use separate directories.')
 if target.exists() or target.is_symlink():raise SystemExit('Installation destination already exists.')
 target.parent.mkdir(parents=True,exist_ok=True)
