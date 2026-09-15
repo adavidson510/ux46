@@ -1626,3 +1626,13 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 
 /* Module availability must win over navigation layout rules. */
 .navbtn[hidden] { display: none !important; }
+
+/* Session recovery and agent access also fit a phone. */
+#roomReleaseActions{display:flex;flex-wrap:wrap;gap:10px;}
+@media(max-width:600px){#roomReleaseActions>button{flex:1;}}
+
+.settings-access { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.settings-access > label { display: block; margin-bottom: .65rem; font-weight: 600; }
+.settings-access-controls { display: flex; gap: .75rem; flex-wrap: wrap; }
+.settings-access-controls select { flex: 1; min-width: 12rem; padding: .7rem; background: var(--ink-050); color: inherit; border: 1px solid var(--control-line); border-radius: .6rem; }
+.settings-access-controls button { white-space: nowrap; }

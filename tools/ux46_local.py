@@ -27,6 +27,7 @@ def initialize(root):
         'registry.json': {'schema_version': 1, 'node_id': 'local', 'projects': []},
         'agents.json': {'schema_version': 1, 'agents': []},
         'config.json': {'schema_version': 1, 'agent_label': 'Codex', 'agent': 'codex', 'port': 8877,
+                       'execution_policy': 'workspace-write',
                        'modules': {'constellation': True, 'email': False, 'tell': False}},
     }
     for name, value in defaults.items():
@@ -51,7 +52,8 @@ def run(root, config, port=None, open_browser=False):
         '--port', str(port or config.get('port', 8877)),
         '--state-dir', str(root/'state'), '--registry', str(root/'registry.json'),
         '--agents-config', str(root/'agents.json'),
-        '--local-agent-label', config.get('agent_label', 'Codex')])
+        '--local-agent-label', config.get('agent_label', 'Codex'),
+        '--execution-policy', config.get('execution_policy', 'preserve')])
     if selected == 'codex':
         args.codex_command = [config.get('cli') or 'codex', 'app-server']
     service = console.ConsoleService(args)

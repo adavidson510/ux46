@@ -45,6 +45,7 @@ import atlas_files as files  # noqa: E402
 import atlas_journal as journal  # noqa: E402
 import atlas_native as native  # noqa: E402
 import atlas_native_profile as native_profile  # noqa: E402
+import ux46_execution_policy as execution_policies  # noqa: E402
 import atlas_remote as remote  # noqa: E402
 import atlas_voice as voice  # noqa: E402
 import atlas_workers as workers  # noqa: E402
@@ -271,11 +272,12 @@ class ConsoleService:
         # runtime that never resumes a thread. Switching rooms therefore never
         # stops anyone's work, and Release stops exactly one process.
         # The host's execution policy: what every session this console starts
-        # or resumes is asked to run under. Default preserves whatever the CLI
-        # saved; a host that has explicitly chosen full access says so once, on
-        # the command line, and every runtime this pool spawns adopts it.
-        self.execution_policy = getattr(config, "execution_policy",
-                                        native_profile.PRESERVE)
+        # or resumes is asked to run under. A saved UI choice takes precedence
+        # over the initial launch default. Existing workers keep their policy.
+        self.access_defaults = execution_policies.ExecutionPolicy(
+            self.state_dir / "execution-policy.json",
+            getattr(config, "execution_policy", native_profile.PRESERVE))
+        self.execution_policy = self.access_defaults.read()["policy"]
         self.workers = workers.SessionWorkerPool(
             command=self._codex_command, on_event=self._on_native_event,
             execution_policy=self.execution_policy,
@@ -1523,6 +1525,23 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                                            getattr(self, "_raw_body", b"") or None)
             return self._json(status, payload)
 
+        if path == "/api/execution-policy" and method in {"GET", "POST"}:
+            if method == "GET":
+                return self._json(HTTPStatus.OK, service.access_defaults.read())
+            body = self._body()
+            if not isinstance(body, dict) or set(body) != {"policy", "base_revision"}:
+                raise ApiError(HTTPStatus.BAD_REQUEST, "bad_policy", "Choose an access default.")
+            with service._connection_lock:
+                try:
+                    result = service.access_defaults.set(body["policy"], body["base_revision"])
+                except execution_policies.PolicyConflict as exc:
+                    raise ApiError(HTTPStatus.CONFLICT, "policy_conflict", str(exc)) from exc
+                except (ValueError, TypeError) as exc:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, "bad_policy", str(exc)) from exc
+                service.execution_policy = result["policy"]
+                service.workers.execution_policy = result["policy"]
+            return self._json(HTTPStatus.OK, result)
+
         if method == "GET" and path == "/api/service/activity":
             hosted = service.workers.attached()
             return self._json(HTTPStatus.OK, {"active_turns": sum(bool(w.sessions.active_turn(tid)) for tid, w in hosted.items()),
@@ -2381,13 +2400,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execution-policy", choices=list(native_profile.POLICIES),
         default=native_profile.PRESERVE,
-        help="permissions UX46 asks native sessions to run under: 'preserve' "
-             "reproduces what the CLI saved for each session and refuses what "
-             "it cannot reproduce exactly; 'full-access' is an explicit "
-             "statement by this host's owner that its sessions run with full "
-             "tools (danger-full-access, approvals never, reviewed by the "
-             "user), overriding a saved restrictive session profile. Neither "
-             "widens any credential or account.")
+        help="Initial access default (a saved UI choice takes precedence): "
+             "workspace-write restricts writes to the project and asks for broader access; "
+             "full-access uses this OS account without routine approvals; preserve keeps "
+             "CLI/session settings. Existing workers change only on reconnect.")
     parser.add_argument("--allow-test-thread", action="store_true",
                         help="allow creating one dedicated harmless native thread")
     parser.add_argument("--test-thread-cwd", default="",

@@ -96,6 +96,7 @@ PROXY_ALLOWLIST: tuple[tuple[frozenset[str], re.Pattern[str]], ...] = tuple(
         ("GET", r"/api/atlas/files/[A-Za-z0-9_-]{1,128}/(?:preview|download)"),
         ("GET", r"/api/audio/[0-9a-f]{32,64}\.wav"),
         ("POST", r"/api/connection/refresh"),
+        ("GET POST", r"/api/execution-policy"),
         ("GET POST", rf"/api/room/{_ROOM}(?:/(?:{_ROOM_ACTIONS}))?"),
         ("PUT", rf"/api/room/{_ROOM}/draft"),
         ("POST", rf"/api/room/{_ROOM}/files"),

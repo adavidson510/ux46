@@ -14,6 +14,14 @@ from ux46_setup import configure, connect
 
 
 class SetupTests(unittest.TestCase):
+    def test_fresh_project_default_preserves_an_existing_owner_choice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);config=initialize(root)
+            self.assertEqual(config['execution_policy'],'workspace-write')
+            config['execution_policy']='full-access'
+            (root/'config.json').write_text(json.dumps(config))
+            self.assertEqual(initialize(root)['execution_policy'],'full-access')
+
     def test_ambiguous_detection_does_not_rewrite_configuration(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);config=initialize(root)

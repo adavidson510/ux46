@@ -112,3 +112,9 @@ If you already serve the contract locally, register it:
 Restart UX46 and verify actual metadata from that adapter. Registration is not a
 successful connection receipt. No SSH, external address, credential or arbitrary
 startup command is accepted by this registration command.
+
+## Access defaults
+
+Fresh Codex installs use project access. See [agent access](agent-access.md) for
+the UI choice, saved-state precedence, reconnect behavior and native readback.
+Preserve an existing owner choice; do not silently opt them into full OS access.

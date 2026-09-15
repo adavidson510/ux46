@@ -153,3 +153,7 @@ rather keep building your own slightly peculiar workspace, that works too.
 ---
 
 <sub>UX46 · Tell it what you need; it shapes itself around you. · [MIT license](LICENSE)</sub>
+
+### Choose your agent’s reach
+
+Start with project access, then choose what suits your work. [The access guide](docs/agent-access.md) explains full access, CLI defaults, and changing an existing conversation without starting over.

@@ -479,9 +479,17 @@
     <section class="settings-card settings-wide" aria-labelledby="connectionTitle">
       <h3 id="connectionTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-hex" /></svg>Connection</h3><p class="settings-note">Your account and runtime status.</p>
       <div class="settings-connection-row"><div id="connectionSummary" class="connection-summary"></div><button type="button" class="settings-action" id="settingsRefresh"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-refresh"/></svg>Refresh connection</button></div>
+      <div id="executionPolicyPanel" class="settings-access" hidden>
+        <label for="executionPolicy" id="executionPolicyLabel">Agent access default</label>
+        <div class="settings-access-controls"><select id="executionPolicy" aria-describedby="executionPolicyHelp"></select><button type="button" class="settings-action" id="saveExecutionPolicy">Save default</button></div>
+        <p id="executionPolicyHelp" class="settings-note"></p>
+        <p class="settings-note">Applies to new and reconnected sessions. Running sessions keep their current access. Use Reconnect below to apply it to this conversation.</p>
+        <p id="executionPolicyActual" class="settings-note"></p>
+        <p id="executionPolicyStatus" class="settings-note" role="status" aria-live="polite"></p>
+      </div>
       <div class="details" id="connDetails" tabindex="0"></div>
     </section>
-    <section class="settings-card settings-wide settings-room"><div><h3><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-archive"/></svg>This room</h3><p class="settings-note">Disconnect this room from the agent. Its history is kept.</p></div><div id="roomReleaseActions"></div></section>
+    <section class="settings-card settings-wide settings-room"><div><h3><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-archive"/></svg>This room</h3><p class="settings-note">Disconnect or reopen this conversation’s connection. History and drafts are kept; messages are never resent.</p></div><div id="roomReleaseActions"></div></section>
     <details class="settings-service-more"><summary>Service recovery</summary>    <section class="settings-card settings-wide service-recovery" aria-labelledby="serviceTitle">
       <div class="service-heading"><div><h3 id="serviceTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-settings" /></svg>Console service</h3><p class="settings-note">Restart UX46’s console on this host.</p></div>
         <button type="button" class="settings-action" id="btnServiceRestart" disabled>Restart service</button></div>

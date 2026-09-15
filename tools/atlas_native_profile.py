@@ -37,7 +37,8 @@ class ProfileError(ValueError):
 
 PRESERVE = "preserve"
 FULL_ACCESS = "full-access"
-POLICIES = (PRESERVE, FULL_ACCESS)
+PROJECT_ACCESS = "workspace-write"
+POLICIES = (PRESERVE, PROJECT_ACCESS, FULL_ACCESS)
 
 _MODES = {
     "danger-full-access": "dangerFullAccess",
@@ -202,7 +203,7 @@ class ExecutionProfile:
             matches = False
         if not matches:
             raise ProfileError(
-                "This host asked the native runtime for full access and it did not "
+                "This host requested an execution policy and the native runtime did not "
                 "grant it; UX46 has not taken control of the new session."
             )
 
@@ -230,9 +231,9 @@ class ExecutionProfile:
             matches = False
         if not matches:
             raise ProfileError(
-                "This host asked the native runtime for full access and it did not "
+                "This host requested an execution policy and the native runtime did not "
                 "grant it; UX46 has not taken control of this session."
-                if self.policy == FULL_ACCESS else
+                if self.policy != PRESERVE else
                 "The native runtime did not preserve this session's execution profile; "
                 "UX46 has not taken control. Continue in the CLI."
             )
@@ -285,6 +286,25 @@ def full_access_start(cwd: str) -> ExecutionProfile:
     return ExecutionProfile(
         params, {"type": "dangerFullAccess"},
         {"policy": FULL_ACCESS, "chosen_by": "host", "thread": "new"}, FULL_ACCESS)
+
+
+def project_access_start(cwd: str) -> ExecutionProfile:
+    """A fresh project sandbox does not inherit extra writable roots."""
+    if not _absolute(cwd): raise ProfileError("A session needs an absolute working directory")
+    settings = {"writable_roots": [], "network_access": False,
+                "exclude_tmpdir_env_var": False, "exclude_slash_tmp": False}
+    params = {"cwd": cwd, "sandbox": "workspace-write", "approvalPolicy": "on-request",
+              "approvalsReviewer": "user", "config": {"sandbox_workspace_write": settings}}
+    sandbox = _policy(dict(type="workspace-write", **settings))
+    return ExecutionProfile(params, sandbox,
+                            {"policy": PROJECT_ACCESS, "chosen_by": "host"}, PROJECT_ACCESS)
+
+
+def project_access(thread: dict, thread_id: str) -> ExecutionProfile:
+    where, source = locate(thread, thread_id)
+    profile = project_access_start(where["cwd"])
+    return ExecutionProfile(dict(profile.params, runtimeWorkspaceRoots=[where["cwd"]]),
+                            profile.sandbox, dict(source, policy=PROJECT_ACCESS, chosen_by="host"), PROJECT_ACCESS)
 
 
 def _latest_turn_context(thread: dict, thread_id: str) -> tuple[dict, dict]:

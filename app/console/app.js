@@ -2959,6 +2959,7 @@ function renderDetails() {
   $("#settingsRoomName").textContent = detail ? (detail.title || detail.session) + " · " + agentLabel() : "Make this workspace feel right for you.";
   summary.textContent = detail ? connectionSummary(detail) : "No room selected";
   $("#settingsRefresh").disabled=!detail?.controllable;
+  renderExecutionPolicyActual();
   $("#roomReleaseActions").replaceChildren();
   summary.dataset.status = detail ? accountState(detail) : "unknown";
   if (!detail) { host.textContent = "No room selected."; return; }
@@ -3003,25 +3004,21 @@ function renderDetails() {
         "At a usage limit? Open /usage in the Codex CLI to review the account’s available options. Refreshing does not reset usage or resend a prompt. On the UX46 gateway host, run ux46 doctor --agent " + agentId() + " --room " + detail.id + "."}));
     }
   }
-  if ((detail.ownership || {}).atlas_owned) {
-    const owner=agentId();
+  if (detail.controllable) {
+    const owner = agentId();
+    const connected = Boolean(detail.ownership?.atlas_owned);
+    const busy = sessionConnectionActions.has(attachKey(owner, detail.id));
+    const running = Boolean(native.active_turn || native.active_run || detail.approvals?.length);
+    const elsewhere = detail.ownership?.state === "held_elsewhere";
+    if (connected) $("#roomReleaseActions").appendChild(el("button", {
+      class: "settings-release", type: "button", text: "Disconnect",
+      disabled: busy || running,
+      on: {click: () => changeSessionConnection(owner, detail.id, false)},
+    }));
     $("#roomReleaseActions").appendChild(el("button", {
-      class: "settings-release", type: "button", text: "Release room",
-      on: {click: async (event) => {
-        const roomId = detail.id;
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          await flushDraft();
-          const result = await api(agentPath(owner,"/api/room/" + encodeURI(roomId) + "/release"), {absolute:true,method: "POST", body: {}});
-          flash(result.message || "Released from UX46. Resume this conversation in Codex.");
-          await refreshRoomState();
-          renderDetails();
-        } catch (error) {
-          flash("Could not release: " + error.message);
-          button.disabled = false;
-        }
-      }},
+      class: "settings-action", type: "button", text: busy ? "Connecting…" : "Reconnect",
+      disabled: busy || running || elsewhere,
+      on: {click: () => changeSessionConnection(owner, detail.id, true)},
     }));
   }
 }
@@ -5456,6 +5453,7 @@ async function continueHere(trigger, opts) {
   const agent = agentId();
   const roomId = detail.id;
   const key = attachKey(agent, roomId);
+  if (!opts?.auto) manuallyDisconnected.delete(key);
   // The caller's own place in the world, so a result can be judged against
   // where *it* was rather than where the attempt it joined started.
   const seq = opts && opts.seq !== undefined ? opts.seq : state.roomSeq;
@@ -5496,6 +5494,7 @@ async function maybeConnect(agent, roomId, seq, gen) {
   if (agentId() !== agent || gen !== state.agentGen || stale(seq, roomId)) return false;
   const detail = state.detail;
   if (!detail || detail.id !== roomId || !detail.controllable) return false;
+  if (manuallyDisconnected.has(attachKey(agent, roomId))) return false;
   const own = (detail.ownership || {}).state;
   // Already warm. Selecting it again must not touch the runtime at all.
   if (own === "atlas_owned") return true;
@@ -5516,6 +5515,104 @@ async function maybeConnect(agent, roomId, seq, gen) {
   // refuse to ask now — picking a session again after it failed is a person
   // saying "try that again", and it would be strange to ignore them.
   return continueHere(null, {auto: true, seq, gen});
+}
+
+// A recovery action owns one fixed agent/room even if the user changes tabs.
+// Reconnect never proceeds after an unknown release or repeats a message.
+const sessionConnectionActions = new Set();
+const manuallyDisconnected = new Set();
+// Defaults belong to the selected agent's host. Never let a late response
+// from another tab change the policy the person is looking at or saving.
+let executionPolicyView = null;
+let executionPolicyLoad = 0;
+function renderExecutionPolicyActual() {
+  if (executionPolicyView?.owner !== agentId()) $("#executionPolicyPanel").hidden = true;
+  const profile = state.detail?.native?.execution_profile;
+  const sandbox = profile?.sandbox?.type;
+  $("#executionPolicyActual").textContent = "This session: " + (!profile?.granted
+    ? "access has not been verified on this connection."
+    : sandbox === "dangerFullAccess" ? "full OS access · approvals " + profile.approval_policy
+    : sandbox === "workspaceWrite" ? "project access · approvals " + profile.approval_policy
+    : "" + sandbox + " · approvals " + profile.approval_policy);
+}
+function renderExecutionPolicyChoice() {
+  const choice = executionPolicyView?.choices.find(item => item.id === $("#executionPolicy").value);
+  $("#executionPolicyHelp").textContent = choice?.description || "";
+}
+async function loadExecutionPolicy() {
+  const owner = agentId(), ticket = ++executionPolicyLoad;
+  executionPolicyView = null;
+  $("#executionPolicyPanel").hidden = true;
+  if (state.detail?.runtime !== "codex") return;
+  try {
+    const result = await api(agentPath(owner, "/api/execution-policy"), {absolute: true});
+    if (ticket !== executionPolicyLoad || owner !== agentId()) return;
+    executionPolicyView = {...result, owner};
+    $("#executionPolicyLabel").textContent = agentLabel() + " · access default";
+    $("#executionPolicy").replaceChildren(...result.choices.map(choice => el("option", {value: choice.id, text: choice.label})));
+    $("#executionPolicy").value = result.policy;
+    $("#saveExecutionPolicy").disabled = false;
+    $("#executionPolicyStatus").textContent = "";
+    $("#executionPolicyPanel").hidden = false;
+    renderExecutionPolicyChoice(); renderExecutionPolicyActual();
+  } catch (_) { /* Older adapters keep their existing connection controls. */ }
+}
+$("#executionPolicy").addEventListener("change", renderExecutionPolicyChoice);
+$("#saveExecutionPolicy").addEventListener("click", async () => {
+  const view = executionPolicyView;
+  if (!view || view.owner !== agentId()) return;
+  const selected = $("#executionPolicy").value;
+  $("#saveExecutionPolicy").disabled = true;
+  try {
+    const result = await api(agentPath(view.owner, "/api/execution-policy"), {absolute: true,
+      method: "POST", body: {policy: selected, base_revision: view.revision}});
+    if (executionPolicyView !== view || view.owner !== agentId()) return;
+    executionPolicyView = {...result, owner: view.owner};
+    $("#executionPolicyStatus").textContent = "Default saved. Existing connections have not changed.";
+  } catch (error) {
+    if (executionPolicyView === view && view.owner === agentId())
+      $("#executionPolicyStatus").textContent = error.message;
+  } finally {
+    if (view.owner === agentId()) $("#saveExecutionPolicy").disabled = false;
+  }
+});
+async function changeSessionConnection(owner, room, reconnect) {
+  const key = attachKey(owner, room);
+  if (sessionConnectionActions.has(key)) return;
+  const here = () => owner === agentId() && room === state.room;
+  sessionConnectionActions.add(key);
+  renderDetails();
+  try {
+    if (here()) await flushDraft();
+    const released = await api(agentPath(owner, "/api/room/" + encodeURI(room) + "/release"),
+      {absolute: true, method: "POST", body: {}});
+    if (!RELEASE_DONE.has(released.release_state)) {
+      throw new Error(released.message || "The old connection has not finished disconnecting. Reconnect was not attempted.");
+    }
+    manuallyDisconnected.add(key);
+    if (reconnect) {
+      const result = await api(agentPath(owner, "/api/room/" + encodeURI(room) + "/attach"),
+        {absolute: true, method: "POST", body: {}});
+      if (!result.room?.ownership?.atlas_owned) {
+        throw new Error("The conversation has not confirmed its new connection. Your messages were not resent.");
+      }
+      manuallyDisconnected.delete(key);
+    }
+    if (here()) {
+      setReceipt(reconnect ? "Reconnected to this conversation. No messages resent."
+        : "Disconnected. Your conversation and draft are kept. Choose Reconnect when ready.", "saved");
+      await refreshRoomState();
+      if (reconnect && here()) await refreshTail();
+    }
+  } catch (error) {
+    if (here()) {
+      setReceipt("Could not " + (reconnect ? "reconnect" : "disconnect") + ": " + error.message, "fail");
+      await refreshRoomState();
+    }
+  } finally {
+    sessionConnectionActions.delete(key);
+    if (here()) renderDetails();
+  }
 }
 
 async function refreshConnection(button) {
@@ -7973,6 +8070,7 @@ function openRoomSettings() {
   renderReadingControls(); renderDetails(); renderVoicePicker();
   const dialog = $("#roomSettingsDialog");
   if (!dialog.open) dialog.showModal();
+  void loadExecutionPolicy();
   if (!serviceRestarting) void loadServiceRecovery();
 }
 $("#roomSettingsClose").addEventListener("click", () => $("#roomSettingsDialog").close());

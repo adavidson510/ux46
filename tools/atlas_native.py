@@ -934,8 +934,8 @@ class NativeSessions:
                            developer_instructions: str | None = None) -> dict:
         """Create an empty, UX46-owned native thread without a model turn.
 
-        Only current readback settings are carried forward.  No history,
-        prompt, shell command, permissions, or approval policy is supplied.
+        No transcript or model prompt is copied. Explicit host access choices
+        are requested and verified; preserve mode leaves CLI defaults intact.
         """
 
         params: dict[str, object] = {"cwd": cwd}
@@ -947,15 +947,14 @@ class NativeSessions:
             # This documented thread/start field is durable context for the
             # new native thread. It is specifically not a turn/input call.
             params["developerInstructions"] = developer_instructions
-        # A host that has said its sessions run with full tools says so at the
-        # start too, or a new conversation would begin under exactly the
-        # restrictions the host chose to lift. Nothing else is overridden: no
-        # config rides along, so the configured MCP servers and tools are the
-        # ones already there.
+        # Apply an explicit access choice when the thread starts, too. Only
+        # sandbox settings change; configured tools and MCP servers stay put.
         profile = None
-        if self.execution_policy == native_profile.FULL_ACCESS:
+        if self.execution_policy != native_profile.PRESERVE:
             try:
-                profile = native_profile.full_access_start(cwd)
+                profile = (native_profile.full_access_start(cwd)
+                           if self.execution_policy == native_profile.FULL_ACCESS
+                           else native_profile.project_access_start(cwd))
             except native_profile.ProfileError as exc:
                 raise NativeError(str(exc), code="execution_profile_unsupported") from exc
             params.update(profile.params)
@@ -967,7 +966,7 @@ class NativeSessions:
                               code="runtime_unavailable")
         if profile is not None:
             # Asking is not being granted. A runtime that answered with
-            # something narrower must not leave a session behind that this
+            # a different policy must not leave a session behind that this
             # console has claimed and would then write to.
             try:
                 profile.verify_start(result)
@@ -1406,6 +1405,8 @@ class NativeSessions:
                 profile = (
                     native_profile.full_access(thread, thread_id)
                     if self.execution_policy == native_profile.FULL_ACCESS
+                    else native_profile.project_access(thread, thread_id)
+                    if self.execution_policy == native_profile.PROJECT_ACCESS
                     else native_profile.from_thread(thread, thread_id)
                 )
             except native_profile.ProfileError as exc:
