@@ -53,6 +53,7 @@ import atlas_tell as tell  # noqa: E402
 import ux46_skills as skill_basket  # noqa: E402
 import ux46_usage as usage_meter  # noqa: E402
 import ux46_chapters as chapters  # noqa: E402
+import ux46_recovery as recovery  # noqa: E402
 
 APP_DIR = HERE.parent / "app" / "console"
 STATIC_FILES = {
@@ -193,6 +194,7 @@ from ux46_events import EventLog
 class ConsoleService:
     def __init__(self, config: argparse.Namespace):
         self.config = config
+        self.recovery_gate = recovery.Gate(getattr(config, "recovery_root", None))
         self.state_dir = Path(config.state_dir).expanduser()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         _own_only(self.state_dir, 0o700)
@@ -270,6 +272,16 @@ class ConsoleService:
                 self._dispatch_queued(item)
 
     def _dispatch_queued(self, item: journal.QueuedMessage) -> None:
+        try:
+            with self.recovery_gate.admit():
+                # Pause may have held this row after queue_due read it.
+                current = self.journal.queue_get(item.client_id)
+                if current and current.status == journal.PENDING:
+                    self._dispatch_admitted_queue(current)
+        except recovery.RecoveryBusy:
+            return
+
+    def _dispatch_admitted_queue(self, item: journal.QueuedMessage) -> None:
         """One FIFO attempt. Ownership and approvals keep the item queued."""
         try:
             room = self.require_room(item.room)
@@ -1078,7 +1090,8 @@ class ConsoleService:
             self._account_recoveries[room.thread_id] = record
         def recover():
             try:
-                result = self.refresh_connection(room)
+                with self.recovery_gate.admit():
+                    result = self.refresh_connection(room)
                 record.update(state="refreshed" if result.get("state") == "refreshed" else "failed",
                               message=("Session refreshed with the current login. Previous prompts were not resent."
                                        if result.get("state") == "refreshed" else "The current Codex login is unavailable. Sign in on this agent’s host, then refresh this session."))
@@ -1089,7 +1102,7 @@ class ConsoleService:
         threading.Thread(target=recover, name="ux46-login-recovery", daemon=True).start()
         return {"state": "deferred", "message": record["message"]}
 
-    def room_state(self, room: discovery.Room, refresh: bool = False) -> dict:
+    def room_state(self, room: discovery.Room, refresh: bool = False, allow_recovery: bool = True) -> dict:
         payload = room.as_json(full=False)
         payload["draft"] = self.journal.draft(room.id)
         payload["submissions"] = [s.as_json() for s in self.journal.recent(room.id, limit=10)]
@@ -1157,7 +1170,7 @@ class ConsoleService:
             payload["approvals"] = self.workers.pending_requests(room.thread_id)
             observer = worker or self.workers.reader()
             payload["account_status"] = observer.account_status.read()
-            payload["connection_recovery"] = self._account_recovery(room, worker, failure)
+            payload["connection_recovery"] = self._account_recovery(room, worker, failure) if allow_recovery else {"state": "inspection_only"}
             if payload["connection_recovery"]["state"] == "deferred":
                 payload["account_status"] = {"state": "unknown", "checked_at": None}
         except native.NativeError as exc:
@@ -1379,10 +1392,23 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if method in ("POST", "PUT", "PATCH", "DELETE"):
                 self._check_mutation(decision)
             scoped = AGENT_PREFIX_RE.fullmatch(path)
-            if scoped:
-                return self._agent_api(method, scoped.group(1), scoped.group(2) or "",
-                                       parsed.query, query, decision)
-            return self._api(method, path, query, decision)
+            target_agent = scoped.group(1) if scoped else "local"
+            suffix = scoped.group(2) if scoped else path
+            # Drafts, queue editing/cancellation, reads and recovery receipts
+            # stay usable while new native work is held.
+            launches = method == "POST" and (suffix in {"/api/sessions", "/api/test-thread", "/api/approvals/answer", "/api/connection/refresh"}
+                or bool(re.fullmatch(r"/api/room/[^/]+/[^/]+/(submit|pending|command|continue|attach)", suffix)))
+            if method == "PATCH" and re.fullmatch(r"/api/room/[^/]+/[^/]+/pending/[^/]+", suffix):
+                launches = self._body().get("editing") is False
+            restoring = suffix == "/api/connection/refresh" or suffix.endswith(("/continue", "/attach"))
+            gate = self.service.recovery_gate.admit(target_agent, self.headers.get("X-UX46-Recovery-ID") if restoring else None) if launches else contextlib.nullcontext()
+            with gate:
+                if scoped:
+                    return self._agent_api(method, scoped.group(1), scoped.group(2) or "",
+                                           parsed.query, query, decision)
+                return self._api(method, path, query, decision)
+        except recovery.RecoveryBusy as exc:
+            self._error(HTTPStatus.CONFLICT, "recovery_in_progress", str(exc))
         except ApiError as exc:
             self._error(exc.status, exc.code, exc.message, exc.detail)
         except native.NativeError as exc:
@@ -1508,6 +1534,16 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 service.workers.execution_policy = result["policy"]
             return self._json(HTTPStatus.OK, result)
 
+        if path.startswith("/api/recovery/"):
+            try:
+                status, result = recovery.api(service.recovery_gate.root, method, path,
+                    self._body() if method == "POST" else None, get("request_id") or None)
+            except recovery.RecoveryBusy as exc:
+                raise ApiError(HTTPStatus.CONFLICT, "recovery_in_progress", str(exc))
+            except (ValueError, OSError):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "invalid_recovery", "Check the recovery mode, configured agent and request ID")
+            return self._json(status, result)
+
         if method == "GET" and path == "/api/service/activity":
             hosted = service.workers.attached()
             return self._json(HTTPStatus.OK, {"active_turns": sum(bool(w.sessions.active_turn(tid)) for tid, w in hosted.items()),
@@ -1521,6 +1557,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 "identity": decision.identity,
                 "node": service.discovery.node,
                 "public_origin": service.auth.public_origin if service.auth.public_enabled else "",
+                "recovery": {"admission": bool(service.recovery_gate.root), "external_preparation": bool(service.recovery_gate.root), "held_queue": True},
                 "runtime_started": service.runtime_started,
                 "started_at": service.started_at,
                 "seq": service.events.seq,
@@ -1807,7 +1844,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 room, str(body.get("client_id", "")), body.get("body", ""), body.get("attachments")))
 
         if method == "GET" and not action:
-            return self._json(HTTPStatus.OK, service.room_state(room, refresh=True))
+            return self._json(HTTPStatus.OK, service.room_state(room, refresh=True, allow_recovery=get("inspect") != "1"))
 
         if method == "GET" and action == "history":
             service.require_controllable(room)
@@ -2361,6 +2398,7 @@ def build_parser() -> argparse.ArgumentParser:
                              "this console can reach: agent id, label, runtime, node and the "
                              "ssh target/port/identity that carries its account-local loopback "
                              "console. Omit it for only the local agent")
+    parser.add_argument("--recovery-root", help="Private installation admission/receipt directory; configured by the launcher")
     parser.add_argument("--local-agent-label", default="Codex",
                         help="the name shown for this machine's own agent")
     parser.add_argument(

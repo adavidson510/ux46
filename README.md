@@ -157,3 +157,5 @@ rather keep building your own slightly peculiar workspace, that works too.
 ### Choose your agent’s reach
 
 Start with project access, then choose what suits your work. [The access guide](docs/agent-access.md) explains full access, CLI defaults, and changing an existing conversation without starting over.
+
+For a stalled connection or unavailable console, see the [doctor and recovery guide](docs/recovery.md).

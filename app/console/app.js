@@ -119,7 +119,7 @@ const WORK_TYPES = new Set([
    outcome unknown, and unknown is not "not sent". */
 const PRE_DISPATCH_REFUSALS = new Set([
   "bad_client_id", "empty", "too_large", "not_controllable", "wrong_target",
-  "held_by_room", "duplicate_mismatch", "not_owned", "held_elsewhere",
+  "held_by_room", "duplicate_mismatch", "not_owned", "held_elsewhere", "recovery_in_progress",
   "ownership_unavailable", "bad_room", "unknown_room", "bad_origin", "bad_csrf",
   "workspace_login_required", "denied", "bad_json", "bad_length", "short_body", "unsupported_encoding",
 ]);
@@ -3840,6 +3840,8 @@ function renderActivity() {
   line.appendChild(el("span", {class: "act-dot" + (now.live ? " live" : ""), "aria-hidden": "true"}));
   line.appendChild(el("span", {class: "act-text" + (now.mono ? " mono" : ""), text: now.text}));
   if (now.kind === "failed") {
+    line.appendChild(el("button", {class: "act-more", type: "button", text: "Refresh this agent",
+      on: {click: () => { openWorkspaceRecovery("agent", agentId()); void runWorkspaceRecovery(); }}}));
     line.appendChild(el("button", {class: "act-more", type: "button", text: "Recovery",
       on: {click: () => { openRoomSettings(); $("#connDetails").scrollIntoView({block: "nearest"}); }}}));
   }
@@ -5740,82 +5742,103 @@ async function refreshConnection(button) {
 $("#btnSessionRefresh").addEventListener("click", event => refreshConnection(event.currentTarget));
 $("#settingsRefresh").addEventListener("click",event=>refreshConnection(event.currentTarget));
 
-// Gateway-owned recovery stays reachable even when the console itself is down.
-let serviceRecovery = null;
-let serviceRestarting = false;
-let serviceActionPending = false;
-let servicePoll = null;
-function renderServiceRecovery() {
-  const status = serviceRecovery;
-  const busy = serviceRestarting || status?.restart_in_progress;
-  $("#btnServiceRestart").disabled = busy || serviceActionPending || !status?.can_restart;
-  $("#btnServiceRestart").textContent = busy ? "Restarting…" : "Restart service";
-  $("#serviceStatus").textContent = status?.message || "Service recovery is unavailable on this host.";
-}
-async function loadServiceRecovery() {
+// CLI and UI share the persisted coordinator receipt. Polling reads receipts;
+// it never retries a mutation or infers successful recovery from transport.
+const workspaceRecovery = {mode: "all", agent: null, id: null, job: null, timer: null, busy: false, until: 0};
+function openWorkspaceRecovery(mode = "all", agent = null) {
+  clearTimeout(workspaceRecovery.timer);
+  Object.assign(workspaceRecovery, {mode, agent, id: null, job: null, busy: false, until: Date.now() + 150000});
   try {
-    const response = await fetch("/api/service/status", {headers: {Accept: "application/json"}, credentials: "same-origin"});
-    if (!response.ok) throw new Error("Service recovery is unavailable on this host.");
-    serviceRecovery = await response.json();
-  } catch (error) { serviceRecovery = {can_restart: false, message: error.message}; }
-  renderServiceRecovery();
-  return serviceRecovery;
+    const saved = JSON.parse(localStorage.getItem("ux46.recovery.request") || "null");
+    if (saved && saved.mode === mode && saved.agent === agent) workspaceRecovery.id = saved.id;
+  } catch (error) { /* storage is optional; a receipt also survives on the host */ }
+  $("#workspaceRecoveryTitle").textContent = mode === "all" ? "Recover UX46" : "Refresh " + (state.agents.find(a => a.id === agent)?.label || "this agent");
+  $("#workspaceRecoveryEffect").textContent = mode === "all"
+    ? "Restart this installation’s configured UX46 services. Active owned work may be interrupted."
+    : "Refresh this agent’s idle owned connections. Busy or unsupported connections are reported.";
+  $("#workspaceRecoveryStatus").textContent = "";
+  $("#runWorkspaceRecovery").textContent = mode === "all" ? "Recover UX46 — may interrupt owned work" : "Refresh this agent";
+  $("#runWorkspaceRecovery").disabled = !!workspaceRecovery.id;
+  $("#workspaceRecovery").showModal();
+  if (workspaceRecovery.id) void checkWorkspaceRecovery();
 }
-function confirmServiceInterruption(status) {
-  const activity = status.activity?.state;
-  $("#serviceConfirmNote").textContent = activity === "busy"
-    ? "This console has active work or pending input. Restarting may interrupt active turns. Queued input will not be resent by this action."
-    : "Current activity could not be checked. Restarting may interrupt active turns on this console.";
-  $("#serviceConfirm").hidden = false;
-  $("#btnServiceConfirm").focus();
-}
-async function restartConsoleService(confirmed = false) {
-  if (serviceRestarting || serviceActionPending) return;
-  serviceActionPending = true;
-  $("#btnServiceRestart").disabled = true;
-  const status = await loadServiceRecovery();
-  serviceActionPending = false;
-  renderServiceRecovery();
-  if (!status.can_restart) return;
-  if (status.requires_confirmation && !confirmed) { confirmServiceInterruption(status); return; }
-  $("#serviceConfirm").hidden = true;
-  serviceRestarting = true; renderServiceRecovery();
-  try {
-    const response = await fetch("/api/service/restart", {
-      method: "POST", credentials: "same-origin",
-      headers: {Accept: "application/json", "Content-Type": "application/json", "X-UX46-Service-CSRF": status.csrf_token},
-      body: JSON.stringify({service: "console", ...(confirmed ? {confirm_interrupt: true} : {})}),
-    });
-    const payload = await response.json();
-    serviceRecovery = payload;
-    if (!response.ok) {
-      if (payload.error === "confirmation_required") { confirmServiceInterruption(payload); return; }
-      throw new Error(payload.message || "The service restart was refused.");
-    }
-    renderServiceRecovery();
-    const started = Date.now();
-    const poll = async () => {
-      servicePoll = null;
-      const current = await loadServiceRecovery();
-      if (["ready", "failed"].includes(current.state) || Date.now() - started > 90000) {
-        serviceRestarting = false;
-        if (!["ready", "failed"].includes(current.state)) current.message = "Restart outcome is not yet confirmed. Check service status before trying again.";
-        renderServiceRecovery();
-        return;
-      }
-      servicePoll = setTimeout(poll, 1500);
-    };
-    servicePoll = setTimeout(poll, 1000);
-  } catch (error) {
-    serviceRecovery = {...serviceRecovery, can_restart: false, message: error.message + " Check status before retrying."};
-  } finally {
-    if (!servicePoll) serviceRestarting = false;
-    renderServiceRecovery();
+function renderWorkspaceRecovery(job) {
+  const host = $("#workspaceRecoveryStatus"); host.replaceChildren();
+  host.appendChild(el("p", {text: job.message || job.state}));
+  const rows = [...(job.services || []), ...(job.connections || [])];
+  if (rows.length) host.appendChild(el("details", {}, [el("summary", {text: "Recovery results"}),
+    ...rows.map(row => el("p", {text: (row.id || row.agent || "Connection") + (row.room ? " · " + row.room : "") + " · " + row.state}))]));
+  if (job.state === "partial" && job.mode === "agent") host.appendChild(el("button", {type: "button", class: "linkbtn", text: "Open full UX46 recovery", on: {click: () => { $("#workspaceRecovery").close(); openWorkspaceRecovery(); }}}));
+  const terminal = ["complete", "partial", "failed"].includes(job.state);
+  $("#runWorkspaceRecovery").disabled = !terminal;
+  if (terminal) {
+    workspaceRecovery.busy = false;
+    try { localStorage.removeItem("ux46.recovery.request"); } catch (error) {}
+    workspaceRecovery.id = null;
+    state.eventRecovery = true;
   }
 }
-$("#btnServiceRestart").addEventListener("click", () => restartConsoleService());
-$("#btnServiceConfirm").addEventListener("click", () => restartConsoleService(true));
-$("#btnServiceCancel").addEventListener("click", () => { $("#serviceConfirm").hidden = true; });
+async function checkWorkspaceRecovery() {
+  clearTimeout(workspaceRecovery.timer);
+  const id = workspaceRecovery.id;
+  if (!id) return;
+  try {
+    const result = await api("/api/recovery/status?request_id=" + encodeURIComponent(id), {absolute: true});
+    if (id !== workspaceRecovery.id) return;
+    if (result.job) {
+      workspaceRecovery.job = result.job; renderWorkspaceRecovery(result.job);
+      if (!workspaceRecovery.id) return;
+    } else $("#workspaceRecoveryStatus").textContent = "The recovery receipt is not available yet. No operation has been repeated.";
+  } catch (error) {
+    if (id !== workspaceRecovery.id) return;
+    $("#workspaceRecoveryStatus").textContent = "Waiting for the workspace to return. Recovery runs independently; no input is being replayed.";
+  }
+  if (Date.now() >= workspaceRecovery.until) {
+    $("#workspaceRecoveryStatus").textContent = "Automatic status checks have ended. Check again when ready or use the doctor command. No recovery was repeated.";
+    return;
+  }
+  if ($("#workspaceRecovery").open) workspaceRecovery.timer = setTimeout(checkWorkspaceRecovery, 2000);
+}
+async function runWorkspaceRecovery() {
+  if (workspaceRecovery.busy || workspaceRecovery.id) return;
+  const mode = workspaceRecovery.mode, agent = workspaceRecovery.agent, id = clientId();
+  Object.assign(workspaceRecovery, {id, busy: true, until: Date.now() + 150000});
+  $("#runWorkspaceRecovery").disabled = true;
+  try { localStorage.setItem("ux46.recovery.request", JSON.stringify({id, mode, agent})); } catch (error) {}
+  try {
+    const status = await api("/api/recovery/status", {absolute: true});
+    if (id !== workspaceRecovery.id) return;
+    const headers = status.recovery_csrf ? {"X-UX46-Recovery-CSRF": status.recovery_csrf} : {};
+    const result = await api("/api/recovery/start", {absolute: true, method: "POST", headers, body: {mode, agent, request_id: id}});
+    if (id !== workspaceRecovery.id) return;
+    if (result.job) { workspaceRecovery.job = result.job; renderWorkspaceRecovery(result.job); }
+  } catch (error) {
+    if (id !== workspaceRecovery.id) return;
+    $("#workspaceRecoveryStatus").textContent = "Recovery could not be confirmed. Check its status or use the doctor command; nothing was retried.";
+  }
+  if (workspaceRecovery.id) void checkWorkspaceRecovery();
+}
+$("#openWorkspaceRecovery").addEventListener("click", () => { $("#workspaceMenu").hidePopover?.(); openWorkspaceRecovery(); });
+$("#closeWorkspaceRecovery").addEventListener("click", () => $("#workspaceRecovery").close());
+$("#workspaceRecovery").addEventListener("close", () => clearTimeout(workspaceRecovery.timer));
+$("#checkWorkspaceRecovery").addEventListener("click", () => void checkWorkspaceRecovery());
+$("#runWorkspaceRecovery").addEventListener("click", () => void runWorkspaceRecovery());
+$("#btnAgentRefresh").addEventListener("click", () => { openWorkspaceRecovery("agent", agentId()); void runWorkspaceRecovery(); });
+
+// Settings opens the same explicit full-recovery control as the workspace menu.
+async function loadServiceRecovery() {
+  try {
+    const status = await api('/api/recovery/status', {absolute:true});
+    $('#btnServiceRestart').disabled = !status.supported;
+    $('#serviceStatus').textContent = status.supported
+      ? 'Recover this installation’s configured services. Active owned work may be interrupted.'
+      : 'Use ux46 doctor on the installation’s host.';
+  } catch (error) {
+    $('#btnServiceRestart').disabled = true;
+    $('#serviceStatus').textContent = 'Recovery status is unavailable. Use ux46 doctor on the installation’s host.';
+  }
+}
+$('#btnServiceRestart').addEventListener('click', () => openWorkspaceRecovery());
 
 /* ------------------------------------------------------------------ drawers */
 function turnsOf() { return state.items.filter((i) => i.type === "userMessage"); }
@@ -8151,7 +8174,7 @@ function openRoomSettings() {
   const dialog = $("#roomSettingsDialog");
   if (!dialog.open) dialog.showModal();
   void loadExecutionPolicy();
-  if (!serviceRestarting) void loadServiceRecovery();
+  void loadServiceRecovery();
 }
 $("#roomSettingsClose").addEventListener("click", () => $("#roomSettingsDialog").close());
 
@@ -8959,7 +8982,7 @@ function openAgentActions(id,anchor){
   $('#agentActionsMark').replaceChildren(agentAvatar(agent,{status:agentAbout(agent).off?'off':'ok'}));
   $('#agentActionsAbout').textContent=agent.runtime==='codex'?'Sessions use this agent’s saved Codex login.':agent.runtime+' · '+(agent.node||'');
   $('#agentActionsRefresh').disabled=agent.runtime!=='codex';
-  $('#agentActionsHelp').textContent=agent.runtime==='codex'?'Reconnect idle sessions now; active work waits until it finishes.':'Session-wide login refresh is not available for this runtime yet.';
+  $('#agentActionsHelp').textContent=agent.runtime==='codex'?'Reconnect idle owned sessions using this agent’s saved login. Busy sessions are reported; full recovery can interrupt them.':'Session-wide login refresh is not available for this runtime yet.';
   renderAgentRefresh();$('#agentActionsDialog').showModal();void loadAgentRefresh();
 }
 function renderAgentRefresh(){
@@ -8974,20 +8997,18 @@ function renderAgentRefresh(){
 }
 async function loadAgentRefresh(){
   clearTimeout(agentActions.poll);const agent=agentActions.agent,gen=agentActions.generation;
-  try{const result=await api('/api/agent-actions/view?agent='+encodeURIComponent(agent),{absolute:true});
-    if(gen!==agentActions.generation)return;agentActions.job=result.job;renderAgentRefresh();
-    if(['discovering','refreshing','waiting'].includes(result.job?.state)&&$('#agentActionsDialog').open)agentActions.poll=setTimeout(loadAgentRefresh,2000);
+  try{const result=await api('/api/recovery/status',{absolute:true});
+    if(gen!==agentActions.generation)return;
+    agentActions.job=result.job?.agent===agent ? {...result.job, items:result.job.connections} : null;renderAgentRefresh();
   }catch(error){if(gen===agentActions.generation)$('#agentRefreshStatus').textContent='Refresh status unavailable.';}
 }
 async function refreshAgentSessions(){
-  const agent=agentActions.agent,gen=agentActions.generation;
-  agentActions.request=agentActions.request||clientId();$('#agentActionsRefresh').disabled=true;
-  try{const result=await api('/api/agent-actions/refresh',{absolute:true,method:'POST',body:{agent,client_id:agentActions.request}});
-    if(gen!==agentActions.generation)return;
-    agentActions.job=result.job;renderAgentRefresh();if(!result.job)$('#agentRefreshStatus').textContent=result.message;
-    else void loadAgentRefresh();
-  }catch(error){if(gen===agentActions.generation){$('#agentRefreshStatus').textContent='Could not confirm the refresh. Reopen this menu to check progress.';$('#agentActionsRefresh').disabled=false;}}
+  const agent = agentActions.agent;
+  closeAgentActions();
+  openWorkspaceRecovery("agent", agent);
+  await runWorkspaceRecovery();
 }
+
 $('#agentActionsClose').addEventListener('click',closeAgentActions);
 $('#agentActionsDialog').addEventListener('close',()=>{clearTimeout(agentActions.poll);agentActions.generation++;});
 $('#agentActionsBrowse').addEventListener('click',()=>{const id=agentActions.agent;closeAgentActions();setBrowseAgent(id);});
@@ -10463,7 +10484,7 @@ function pendingTag(item, editing) {
   if (item.status === "accepted") return el("span", {class: "pendtag go", text: "Sent"});
   if (item.status === "failed") return el("span", {class: "pendtag fail", text: "Not sent"});
   if (item.status === "uncertain") return el("span", {class: "pendtag warn", text: "Delivery unknown"});
-  if (item.status === "editing") return el("span", {class: "pendtag warn", text: "Held for editing"});
+  if (item.status === "editing") return el("span", {class: "pendtag warn", text: item.queued_reason?.startsWith("Held after recovery") ? "Held after recovery" : "Held for editing"});
   return el("span", {class: "pendtag", text: "Pending"});
 }
 

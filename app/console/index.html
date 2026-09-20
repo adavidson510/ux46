@@ -234,6 +234,7 @@
         </div>
         <p class="submeta">
           <button type="button" class="cap agent-name-action" id="sessCap" aria-haspopup="dialog"></button>
+          <button type="button" class="linkbtn" id="btnAgentRefresh">Refresh this agent</button>
           <span class="kind" id="sessKind"></span>
           <span class="proj-phone" id="sessProject"></span>
           <span class="ownership" id="ownState"></span>
@@ -449,7 +450,7 @@
 <dialog class="agent-actions-dialog" id="agentActionsDialog" aria-labelledby="agentActionsTitle">
   <div class="agent-actions-head"><span id="agentActionsMark"></span><div><h2 id="agentActionsTitle">Agent</h2><p id="agentActionsAbout"></p></div><button class="iconbtn" type="button" id="agentActionsClose" aria-label="Close agent menu"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close"/></svg></button></div>
   <div class="agent-actions-list"><button type="button" id="agentActionsNew"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus"/></svg><span>New exploration<small>Start a quick, blank session with this agent.</small></span></button>
-  <button type="button" id="agentActionsRefresh"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-refresh"/></svg><span>Refresh all sessions<small id="agentActionsHelp"></small></span></button>
+  <button type="button" id="agentActionsRefresh"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-refresh"/></svg><span>Refresh this agent<small id="agentActionsHelp"></small></span></button>
   <button type="button" id="agentActionsBrowse"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-projects"/></svg><span>Browse sessions</span></button></div>
   <div id="agentRefreshStatus" role="status" aria-live="polite"></div>
 </dialog>
@@ -491,13 +492,11 @@
     </section>
     <section class="settings-card settings-wide settings-room"><div><h3><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-archive"/></svg>This room</h3><p class="settings-note">Disconnect or reopen this conversation’s connection. History and drafts are kept; messages are never resent.</p></div><div id="roomReleaseActions"></div></section>
     <details class="settings-service-more"><summary>Service recovery</summary>    <section class="settings-card settings-wide service-recovery" aria-labelledby="serviceTitle">
-      <div class="service-heading"><div><h3 id="serviceTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-settings" /></svg>Console service</h3><p class="settings-note">Restart UX46’s console on this host.</p></div>
-        <button type="button" class="settings-action" id="btnServiceRestart" disabled>Restart service</button></div>
+      <div class="service-heading"><div><h3 id="serviceTitle"><svg class="ic settings-card-icon" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-settings" /></svg>Recover UX46</h3><p class="settings-note">Recover the services configured for this installation.</p></div>
+        <button type="button" class="settings-action" id="btnServiceRestart" disabled>Recover UX46</button></div>
       <p class="settings-note">All sessions connected through this console will briefly disconnect. Active console-owned turns may be interrupted.</p>
       <p class="settings-service-status" id="serviceStatus" role="status" aria-live="polite">Checking service recovery availability…</p>
-      <div class="service-confirm" id="serviceConfirm" hidden>
-        <p id="serviceConfirmNote"></p><div class="acts"><button type="button" class="settings-action" id="btnServiceConfirm">Restart and interrupt active work</button><button type="button" class="linkbtn" id="btnServiceCancel">Cancel</button></div>
-      </div>
+
     </section></details>
   </div>
 </dialog>
@@ -584,6 +583,7 @@
 <div class="workspace-menu" id="workspaceMenu" popover="auto" role="dialog"
      aria-label="Workspace settings">
   <p class="workspace-menu-title">Your workspace</p>
+  <button type="button" id="openWorkspaceRecovery">Recover UX46</button>
   <button type="button" data-settings="room" autofocus>Room settings</button>
   <button type="button" data-settings="appearance">Appearance &amp; voice</button>
   <button type="button" data-settings="desktops">Desktops &amp; sync</button>
@@ -592,6 +592,16 @@
   <div class="workspace-menu-separator"></div>
   <button type="button" data-settings="connections">Account &amp; connection<span id="settingsAgent"></span></button>
 </div>
+
+<dialog class="agent-actions-dialog" id="workspaceRecovery" aria-labelledby="workspaceRecoveryTitle">
+  <div class="agent-actions-head"><div><h2 id="workspaceRecoveryTitle">Recover UX46</h2><p id="workspaceRecoveryEffect"></p></div>
+    <button type="button" class="iconbtn" id="closeWorkspaceRecovery" aria-label="Close recovery">×</button></div>
+  <div id="workspaceRecoveryStatus" role="status" aria-live="polite"></div>
+  <div class="acts"><button type="button" id="runWorkspaceRecovery">Recover UX46 — may interrupt owned work</button>
+    <button type="button" class="ghost" id="checkWorkspaceRecovery">Check status</button></div>
+  <p class="small">Conversations and drafts are kept. Queued messages are held. Recovery uses the saved login on the agent’s host; it cannot reset usage limits.</p>
+  <details><summary>If the workspace cannot reconnect</summary><p>Run this in Terminal on the installation’s host:</p><code>ux46 doctor --check --json</code><p>For explicit full recovery:</p><code>ux46 --doctor --recover-all</code></details>
+</dialog>
 
 <div class="scrim" id="scrim" hidden></div>
 
