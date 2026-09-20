@@ -1838,7 +1838,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if not audio_path.is_file():
                 raise ApiError(HTTPStatus.NOT_FOUND, "audio_gone",
                                "that clip is no longer cached — ask for it again")
-            return self._send(HTTPStatus.OK, audio_path.read_bytes(), "audio/wav")
+            status, data, headers = voice.audio_response(
+                audio_path.read_bytes(), self.headers.get("Range", ""))
+            return self._send(HTTPStatus(status), data, "audio/wav", headers)
 
         if method == "POST" and path == "/api/test-thread":
             if not service.config.allow_test_thread:
@@ -2370,6 +2372,14 @@ def _project_item(entry: dict) -> dict:
         out["query"] = str(item.get("query") or "")
     elif kind == "plan":
         out["text"] = str(item.get("text") or "")
+    elif kind == "subAgentActivity":
+        # This is a historical lifecycle marker, not the child's transcript or
+        # current status. Preserve its reference without inventing an output.
+        for source, target in (("agentPath", "agent_path"),
+                               ("agentThreadId", "agent_thread_id"),
+                               ("kind", "activity_kind")):
+            value = item.get(source)
+            out[target] = value if isinstance(value, str) else ""
     else:
         out["raw_keys"] = sorted(k for k in item.keys() if k != "type")[:12]
     return out

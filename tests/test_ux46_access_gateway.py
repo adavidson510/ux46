@@ -75,7 +75,7 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             payload = b'{"slow":true}'
         elif path == "/echo":
             payload = body
-        elif path == "/binary":
+        elif path == "/binary" or "/api/audio/" in path:
             payload = BINARY
         elif path == "/provider401":
             payload = b'{"error":"the provider wants its own login"}'
@@ -99,8 +99,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
         else:
             payload = json.dumps({"upstream": self.server.name, "path": self.path}).encode()
         self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream"
-                         if path in ("/binary", "/echo") else "application/json")
+        self.send_header("Content-Type", "audio/wav" if "/api/audio/" in path else
+                         "application/octet-stream" if path in ("/binary", "/echo") else "application/json")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         if self.command != "HEAD":
@@ -421,7 +421,34 @@ class Routing(GateCase):
         self.assertEqual(self.tell.seen, [])
 
 
+class ModuleConfiguration(GateCase):
+    def test_explicit_modules_are_authenticated_and_do_not_probe_upstream(self):
+        self.server.modules = {'email': True, 'tell': True, 'constellation': True}
+        status, _, body = self.ask(path='/api/modules')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), self.server.modules)
+        self.assertEqual(self.console.seen, [])
+        self.assertEqual(self.ask(path='/api/modules', password=None)[0], 401)
+        self.assertEqual(self.ask('POST', '/api/modules', body=b'{}')[0], 405)
+
+
 class Bodies(GateCase):
+    def test_old_adapter_audio_supports_seek_through_authenticated_gateway(self):
+        for path in ("/api/audio/fixture.wav", "/api/agents/agent2/api/audio/fixture.wav"):
+            with self.subTest(path=path):
+                status, headers, body = self.ask(path=path, headers={"Range": "bytes=20-79"})
+                self.assertEqual(status, 206)
+                self.assertEqual(body, BINARY[20:80])
+                self.assertEqual(headers["Content-Range"], f"bytes 20-79/{len(BINARY)}")
+                self.assertEqual(headers["Accept-Ranges"], "bytes")
+                self.assertEqual(headers["Content-Length"], "60")
+
+    def test_audio_range_cannot_bypass_login(self):
+        status, _, _ = self.ask(path="/api/audio/fixture.wav", password=None,
+                                headers={"Range": "bytes=0-9"})
+        self.assertEqual(status, 401)
+        self.assertEqual(self.console.seen, [])
+
     def test_an_upload_arrives_byte_for_byte(self):
         status, _, _ = self.ask(method="POST", path="/echo", body=BINARY,
                                 headers={"Content-Type": "application/octet-stream"})

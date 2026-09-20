@@ -108,12 +108,12 @@ PROXY_ALLOWLIST: tuple[tuple[frozenset[str], re.Pattern[str]], ...] = tuple(
 #: Response headers worth carrying back. Everything else — including the
 #: remote's own security headers and any cookie it might ever grow — is dropped
 #: so this console's headers remain the only ones the browser sees.
-FORWARDED_RESPONSE_HEADERS = ("Content-Disposition",)
+FORWARDED_RESPONSE_HEADERS = ("Content-Disposition", "Accept-Ranges", "Content-Range")
 
 #: Request headers worth carrying forward. Authorization, cookies and the outer
 #: CSRF token are deliberately absent: the remote gets its own token, obtained
 #: internally, and never sees this console's.
-FORWARDED_REQUEST_HEADERS = ("Content-Type", "Accept")
+FORWARDED_REQUEST_HEADERS = ("Content-Type", "Accept", "Range")
 
 
 class RemoteError(Exception):

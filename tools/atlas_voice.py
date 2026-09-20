@@ -30,6 +30,26 @@ MAX_CACHE_FILES = 400
 KEY_RE = re.compile(r"^[0-9a-f]{32,64}$")
 
 
+def audio_response(data: bytes, range_header: str = "") -> tuple:
+    """Serve one browser byte range so WAV playback can seek reliably.
+
+    Malformed or multipart ranges fall back to the complete representation;
+    a valid range outside the clip gets 416 with its actual length.
+    Authentication and cache ownership are enforced by the calling endpoint.
+    """
+    headers = (("Accept-Ranges", "bytes"),)
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header[:200])
+    if not match or len(range_header) > 200 or not any(match.groups()):
+        return 200, data, headers
+    left, right = match.groups()
+    size = len(data)
+    start = int(left) if left else max(0, size - int(right))
+    end = min(size - 1, int(right)) if left and right else size - 1
+    if start >= size or end < start or (not left and int(right) == 0):
+        return 416, b"", headers + (("Content-Range", f"bytes */{size}"),)
+    return 206, data[start:end + 1], headers + (("Content-Range", f"bytes {start}-{end}/{size}"),)
+
+
 # -- what a reader should hear ---------------------------------------------
 # Runtimes answer in Markdown. Kokoro reads what it is given, so the raw
 # markers came out loud: "asterisk asterisk bold asterisk asterisk". This is a
