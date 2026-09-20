@@ -62,7 +62,7 @@ If the browser doesn't open, use the address printed in Terminal. If installatio
 returned without starting the app, run:
 
 ```sh
-~/.local/bin/ux46 run --open
+~/.local/bin/ux46 open
 ```
 
 Click the **UX46 symbol** or **New conversation**. Start with something small and
@@ -76,25 +76,27 @@ starting something new here.
 
 ## 4 · Know how to leave and come back
 
-For now, keep the Terminal window running while you use UX46. To stop the app,
-return to that window and press **Control+C**. Closing a browser tab alone doesn't
-stop the server. There is no background service installed by default.
-
-Next time, start it with the same command:
+You can close Terminal after `ux46 open` finishes. UX46 runs in the background
+until you stop it or log out; no system-wide startup service is installed.
+Closing a browser tab alone doesn't stop it.
 
 ```sh
-~/.local/bin/ux46 run --open
+~/.local/bin/ux46 stop
+~/.local/bin/ux46 open
 ```
 
-Stopping the server doesn't remove your saved settings or memories. Before
-stopping during active agent work, let that work finish or stop it in the interface.
+`stop` gracefully stops this installation and may interrupt its active owned
+work. Conversations, drafts, settings and memories stay in their stores. `open`
+reuses a running workspace or starts it and opens the browser. For foreground
+diagnostics, `ux46 run` is still available; Control+C stops that foreground run.
 
 ## Where your things live
 
 | Location | What's there | What you can do with it |
 | :--- | :--- | :--- |
 | `~/ux46` | Source: the interface, tools, docs, and skills | Let your AI edit your copy |
-| `~/.ux46` | Private settings, registry, and local workspace stores | Back it up; keep it out of public contributions |
+| `~/.ux46` | Private settings, registry, workspace stores and source recovery points | Back it up; keep it out of public contributions |
+| `~/.ux46.install` | Resumable installer, optional private Python and independent repair launcher | Keep it with this installation; it is not a temporary download to delete |
 | Your project's `sessions/` folder | Portable Session Vault records | Keep useful project context; treat it as private |
 | Provider-managed storage | Native conversations and authentication | Leave ownership with Codex or Claude |
 
@@ -118,11 +120,11 @@ review. The fresh install doesn't search through and reorganize your old chats.
 
 | What you see | What to try |
 | :--- | :--- |
-| “Your copy already exists” or “Private data already exists” | Start the existing copy using the command above. Re-running the installer is not an update; it refuses to replace your work. |
+| “Existing path preserved” | The folder or launcher belongs to another installation. Use its existing launcher or choose separate locations; do not delete it to make setup proceed. |
 | “Address already in use” | Another process may be using the port. Try `~/.local/bin/ux46 run --port 8878 --open`. |
-| Browser opens, but the agent can't respond | Check that the selected CLI is installed and signed in using its official guide. `ux46 doctor` checks executable availability, not your login or quota. |
+| Browser opens, but the agent can't respond | Check that the selected CLI is installed and signed in using its official guide. `ux46 doctor --check` checks the selected command and reports available current evidence; unknown login or quota stays unknown. |
 | `ux46: command not found` | Use the full `~/.local/bin/ux46` command. Your shell may not search that folder automatically. |
-| Setup cannot download a file | Keep the exact error. Check your connection; ask your AI to inspect any partial installation before retrying. Don't delete a folder just because its name appears in an error. |
+| Setup cannot download a file or finish configuration | Rerun the same command with the same locations and release. Its saved transaction resumes; completed files and your additions stay. If a crash happened before an ownership marker was saved, keep the error and inspect the unclaimed path; it will not be erased or guessed to be owned. |
 
 For a small diagnostic report that doesn't start an agent:
 

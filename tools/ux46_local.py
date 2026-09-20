@@ -152,9 +152,15 @@ def run(root, config, port=None, open_browser=False):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {'start','stop','open','customize','snapshot','undo','source-status'}:
+        from ux46_manage import main as manage
+        return manage(argv, root=home())
     parser = argparse.ArgumentParser(description='Your agents. Your work. Your space.')
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('init', help='Create private configuration; never overwrite it')
+    for command,help_text in {'open':'Open or reopen this installed workspace','start':'Start this installed workspace in the background','stop':'Gracefully stop this installation','customize':'Save a recovery point and open the source project','snapshot':'Save a source recovery point','undo':'Restore a saved source point after stopping UX46','source-status':'Compare local source with its installed base'}.items():
+        commands.add_parser(command,help=help_text)
     launch = commands.add_parser('run', help='Run the local browser workspace')
     launch.add_argument('--port', type=int)
     launch.add_argument('--open',action='store_true',help='Open the local workspace in your browser')
@@ -175,7 +181,6 @@ def main(argv=None):
     add = commands.add_parser('project-add', help='Explicitly register a project directory')
     add.add_argument('path', type=Path)
     add.add_argument('--name')
-    argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == '--doctor': argv[0] = 'doctor'
     args = parser.parse_args(argv)
     root = home()
@@ -216,28 +221,30 @@ def main(argv=None):
         print(f'Ready: {root}. Start with: python3 tools/ux46 run')
         return 0
     if args.command == 'project-add':
-        target = args.path.expanduser().resolve(strict=True)
-        if not target.is_dir(): parser.error('Project must be a directory')
-        identity = re.sub(r'[^a-z0-9._-]+', '-', target.name.lower()).strip('-')[:64]
-        if not identity: parser.error('Choose a directory with a name')
-        registry_path = root/'registry.json'
-        registry = json.loads(registry_path.read_text())
-        if any(p['id'] == identity or p['root'] == str(target) for p in registry['projects']):
-            parser.error('Project already registered, or its name is already used')
-        if (target/'sessions').exists() and any((target/'sessions').iterdir()):
-            # Existing records may belong to a different registry or runtime.
-            # Filing a project is not permission to import or take over its past.
-            parser.error('This directory already has sessions. Initial registration does not import history.')
-        manifest = target/'project.json'
-        if not manifest.exists():
-            with manifest.open('x') as out:
-                json.dump({'schema_version': 1, 'id': identity, 'name': args.name or target.name,
-                           'visibility': 'private', 'sources': []}, out, indent=2)
-        registry['projects'].append({'id': identity, 'name': args.name or target.name, 'root': str(target)})
-        temporary = registry_path.with_suffix('.pending')
-        temporary.write_text(json.dumps(registry, indent=2)+'\n')
-        temporary.chmod(0o600)
-        temporary.replace(registry_path)
-        print(f'Registered {identity}. New sessions will be saved in {target}/sessions.')
-        return 0
+        from ux46_manage import locked
+        with locked(root):
+            target = args.path.expanduser().resolve(strict=True)
+            if not target.is_dir(): parser.error('Project must be a directory')
+            identity = re.sub(r'[^a-z0-9._-]+', '-', target.name.lower()).strip('-')[:64]
+            if not identity: parser.error('Choose a directory with a name')
+            registry_path = root/'registry.json'
+            registry = json.loads(registry_path.read_text())
+            if any(p['id'] == identity or p['root'] == str(target) for p in registry['projects']):
+                parser.error('Project already registered, or its name is already used')
+            if (target/'sessions').exists() and any((target/'sessions').iterdir()):
+                # Existing records may belong to a different registry or runtime.
+                # Filing a project is not permission to import or take over its past.
+                parser.error('This directory already has sessions. Initial registration does not import history.')
+            manifest = target/'project.json'
+            if not manifest.exists():
+                with manifest.open('x') as out:
+                    json.dump({'schema_version': 1, 'id': identity, 'name': args.name or target.name,
+                               'visibility': 'private', 'sources': []}, out, indent=2)
+            registry['projects'].append({'id': identity, 'name': args.name or target.name, 'root': str(target)})
+            temporary = registry_path.with_suffix('.pending')
+            temporary.write_text(json.dumps(registry, indent=2)+'\n')
+            temporary.chmod(0o600)
+            temporary.replace(registry_path)
+            print(f'Registered {identity}. New sessions will be saved in {target}/sessions.')
+            return 0
     return run(root, config, args.port, args.open)

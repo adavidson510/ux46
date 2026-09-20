@@ -222,3 +222,32 @@ test('explicit full recovery is one request with an interruption label and no se
   await expect(page.locator('#draft')).toHaveValue('unsent words');
   await page.screenshot({path:test.info().outputPath('workspace-recovery.png')});
 });
+
+test('customization opens the local source project even while another agent is selected', async ({page}) => {
+  await fixture(page); await seed(page,'fixture/alpha','other-agent');
+  const writes=[];
+  await page.route('**/api/customize/start', async route => {
+    writes.push(route.request().postDataJSON());
+    await route.fulfill({json:{state:'created',agent:'local',new_room:{id:'ux46-workspace/customize-fixture',title:'Customize my workspace'},customization:{recovery_point:'fixture123'}}});
+  });
+  await page.evaluate(()=>{window.opened=[];openSession=async(...args)=>window.opened.push(args);$('#customizeWorkspace').click();});
+  await expect(page.locator('#customizeDialog')).toContainText('A recovery point is saved first');
+  await page.screenshot({path:test.info().outputPath('customize-source.png')});
+  await page.locator('#customizeStart').click();
+  await expect.poll(()=>writes.length).toBe(1);
+  expect(Object.keys(writes[0])).toEqual(['client_id']);
+  await expect.poll(()=>page.evaluate(()=>window.opened)).toEqual([['local','ux46-workspace/customize-fixture',{toTail:true,connect:true}]]);
+  expect(await page.evaluate(()=>localStorage.getItem('ux46.customize.request'))).toBeNull();
+});
+
+test('uncertain customization is not automatically repeated and manual check keeps its ID', async ({page}) => {
+  await fixture(page);const writes=[];
+  await page.route('**/api/customize/start', async route => {writes.push(route.request().postDataJSON());await route.abort();});
+  await page.evaluate(()=>$('#customizeWorkspace').click());await page.locator('#customizeStart').click();
+  await expect(page.locator('#customizeStatus')).toContainText('nothing was retried');
+  expect(writes).toHaveLength(1);
+  await expect(page.locator('#customizeStart')).toHaveText('Check previous request');
+  await page.locator('#customizeStart').click();
+  await expect.poll(()=>writes.length).toBe(2);expect(writes[0]).toEqual(writes[1]);
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});

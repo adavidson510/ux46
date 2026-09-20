@@ -583,6 +583,7 @@
 <div class="workspace-menu" id="workspaceMenu" popover="auto" role="dialog"
      aria-label="Workspace settings">
   <p class="workspace-menu-title">Your workspace</p>
+  <button type="button" id="customizeWorkspace">Customize my workspace</button>
   <button type="button" id="openWorkspaceRecovery">Recover UX46</button>
   <button type="button" data-settings="room" autofocus>Room settings</button>
   <button type="button" data-settings="appearance">Appearance &amp; voice</button>
@@ -592,6 +593,14 @@
   <div class="workspace-menu-separator"></div>
   <button type="button" data-settings="connections">Account &amp; connection<span id="settingsAgent"></span></button>
 </div>
+
+<dialog class="agent-actions-dialog" id="customizeDialog" aria-labelledby="customizeTitle">
+  <h2 id="customizeTitle">Customize my workspace</h2>
+  <p>Open this installation’s source with your local agent. A recovery point is saved first. Describe one small visible change, try it, and keep or undo it.</p>
+  <p id="customizeStatus" role="status" aria-live="polite"></p>
+  <div class="acts"><button type="button" class="primary" id="customizeStart">Open source project</button><button type="button" id="customizeClose" class="linkbtn">Close</button></div>
+  <details><summary>Undo from Terminal</summary><p>Stop this installation, restore the saved source, then reopen it. Conversations and drafts stay in private storage.</p><code>ux46 stop</code><br><code>ux46 undo</code><br><code>ux46 open</code><p>This also works when a changed UI cannot load.</p></details>
+</dialog>
 
 <dialog class="agent-actions-dialog" id="workspaceRecovery" aria-labelledby="workspaceRecoveryTitle">
   <div class="agent-actions-head"><div><h2 id="workspaceRecoveryTitle">Recover UX46</h2><p id="workspaceRecoveryEffect"></p></div>

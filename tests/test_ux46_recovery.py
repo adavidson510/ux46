@@ -138,6 +138,15 @@ class RecoveryTests(unittest.TestCase):
         finally:
             release.set(); worker.join(1); gate.resume('fixture_wait')
 
+    def test_source_undo_lock_prevents_service_recovery(self):
+        self.coordinator.directory.mkdir(parents=True,exist_ok=True)
+        with (self.coordinator.directory/'source.lock').open('a') as source_lock:
+            recovery.fcntl.flock(source_lock,recovery.fcntl.LOCK_EX)
+            with patch.object(recovery,'installation',return_value=self.plan()):
+                job=self.coordinator.execute('all',request_id='source_undo_fixture')
+        self.assertEqual(job['state'],'partial');self.assertEqual(self.manager.calls,[])
+        self.assertEqual(self.agent.calls,[])
+
     def test_unknown_agent_and_unregistered_services_do_not_create_targets(self):
         with self.assertRaises(ValueError): self.coordinator.execute('agent', 'unregistered', 'bad_target_fixture')
         result = self.coordinator.execute('all', request_id='no_service_fixture')
