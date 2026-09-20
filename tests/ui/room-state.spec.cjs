@@ -333,3 +333,118 @@ test('public UI preserves the configured local identity and its existing draft k
   await page.evaluate(() => loadAgents());
   expect(await page.evaluate(() => agentId())).toBe('owner-agent');
 });
+
+async function desktopFixture(page) {
+  await fixture(page);
+  const tab = room => ({agent:'local',room,project:'fixture',title:room,controllable:true});
+  const layout = rooms => ({version:1,tabs:rooms.map(tab),active:rooms.length?{agent:'local',room:rooms[0]}:null,customizations:{version:1}});
+  let envelope = {version:1,state:{schema_version:1,aliases:[],desktops:[],notes:[{id:'keep-note',text:'keep'}],liveDesktops:[
+    {id:'default',name:'Desktop 1',layout:layout(['fixture/old'])},
+    {id:'second',name:'Desktop 2',layout:layout(['fixture/two'])},
+    {id:'third',name:'Desktop 3',layout:layout(['fixture/three'])},
+    {id:'fourth',name:'Accidental fourth',layout:layout(['fixture/alpha','fixture/beta'])},
+  ]}};
+  const writes=[];
+  await page.route('**/api/desktop-state', async route => {
+    if (route.request().method()==='PUT') {
+      const payload=route.request().postDataJSON();writes.push(payload);
+      if (payload.base_version!==envelope.version) return route.fulfill({status:409,json:{error:'desktop_conflict',detail:envelope}});
+      envelope={version:envelope.version+1,state:payload.state};
+    }
+    await route.fulfill({json:envelope});
+  });
+  await page.evaluate(tabs=>{
+    state.device='fixture-browser';state.agents=[{id:'local',kind:'local',label:'Local'}];
+    state.tabs=tabs;state.draft={body:'unsent words',version:1};
+    selectLiveDesktop('fourth');
+    openDesktopDialog();
+  },[tab('fixture/alpha'),tab('fixture/beta')]);
+  await expect(page.getByRole('radio',{name:'Accidental fourth',exact:true})).toBeVisible();
+  await page.locator('#deskManageToggle').click();
+  return {read:()=>envelope,writes};
+}
+
+test('desktop footer saves edited names and keeps them after reopening', async ({page}) => {
+  const f=await desktopFixture(page);
+  await page.getByRole('textbox',{name:'Rename Desktop 1',exact:true}).fill('Main work');
+  await page.getByRole('textbox',{name:'Rename Desktop 2',exact:true}).fill('Reading');
+  // Device presence refreshes must not discard the edits awaiting Save.
+  await page.evaluate(()=>{desktopChooser.manageRendered=false;renderDesktopDialog();});
+  await expect(page.getByRole('textbox',{name:'Rename Desktop 1',exact:true})).toHaveValue('Main work');
+  await page.locator('#deskApply').click();
+  await expect(page.locator('#deskDialog')).not.toBeVisible();
+  expect(f.read().state.liveDesktops.slice(0,2).map(d=>d.name)).toEqual(['Main work','Reading']);
+  await page.evaluate(()=>openDesktopDialog());
+  await expect(page.getByRole('radio',{name:'Main work',exact:true})).toBeVisible();
+  await expect(page.getByRole('radio',{name:'Reading',exact:true})).toBeVisible();
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('save current tabs, clear, undo and remove affect arrangements only', async ({page}) => {
+  const f=await desktopFixture(page);
+  const nativeMutations=[];
+  page.on('request',r=>{if(r.method()!=='GET' && /\/(release|interrupt|submit|attach|continue|refresh)$/.test(new URL(r.url()).pathname))nativeMutations.push(r.url());});
+  await page.getByRole('button',{name:'Save current tabs here · Desktop 1',exact:true}).click();
+  await expect(page.locator('#deskChoiceNote')).toContainText('Current tabs saved');
+  expect(f.read().state.liveDesktops[0].layout.tabs.map(t=>t.room)).toEqual(['fixture/alpha','fixture/beta']);
+  for(const name of ['Desktop 2','Desktop 3']) {
+    await page.getByRole('button',{name:'Clear desktop · '+name,exact:true}).click();
+    await expect(page.locator('#deskChoiceNote')).toContainText('Desktop cleared');
+  }
+  expect(f.read().state.liveDesktops.slice(1,3).map(d=>d.layout.tabs.length)).toEqual([0,0]);
+  await page.getByRole('button',{name:'Undo layout change · Desktop 2',exact:true}).click();
+  await expect(page.locator('#deskChoiceNote')).toContainText('Desktop restored');
+  expect(f.read().state.liveDesktops[1].layout.tabs[0].room).toBe('fixture/two');
+  await page.getByRole('button',{name:'Clear desktop · Desktop 2',exact:true}).click();
+  await expect(page.locator('#deskChoiceNote')).toContainText('Desktop cleared');
+  await page.getByRole('button',{name:'Remove desktop · Accidental fourth',exact:true}).click();
+  await expect.poll(()=>f.read().state.liveDesktops[3].removed).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>desktopChooser.busy)).toBe(false);
+  expect(f.read().state.liveDesktops[3].removed).toBe(true);
+  expect(f.read().state.liveDesktops[3].layout.tabs).toHaveLength(2);
+  expect(await page.evaluate(()=>selectedLiveDesktopId())).toBe('default');
+  expect(f.read().state.notes).toEqual([{id:'keep-note',text:'keep'}]);
+  expect(nativeMutations).toEqual([]);
+  await page.screenshot({path:test.info().outputPath('desktop-management.png')});
+});
+
+test('removed desktops and cleared generations refuse delayed old layout writes', async ({page}) => {
+  const f=await desktopFixture(page);
+  await page.evaluate(()=>{
+    shared.ops=[{desktopId:'second',layoutGeneration:0,kind:'tabs',base:[],tabs:[{agent:'local',room:'fixture/stale'}]}];
+  });
+  await page.getByRole('button',{name:'Clear desktop · Desktop 2',exact:true}).click();
+  await expect(page.locator('#deskChoiceNote')).toContainText('Desktop cleared');
+  await page.evaluate(async()=>{
+    shared.ops=[{desktopId:'second',layoutGeneration:0,kind:'tabs',base:[],tabs:[{agent:'local',room:'fixture/stale'}]}];
+    await flushLayoutOps();
+  });
+  expect(f.read().state.liveDesktops[1].layout.tabs).toEqual([]);
+  await page.getByRole('button',{name:'Remove desktop · Desktop 3',exact:true}).click();
+  await expect.poll(()=>f.read().state.liveDesktops[2].removed).toBe(true);
+  await expect.poll(()=>page.evaluate(()=>desktopChooser.busy)).toBe(false);
+  await page.evaluate(async()=>{
+    shared.ops=[{desktopId:'third',layoutGeneration:0,kind:'active',agent:'local',room:'fixture/stale'}];
+    await flushLayoutOps();
+  });
+  expect(f.read().state.liveDesktops[2].removed).toBe(true);
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('failed name saves and unresolved drafts keep the desktop and input in place', async ({page}) => {
+  const f=await desktopFixture(page);
+  await page.getByRole('textbox',{name:'Rename Desktop 1',exact:true}).fill('My work');
+  await page.route('**/api/desktop-state', route => route.request().method()==='PUT'
+    ? route.fulfill({status:503,json:{error:'unavailable',message:'Workspace unavailable'}})
+    : route.fulfill({json:f.read()}));
+  await page.locator('#deskApply').click();
+  await expect(page.locator('#deskApply')).toBeEnabled();
+  await expect(page.locator('#deskDialog')).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'Rename Desktop 1',exact:true})).toHaveValue('My work');
+  expect(f.read().state.liveDesktops[0].name).toBe('Desktop 1');
+  await page.evaluate(()=>{desktopChooser.edits.clear();state.conflict={room:state.room,theirs:{body:'other draft',version:2}};});
+  await page.getByRole('button',{name:'Clear desktop · Accidental fourth',exact:true}).click();
+  await expect(page.locator('#deskChoiceNote')).toContainText('Your draft is kept here');
+  expect(f.read().state.liveDesktops[3].layout.tabs).toHaveLength(2);
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});

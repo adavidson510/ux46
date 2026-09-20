@@ -1674,3 +1674,6 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .chapter-notice{flex:none;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px var(--pad-x);border-bottom:1px solid var(--lav-dim);background:var(--lav-wash);color:var(--text);font:13px var(--sans);}
 .chapter-notice[hidden]{display:none;}
 .chapter-notice button{color:var(--focus);white-space:normal;text-align:left;}
+
+.desk-managed{padding:12px 0;border-bottom:1px solid var(--line);}
+.desk-managed .desk-help{margin:4px 0;}
