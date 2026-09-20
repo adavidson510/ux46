@@ -1006,7 +1006,7 @@ function selectLiveDesktop(id) {
 
 function liveDesktops(raw) {
   const stored = raw && Array.isArray(raw.liveDesktops) ? raw.liveDesktops : null;
-  if (stored) return stored.filter((desk) => desk && typeof desk === "object");
+  if (stored) return stored.filter((desk) => desk && typeof desk === "object" && !desk.removed);
   // A previous console had one anonymous live layout. It becomes the stable
   // default on the first write; until then this read-only view loses nothing.
   const legacy = raw && raw.sharedLayout;
@@ -1041,6 +1041,7 @@ function layoutRecord(raw) {
   return {
     tooNew: false, version, tabs, desktopId: String(desk.id || "default"),
     desktopName: String(desk.name || "Shared desktop"),
+    generation: Number(held.generation) || 0,
     active: ROOM_ID_SHAPE.test(room)
       ? {agent: String(wanted.agent || DEFAULT_AGENT), room} : null,
     customizations: held.customizations && typeof held.customizations === "object"
@@ -1145,7 +1146,8 @@ async function applySharedLayout(record, opts) {
       : "This is your shared layout. " + shared.lost + " conversations this device had "
         + "open are not part of it; nothing was closed or released.");
   }
-  if (!first) void followSharedActive(record, previous);
+  if (!record.tabs.length && safeToFollow()) showEmptyDesktop();
+  else if (!first) void followSharedActive(record, previous);
 }
 
 /* Preferences, not pixels. A phone follows the theme and keeps its own
@@ -1221,7 +1223,7 @@ function queueLayoutOp(op) {
   // made it. Switching this window to another named desktop may not retarget
   // a tab move, close, or preference change.
   if (!desktopId || desktopId !== selectedLiveDesktopId()) return;
-  shared.ops.push(Object.assign({desktopId}, op));
+  shared.ops.push(Object.assign({desktopId, layoutGeneration: shared.applied.generation || 0}, op));
   clearTimeout(shared.timer);
   shared.timer = setTimeout(() => void flushLayoutOps(), LAYOUT_PUBLISH_MS);
 }
@@ -1268,10 +1270,7 @@ function layoutFor(next, desktopId) {
   }
   const id = desktopId || selectedLiveDesktopId();
   let desk = next.liveDesktops.find((entry) => entry && entry.id === id);
-  if (!desk) {
-    desk = {id, name: "Shared desktop", layout: {}};
-    next.liveDesktops.push(desk);
-  }
+  if (!desk || desk.removed) throw new Error("That desktop was removed. Choose another desktop; your conversations are kept.");
   const held = desk.layout && typeof desk.layout === "object" ? desk.layout : (desk.layout = {});
   if (!Array.isArray(held.tabs)) held.tabs = [];
   if (!held.customizations || typeof held.customizations !== "object") {
@@ -1347,6 +1346,8 @@ async function flushLayoutOps(retrying) {
   try {
     result = await saveDesktopState((next) => {
       const layout = layoutFor(next, desktopId);
+      if (ops.some(op => (op.layoutGeneration || 0) !== (Number(layout.generation) || 0)))
+        throw new Error("This desktop was cleared or replaced. Your earlier layout change was not applied.");
       for (const op of ops) applyLayoutOp(layout, op);
       stampLiveLayout(next, layout, desktopId);
     }, "Your layout");
@@ -1375,6 +1376,7 @@ async function flushLayoutOps(retrying) {
     renderDesktopDialog();
     return;
   }
+  if (result.message && !/still saving/.test(result.message)) flash(result.message);
   if (result.message && /still saving/.test(result.message)) {
     shared.ops = ops.concat(shared.ops);
     clearTimeout(shared.timer);
@@ -1405,7 +1407,12 @@ async function refreshSharedLayout() {
     void renderRoomList();
     renderDesktopDialog();
     const record = layoutRecord(state.desk.raw);
-    if (!record || record.tooNew) { renderTabs(); return; }
+    if (!record || record.tooNew) {
+      if (!record && safeToFollow() && state.desk.liveDesktops.length) {
+        await joinLiveDesktop(state.desk.liveDesktops[0].id);
+      }
+      renderTabs(); return;
+    }
     if (record.by && record.by === state.device && shared.applied) {
       shared.applied = record;      // this device's own write, coming back
       renderTabs();
@@ -1542,6 +1549,9 @@ function hydrateLiveActive(record, generation) {
 
 async function joinLiveDesktop(id) {
   if (deviceOnlyLayout() || !id) return false;
+  if (state.sending || state.pendingEdit) { flash("Finish the current input before changing desktops."); return false; }
+  await flushDraft();
+  if (state.draftDirty || state.conflict) { flash("Your draft is still here. Save or resolve it before changing desktops."); return false; }
   const previous = selectedLiveDesktopId();
   selectLiveDesktop(id);
   const generation = ++shared.generation;
@@ -1555,10 +1565,21 @@ async function joinLiveDesktop(id) {
     return false;
   }
   await applySharedLayout(record, {first: true});
-  hydrateLiveActive(record, generation);
+  if (!record.tabs.length) showEmptyDesktop();
+  else hydrateLiveActive(record, generation);
   scheduleLayoutPoll(); renderDesktopDialog();
   flash("Joined shared desktop “" + record.desktopName + "”. Nothing was attached or released.");
   return true;
+}
+
+function showEmptyDesktop() {
+  rememberRoomView(); clearSpeech();
+  state.roomSeq += 1; roomSelectionIntent += 1;
+  Object.assign(state, {room:null, detail:null, items:[], tail:[], cursor:null,
+    roomRefreshing:false, draft:{body:"",version:0}, draftDirty:false, approvals:[]});
+  state.ids = new Set(); $('#draft').value = "";
+  renderStream(); renderCrumb(); renderTarget(); renderActivity();
+  $('#stream').replaceChildren(el('p',{class:'empty',text:'This desktop is empty. Open a conversation from the sidebar or start a new one.'}));
 }
 
 /* ---------------------------------------------------------------- the mark
@@ -2085,7 +2106,7 @@ async function loadDesktop(id) {
 }
 
 /* ------------------------------------------------------------ the dialog */
-const desktopChooser = {window:clientId(), selected: '', busy: false, devices: null, checking: false, checkedAt: 0, error: '', managing: false, manageRendered: false};
+const desktopChooser = {window:clientId(), selected: '', busy: false, devices: null, checking: false, checkedAt: 0, error: '', managing: false, manageRendered: false, edits: new Map()};
 
 function browserDeviceHint() {
   const ua = navigator.userAgent || '';
@@ -2187,18 +2208,125 @@ function renderDesktopChooser() {
   $('#deskApply').textContent = desktopChooser.busy ? 'Saving…' : 'Save';
   $('#deskCancel').disabled=desktopChooser.busy;$('#deskClose').disabled=desktopChooser.busy;
   if(desktopChooser.managing && !desktopChooser.manageRendered)renderDesktopManagement();
+  $('#deskManageLive').querySelectorAll('button').forEach(button=>{button.disabled=desktopChooser.busy || state.desk.saving;});
+}
+
+function desktopManagementMessage(message) {
+  $('#deskChoiceNote').textContent = message;
+  $('#deskChoiceNote').hidden = !message;
+}
+
+async function saveManagedDesktopDetails(onlyId) {
+  const edits = [...desktopChooser.edits].filter(([id]) => !onlyId || id === onlyId);
+  if (!edits.length) return {ok:true};
+  if (edits.some(([,edit]) => !edit.name.trim())) {
+    desktopManagementMessage('Give each desktop a name before saving.'); return {ok:false};
+  }
+  const result = await saveDesktopState(next => {
+    for (const [id, edit] of edits) {
+      const desk = (next.liveDesktops || []).find(d => d.id === id && !d.removed);
+      if (!desk) throw new Error('That desktop was removed elsewhere. Your edit is kept here.');
+      if ((desk.name !== edit.baseName && desk.name !== edit.name.trim())
+          || ((desk.description || '') !== edit.baseDescription && (desk.description || '') !== edit.description.trim()))
+        throw new Error('Desktop details changed elsewhere. Your edit is kept; reopen Manage desktops to review the latest names.');
+      desk.name = edit.name.trim(); desk.description = edit.description.trim();
+    }
+  }, 'Desktop details');
+  if (result.ok) {
+    for (const [id,edit] of edits) if (desktopChooser.edits.get(id) === edit) desktopChooser.edits.delete(id);
+    desktopChooser.manageRendered = false;
+    desktopManagementMessage('Desktop details saved.'); renderDesktopDialog();
+  } else desktopManagementMessage(result.message || 'Desktop details could not be saved.');
+  return result;
+}
+
+async function changeLiveDesktop(id, action) {
+  if (desktopChooser.busy || state.desk.saving) return;
+  desktopChooser.busy = true;
+  desktopManagementMessage('Saving desktop…'); renderDesktopChooser();
+  // Capture the visible arrangement before any read or navigation can change it.
+  const snapshot = {tabs:sharedSnapshotTabs(), active:activeRef(), customizations:desktopCustomizations(null)};
+  try {
+    if (id === selectedLiveDesktopId() && ['clear','remove','undo'].includes(action)) {
+      if (state.sending || state.pendingEdit) throw new Error('Finish the current input before changing this desktop.');
+      await flushDraft();
+      if (state.draftDirty || state.conflict) throw new Error('Your draft is kept here. Save or resolve it before changing this desktop.');
+    }
+    const saved = await saveManagedDesktopDetails();
+    if (!saved.ok) return;
+    const result = await saveDesktopState(next => {
+      const desk = (next.liveDesktops || []).find(d => d.id === id);
+      if (!desk || (desk.removed && action !== 'restore')) throw new Error('That desktop is no longer available.');
+      if (action === 'remove') {
+        if (liveDesktops(next).length <= 1 || id === 'default') throw new Error('Keep the primary desktop. You can clear its tabs instead.');
+        // Keep the original arrangement for Restore. Older windows cannot
+        // recreate a different desktop at this same identity by syncing tabs.
+        desk.removed = true; desk.removed_at = new Date().toISOString();
+      } else if (action === 'restore') {
+        delete desk.removed; delete desk.removed_at;
+      } else {
+        const before = JSON.parse(JSON.stringify(desk.layout));
+        const wanted = action === 'save' ? snapshot : action === 'undo' ? desk.previousLayout
+          : {tabs:[],active:null,customizations:before.customizations};
+        if (!wanted) throw new Error('No previous arrangement is available.');
+        desk.previousLayout = before;
+        desk.layout = {...before,...wanted,generation:(Number(before.generation)||0)+1};
+        stampLiveLayout(next, desk.layout, id);
+      }
+    }, 'Desktop arrangement');
+    if (!result.ok) throw new Error(result.message || 'The desktop could not be changed.');
+    shared.ops = shared.ops.filter(op => op.desktopId !== id);
+    if (id === selectedLiveDesktopId()) {
+      if (action === 'remove') {
+        const fallback = state.desk.liveDesktops.find(d => d.id === 'default') || state.desk.liveDesktops[0];
+        await joinLiveDesktop(fallback.id); desktopChooser.selected = fallback.id;
+      } else {
+        const record = layoutRecord(state.desk.raw);
+        if (record) {await applySharedLayout(record,{first:true}); if (!record.tabs.length) showEmptyDesktop();}
+      }
+    }
+    if (!state.desk.liveDesktops.some(d => d.id === desktopChooser.selected)) desktopChooser.selected = selectedLiveDesktopId();
+    desktopChooser.manageRendered = false;
+    desktopManagementMessage(action === 'remove' ? 'Desktop removed. Restore is available below; conversations are kept.'
+      : action === 'clear' ? 'Desktop cleared. Undo is available; conversations are kept.'
+      : action === 'save' ? 'Current tabs saved here. The previous arrangement is available with Undo.' : 'Desktop restored.');
+  } catch (error) {desktopManagementMessage(error.message);}
+  finally {desktopChooser.busy=false; renderDesktopDialog();}
 }
 
 function renderDesktopManagement() {
   desktopChooser.manageRendered = true;
   const host = $('#deskManageLive');host.replaceChildren();
+  host.appendChild(el('p',{class:'desk-help',text:'Save keeps edited names. Save current tabs here copies this window’s arrangement. Clearing or removing a desktop keeps its conversations and drafts.'}));
   for (const item of state.desk.liveDesktops || []) {
-    const name = el('input',{type:'text',maxlength:80,'aria-label':'Rename '+item.name,value:item.name,required:true});
-    const description = el('input',{type:'text',maxlength:240,'aria-label':'Description for '+item.name,value:item.description||'',placeholder:'What you use it for'});
-    const form = el('form',{class:'desk-edit-form'},[name,description,el('button',{class:'linkbtn',type:'submit',text:'Update desktop'})]);
-    form.addEventListener('submit',async event=>{event.preventDefault();const result=await saveDesktopState(next=>{
-      layoutFor(next,item.id);const live=next.liveDesktops.find(d=>d.id===item.id);live.name=name.value.trim() || item.name;live.description=description.value.trim();
-    },'Desktop details');if(result.ok){desktopChooser.manageRendered=false;renderDesktopDialog();}});host.appendChild(form);
+    const edit = desktopChooser.edits.get(item.id);
+    const row = el('section',{class:'desk-managed',data:{desktop:item.id}});
+    const name = el('input',{type:'text',maxlength:80,'aria-label':'Rename '+item.name,value:edit?.name ?? item.name,required:true});
+    const description = el('input',{type:'text',maxlength:240,'aria-label':'Description for '+item.name,value:edit?.description ?? item.description ?? '',placeholder:'What you use it for'});
+    const stage = () => {
+      const previous = desktopChooser.edits.get(item.id);
+      desktopChooser.edits.set(item.id,{name:name.value,description:description.value,
+        baseName:previous?.baseName ?? item.name,baseDescription:previous?.baseDescription ?? item.description ?? ''});
+    };
+    name.addEventListener('input',stage);description.addEventListener('input',stage);
+    const form = el('form',{class:'desk-edit-form'},[name,description,el('button',{class:'linkbtn',type:'submit',text:'Save name',disabled:desktopChooser.busy})]);
+    form.addEventListener('submit',async event=>{event.preventDefault();stage();await saveManagedDesktopDetails(item.id);});
+    row.append(form,el('p',{class:'desk-help',text:(item.layout?.tabs?.length || 0)+' conversations'}));
+    const actions=el('div',{class:'desk-edit-form'});
+    for (const [action,label] of [['save','Save current tabs here'],['clear','Clear desktop'],['undo','Undo layout change'],['remove','Remove desktop']]) {
+      if (action==='undo' && !item.previousLayout) continue;
+      if (action==='remove' && (item.id==='default' || state.desk.liveDesktops.length===1)) continue;
+      actions.appendChild(el('button',{class:'linkbtn',type:'button',text:label,disabled:desktopChooser.busy,
+        'aria-label':label+' · '+item.name,on:{click:()=>void changeLiveDesktop(item.id,action)}}));
+    }
+    row.appendChild(actions);host.appendChild(row);
+  }
+  const removed = (state.desk.raw?.liveDesktops || []).filter(d=>d.removed);
+  if (removed.length) {
+    const details=el('details',{},[el('summary',{text:'Removed desktops'})]);
+    for (const item of removed) details.appendChild(el('button',{class:'linkbtn',type:'button',text:'Restore '+item.name,
+      on:{click:()=>void changeLiveDesktop(item.id,'restore')}}));
+    host.appendChild(details);
   }
   const data=desktopChooser.devices,current=data?.devices.find(d=>d.id===data.current_device),settings=$('#deskDeviceSettings');settings.replaceChildren();
   if (!current) {settings.appendChild(el('p',{class:'desk-help',text:desktopChooser.error || 'Connecting this browser…'}));desktopChooser.manageRendered=false;return;}
@@ -2221,6 +2349,7 @@ async function applyDesktopChoice() {
   if(desktopChooser.busy)return;desktopChooser.busy=true;renderDesktopChooser();
   const choice=desktopChooser.selected,wasLocal=deviceOnlyLayout();let ok=true;
   try {
+    if (!(await saveManagedDesktopDetails()).ok) return;
     if(choice==='local')await setLayoutScope(true);
     else if(choice!==selectedLiveDesktopId() || wasLocal) {
       if(wasLocal){savePref(SCOPE_KEY,'');deviceNavHeld=null;}
@@ -2826,7 +2955,7 @@ function openDesktopDialog() {
   if (!dialog) return;
   $('#deskChoiceNote').textContent='';$('#deskChoiceNote').hidden=true;
   $('#deskName').value = defaultDesktopName();$('#deskNewName').value=nextDesktopName();$('#deskNewDescription').value='';
-  desktopChooser.selected=deviceOnlyLayout()?'local':selectedLiveDesktopId();desktopChooser.managing=false;desktopChooser.manageRendered=false;
+  desktopChooser.selected=deviceOnlyLayout()?'local':selectedLiveDesktopId();desktopChooser.managing=false;desktopChooser.manageRendered=false;desktopChooser.edits.clear();
   dialog.classList.remove('managing');
   $('#deskManage').hidden=true;$('#deskManageToggle').setAttribute('aria-expanded','false');$('#deskManageToggle span').textContent='Manage desktops';
   renderDesktopDialog();
