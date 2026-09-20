@@ -178,3 +178,47 @@ test('unclosed history gap is bounded and leaves the previous view intact', asyn
   await expect(page.getByRole('button', {name: 'Read latest', exact: true})).toBeVisible();
   await expect(page.locator('#draft')).toHaveValue('unsent words');
 });
+
+test('visible agent refresh keeps its target through navigation and shares the persisted receipt', async ({page}) => {
+  await fixture(page);
+  const writes=[];
+  let receipt;
+  await page.route('**/api/recovery/**', async route => {
+    if (route.request().method()==='POST') {
+      const body=route.request().postDataJSON();writes.push(body);
+      receipt={id:body.request_id,mode:body.mode,agent:body.agent,state:'running',message:'Checking owned connections',connections:[]};
+      await route.fulfill({status:202,json:{job:receipt}});
+    } else await route.fulfill({json:{supported:true,job:receipt}});
+  });
+  await page.locator('#btnAgentRefresh').click();
+  await expect.poll(()=>writes.length).toBe(1);
+  expect(writes[0].mode).toBe('agent');expect(writes[0].agent).toBe('local');
+  await seed(page,'fixture/beta','other-agent');
+  receipt={...receipt,state:'partial',message:'One busy connection was deferred',connections:[{agent:'local',room:'fixture/alpha',state:'deferred'}]};
+  await page.evaluate(()=>checkWorkspaceRecovery());
+  await expect(page.locator('#workspaceRecoveryStatus')).toContainText('One busy connection was deferred');
+  await expect(page.getByRole('button',{name:'Open full UX46 recovery'})).toBeVisible();
+  expect(writes).toHaveLength(1);
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('explicit full recovery is one request with an interruption label and no second confirmation', async ({page}) => {
+  await fixture(page);
+  const writes=[];
+  await page.route('**/api/recovery/**', route => {
+    if (route.request().method()==='POST') {
+      const body=route.request().postDataJSON();writes.push(body);
+      return route.fulfill({status:202,json:{job:{id:body.request_id,mode:'all',agent:null,state:'complete',message:'Recovery finished without replay',services:[{id:'console',state:'ready'}]}}});
+    }
+    return route.fulfill({json:{supported:true,job:null}});
+  });
+  await page.evaluate(()=>{ window.confirm=()=>{throw new Error('Unexpected second confirmation');}; openWorkspaceRecovery(); });
+  await expect(page.locator('#workspaceRecoveryEffect')).toContainText('Active owned work may be interrupted');
+  await page.getByRole('button',{name:'Recover UX46 — may interrupt owned work',exact:true}).click();
+  await expect(page.locator('#workspaceRecoveryStatus')).toContainText('Recovery finished without replay');
+  expect(writes).toHaveLength(1);
+  expect(Object.keys(writes[0]).sort()).toEqual(['agent','mode','request_id']);
+  expect(writes[0].agent).toBeNull();expect(writes[0].mode).toBe('all');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  await page.screenshot({path:test.info().outputPath('workspace-recovery.png')});
+});

@@ -18,6 +18,7 @@ session ownership and input/output; they do not replace provider authentication.
 | Human workspace projections | [ux46_workspace_api.py](../tools/ux46_workspace_api.py) |
 | Optional remote agents | [atlas_remote.py](../tools/atlas_remote.py) |
 | Optional private access gateway | [ux46_access_gateway.py](../tools/ux46_access_gateway.py) |
+| Doctor and independent recovery | [ux46_doctor.py](../tools/ux46_doctor.py), [ux46_recovery.py](../tools/ux46_recovery.py), [recovery guide](recovery.md) |
 | Bounded event pages and restart detection | [ux46_events.py](../tools/ux46_events.py) |
 
 Event replies acknowledge only the returned page, with a continuation flag for

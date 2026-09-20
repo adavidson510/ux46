@@ -56,6 +56,7 @@ def run(root, config, port=None, open_browser=False):
         '--execution-policy', config.get('execution_policy', 'preserve')])
     if selected == 'codex':
         args.codex_command = [config.get('cli') or 'codex', 'app-server']
+    args.recovery_root = str(root)
     service = console.ConsoleService(args)
     claude_server = None
     if selected == 'claude':
@@ -68,6 +69,7 @@ def run(root, config, port=None, open_browser=False):
         c = claude.build_parser().parse_args(['--agent-id','local','--agent-name',config.get('agent_label','Claude'),
             '--node','local','--registry',str(root/'registry.json'),'--state-dir',str(root/'claude'),
             '--cli',config.get('cli') or 'claude','--permission-mode','default','--quiet','--fresh-only'])
+        c.recovery_root = str(root)
         service_claude=claude.ClaudeService(c)
         claude_server=claude.ClaudeServer(('127.0.0.1',0),service_claude)
         c.port=claude_server.server_port
@@ -129,6 +131,8 @@ def run(root, config, port=None, open_browser=False):
                 raise console.ApiError(HTTPStatus.SERVICE_UNAVAILABLE, 'unavailable', 'Local store unavailable')
 
     server = console.ConsoleServer(('127.0.0.1', args.port), LocalHandler, service)
+    from ux46_recovery import register_console
+    register_console(root, server.server_port)
     print(f'UX46: http://127.0.0.1:{server.server_port}/', flush=True)
     if open_browser:
         import threading, webbrowser
@@ -154,7 +158,14 @@ def main(argv=None):
     launch = commands.add_parser('run', help='Run the local browser workspace')
     launch.add_argument('--port', type=int)
     launch.add_argument('--open',action='store_true',help='Open the local workspace in your browser')
-    commands.add_parser('doctor', help='Check prerequisites without starting an agent')
+    doctor = commands.add_parser('doctor', help='Inspect this installation or explicitly recover its owned connections')
+    doctor.add_argument('--check', action='store_true', help='Inspection only; never restart anything')
+    doctor.add_argument('--json', action='store_true')
+    doctor.add_argument('--agent'); doctor.add_argument('--room')
+    operation = doctor.add_mutually_exclusive_group()
+    operation.add_argument('--recover', action='store_true', help='Refresh the exact selected agent')
+    operation.add_argument('--recover-all', action='store_true', help='Recover all configured UX46-owned services; may interrupt active owned work')
+    doctor.add_argument('--request-id', help='Stable recovery operation ID; repeating it only reads its receipt')
     setup = commands.add_parser('setup', help='Configure this agent without importing history')
     setup.add_argument('--agent',choices=['auto','codex','claude','none'],default='auto')
     setup.add_argument('--name');setup.add_argument('--cli');setup.add_argument('--json',action='store_true')
@@ -164,13 +175,34 @@ def main(argv=None):
     add = commands.add_parser('project-add', help='Explicitly register a project directory')
     add.add_argument('path', type=Path)
     add.add_argument('--name')
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == '--doctor': argv[0] = 'doctor'
     args = parser.parse_args(argv)
     root = home()
     if args.command == 'doctor':
-        print(json.dumps({'python': sys.version.split()[0], 'codex_on_path': bool(shutil.which('codex')),
-                          'claude_on_path': bool(shutil.which('claude')),
-                          'config_exists': (root/'config.json').exists(), 'platform': sys.platform}, indent=2))
-        return 0
+        from ux46_doctor import inspect, render, successful
+        from ux46_recovery import Coordinator
+        if args.check and (args.recover or args.recover_all): parser.error('--check is inspection only')
+        if args.recover and not args.agent: parser.error('--recover needs --agent ID')
+        if args.recover_all and (args.agent or args.room): parser.error('--recover-all covers the installation; omit --agent and --room')
+        if args.request_id and not (args.recover or args.recover_all): parser.error('--request-id needs an explicit recovery mode')
+        try:
+            if args.recover or args.recover_all:
+                if args.recover_all and not args.json:
+                    print('Recovering configured UX46-owned services. Active owned work may be interrupted; input will not be replayed.', flush=True)
+                result = Coordinator(root).execute('all' if args.recover_all else 'agent', args.agent, args.request_id)
+                if args.json: print(json.dumps(result, indent=2))
+                else:
+                    print(result['state'] + ': ' + result.get('message', ''))
+                    for row in result.get('services', []) + result.get('connections', []):
+                        print((row.get('id') or row.get('agent','')) + ': ' + row['state'])
+                    print('Receipt: ' + result['id'])
+                return 0 if result['state'] == 'complete' else 1
+            result = inspect(root, args.agent, args.room)
+        except (ValueError, OSError) as exc: parser.error(str(exc))
+        if args.json: print(json.dumps(result, indent=2))
+        else: render(result)
+        return 0 if successful(result) else 1
     config = initialize(root)
     if args.command in ('setup','connect'):
         from ux46_setup import configure, connect

@@ -533,11 +533,10 @@ class ClientScopingTests(unittest.TestCase):
         self.assertNotEqual(local[2], far[2])
 
     def test_every_api_path_goes_through_the_prefixing_helper(self):
-        # The CSRF retry helper takes a caller-scoped URL. Only bootstrap and
-        # local service recovery deliberately use unscoped literal routes.
+        # The CSRF retry helper takes a caller-scoped URL. Recovery now also
+        # uses api(..., absolute:true); only bootstrap is a literal fetch.
         calls = re.findall(r"fetch\(([^,\n]+)", APP_JS)
-        self.assertEqual(set(calls), {'url', '"/api/bootstrap"',
-                                     '"/api/service/status"', '"/api/service/restart"'})
+        self.assertEqual(set(calls), {'url', '"/api/bootstrap"'})
         self.assertTrue('consoleFetch(opts.absolute ? path : apiUrl(path), opts)' in APP_JS)
         # And no literal "/api/..." string is handed to an element attribute.
         self.assertIn('return apiUrl("/api/atlas/files/"', APP_JS)

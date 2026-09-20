@@ -833,6 +833,38 @@ class NativeCommandTests(unittest.TestCase):
             finally:
                 h.close()
 
+    def test_refresh_accepts_a_known_stopped_system_error(self):
+        h = ConsoleHarness(mode="system_error")
+        try:
+            status, payload = h.call("POST", "/api/connection/refresh", body={})
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["connection"]["state"], "refreshed")
+        finally:
+            h.close()
+
+    def test_recovery_mutations_need_csrf_and_reject_command_fields(self):
+        h = ConsoleHarness()
+        try:
+            h.service.recovery_gate = console.recovery.Gate(h.tmp)
+            body = {'mode':'all','request_id':'console_fixture_1'}
+            with patch.object(console.recovery,'launch') as launch:
+                status, answer = h.call('POST','/api/recovery/start',body,csrf=False)
+                self.assertEqual(status,403); self.assertEqual(answer['error'],'bad_csrf')
+                status, answer = h.call('POST','/api/recovery/start',{**body,'pid':123})
+                self.assertEqual(status,400); launch.assert_not_called()
+        finally:
+            h.close()
+
+    def test_inspection_room_read_does_not_schedule_account_recovery(self):
+        h = ConsoleHarness()
+        try:
+            with patch.object(h.service, "_account_recovery") as recovery:
+                status, payload = h.call("GET", "/api/room/fixture/console-work?inspect=1")
+            self.assertEqual(status, 200)
+            recovery.assert_not_called()
+        finally:
+            h.close()
+
     def test_refresh_refuses_a_submit_or_refresh_race(self):
         h = ConsoleHarness()
         try:

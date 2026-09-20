@@ -78,7 +78,8 @@ def thread_meta(thread_id: str, name: str, cwd: str) -> dict:
         "ephemeral": False,
         "status": ({"type": "active", "activeFlags": []}
                    if MODE in ("active", "loaded_paged_active")
-                   else {"type": "systemError"} if MODE == "unknown_activity"
+                   else {"type": "futureUnknownState"} if MODE == "unknown_activity"
+                   else {"type": "systemError"} if MODE == "system_error"
                    else {"type": "notLoaded"}),
         "turns": [],
     }
@@ -220,7 +221,7 @@ def main() -> int:
                           "error": {"code": -32602, "message": "bad fixture cursor"}})
             else:
                 ids = sorted(loaded)
-                if MODE in ("active", "unknown_activity"):
+                if MODE in ("active", "unknown_activity", "system_error"):
                     ids = [THREAD_ONE]
                 ok({"data": ids, "nextCursor": None})
         elif method == "account/read":

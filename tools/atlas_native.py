@@ -1161,7 +1161,7 @@ class NativeSessions:
             status = (thread.get("status") or {}).get("type")
             if status == "active":
                 active += 1
-            elif status not in ("idle", "notLoaded"):
+            elif status not in ("idle", "notLoaded", "systemError"):
                 unknown += 1
         pending = len(self.server.pending_requests())
         observed = len(self._active_turns)

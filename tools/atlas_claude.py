@@ -1053,9 +1053,13 @@ class Turn:
 # the service
 # ---------------------------------------------------------------------------
 
+import ux46_recovery as recovery
+
+
 class ClaudeService:
     def __init__(self, config):
         self.config = config
+        self.recovery_gate = recovery.Gate(getattr(config, "recovery_root", None))
         self.state_dir = Path(config.state_dir).expanduser()
         self.state_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -1395,7 +1399,12 @@ class ClaudeService:
         the process — never for the length of a turn, which is a model's time
         and not a request's. Two conversations do not queue behind each other.
         """
-        with self.room_lock(room.id):
+        with self.recovery_gate.admit(), self.room_lock(room.id):
+            if reserved:
+                queued = self.journal.queue_get(client_id)
+                if not queued or queued.status != PENDING:
+                    raise recovery.RecoveryBusy("Queued input is held and has not been sent")
+                self.journal.queue_mark(client_id, DISPATCHING)
             if self.running(room.id) is not None:
                 raise AdapterError(HTTPStatus.CONFLICT, "busy",
                                    "a turn is already running in this conversation")
@@ -1504,10 +1513,11 @@ class ClaudeService:
                     continue
                 if self.running(room.id) is not None:
                     continue
-                self.journal.queue_mark(item.client_id, DISPATCHING)
                 try:
                     result = self.dispatch(room, item.client_id, item.body, [],
                                            background=False, reserved=True)
+                except recovery.RecoveryBusy:
+                    continue
                 except AdapterError as exc:
                     # Still queued, still exactly once: it waits for the next
                     # pass rather than being retried into a second send.
@@ -2054,6 +2064,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="where Claude Code writes its transcripts")
     parser.add_argument("--registry", default=DEFAULT_REGISTRY,
                         help="read-only Session Vault registry")
+    parser.add_argument("--recovery-root", help="Private installation admission and recovery records")
     parser.add_argument("--state-dir", default=DEFAULT_STATE_DIR,
                         help="private journal and attachments (not Git, Vault or Tell)")
     parser.add_argument("--unfiled-project", default=DEFAULT_UNFILED_PROJECT,

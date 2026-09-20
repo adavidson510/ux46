@@ -60,13 +60,14 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from atlas_console import AuthBoundary  # noqa: E402
 from ux46_service_control import ServiceControl  # noqa: E402
+import ux46_recovery as recovery  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # fixed limits and shapes
@@ -623,6 +624,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._refuse(HTTPStatus.NOT_FOUND, "no such brand asset")
             return
 
+        if server.recovery_root and path.startswith('/api/recovery/'):
+            self._recovery_control(path, decision)
+            return
+
         if path.startswith("/api/service/") and path != "/api/service/activity":
             self._service_control(path, decision)
             return
@@ -667,6 +672,39 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command!='HEAD':self.wfile.write(body)
         return True
+
+    def _recovery_control(self, path, decision):
+        """The same external coordinator, reachable without the upstream console."""
+        server = self.server
+        body = None
+        if self.command == 'POST':
+            cookie = read_cookie(self.headers.get('Cookie', ''), COOKIE_NAME)
+            csrf = self.headers.get('X-UX46-Recovery-CSRF', '')
+            if (not server.login.valid(cookie, decision.identity)
+                    or self.headers.get('Origin', '') != server.auth.origin_for(self.headers.get('Host', ''))
+                    or not hmac.compare_digest(csrf.encode(), server.service_csrf.encode())):
+                self._drain()
+                self._refuse(403, json.dumps({'error':'recovery_request_forbidden'}), content_type='application/json'); return
+            length = int(self.headers.get('Content-Length') or 0)
+            if not 0 < length <= 1024:
+                self._drain(); self._refuse(400, 'A small JSON recovery request is required'); return
+            try: body = json.loads(self.rfile.read(length))
+            except (ValueError, UnicodeError):
+                self._refuse(400, 'Invalid recovery request'); return
+        else: self._drain()
+        try:
+            # Remote adapter preparation goes directly to its own console;
+            # the gateway only selects registered recovery targets.
+            if path not in {'/api/recovery/status','/api/recovery/start'}:
+                self._refuse(404, 'No such recovery operation'); return
+            identity = parse_qs(urlparse(self.path).query).get('request_id', [None])[0]
+            status, payload = recovery.api(server.recovery_root, self.command, path, body, identity)
+            if self.command == 'GET': payload['recovery_csrf'] = server.service_csrf
+        except recovery.RecoveryBusy:
+            status, payload = 409, {'error':'recovery_in_progress'}
+        except (OSError, ValueError):
+            status, payload = 400, {'error':'invalid_recovery','message':'Check the mode, configured agent and request ID.'}
+        self._refuse(status, json.dumps(payload), content_type='application/json')
 
     def _service_control(self, path, decision):
         server = self.server
@@ -902,7 +940,7 @@ class GatewayServer(ThreadingHTTPServer):
 
     def __init__(self, address, gate: Gate, auth: AuthBoundary, console: Upstream,
                  tell: Upstream, brand_dir: Path = None, public_brand: bool = False,
-                 verbose: bool = False, login: "Login" = None, service_control=None):
+                 verbose: bool = False, login: "Login" = None, service_control=None, recovery_root=None):
         if address[0] != "127.0.0.1":
             raise ValueError("this gate binds 127.0.0.1 only")
         super().__init__(address, GatewayHandler)
@@ -916,6 +954,7 @@ class GatewayServer(ThreadingHTTPServer):
         self.gateway_verbose = verbose
         self.service_csrf = secrets.token_urlsafe(32)
         self.service_control = service_control or ServiceControl(console, auth)
+        self.recovery_root = Path(recovery_root).resolve() if recovery_root else None
 
     def handle_error(self, request, client_address):
         # A browser that walked away mid-download is not an incident, and a
@@ -958,6 +997,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visualization-root", action="append", default=[], help="Explicit directory of local HTML visualization fragments")
     parser.add_argument("--visualization-kit", default="", help="Installed visualization assets directory")
     parser.add_argument("--workspace-ui-dir", default="", help="Opt-in fixed UI assets; independent of native workers")
+    parser.add_argument("--recovery-root", default="", help="Explicit private UX46 installation whose recovery stays reachable without the console")
     parser.add_argument("--boards-store", default=str(Path.home() / ".local/state/ux46/boards.sqlite3"),
                         help="Owner conversation boards SQLite store")
     parser.add_argument("--identity-header", default="Tailscale-User-Login")
@@ -1022,7 +1062,8 @@ def serve(args) -> int:
                         public_user=args.public_user,
                         identity_header=args.identity_header)
     server = GatewayServer(("127.0.0.1", args.port), Gate(stored, args.username), auth,
-                           console, tell, brand_dir, args.public_brand, args.verbose)
+                           console, tell, brand_dir, args.public_brand, args.verbose,
+                           recovery_root=getattr(args, 'recovery_root', '') or None)
     from ux46_board_gateway import BoardAPI
     server.boards = BoardAPI(args.boards_store)
     if args.workspace_store:

@@ -660,5 +660,32 @@ class PasswordFile(unittest.TestCase):
                 gate.Upstream(origin)
 
 
+class RecoveryGateway(GateCase):
+    def test_recovery_is_local_to_gateway_and_requires_login_origin_and_token(self):
+        from unittest.mock import patch
+        from ux46_local import initialize
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary); initialize(root)
+            self.server.recovery_root = root
+            try:
+                status, headers, raw = self.ask(path='/api/recovery/status')
+                self.assertEqual(status,200); self.assertEqual(self.console.seen,[])
+                token = json.loads(raw)['recovery_csrf']; cookie = cookie_value(headers)
+                body = json.dumps({'mode':'all','request_id':'gateway_fixture_1'})
+                permitted = {'Origin':ORIGIN,'X-UX46-Recovery-CSRF':token,'Content-Type':'application/json'}
+                with patch.object(gate.recovery,'launch',return_value={'id':'gateway_fixture_1','state':'running'}) as launch:
+                    for held, supplied in [(None,permitted),(cookie,{}),(cookie,{**permitted,'Origin':'https://wrong.example'})]:
+                        self.assertEqual(self.ask('POST','/api/recovery/start',body=body,cookie=held,headers=supplied)[0],403)
+                    launch.assert_not_called()
+                    self.assertEqual(self.ask('POST','/api/recovery/start',body=body,cookie=cookie,headers=permitted)[0],202)
+                    launch.assert_called_once_with(root,'all',None,'gateway_fixture_1')
+                with patch.object(gate.recovery,'launch') as launch:
+                    malicious = json.dumps({'mode':'all','request_id':'gateway_fixture_2','command':'stop-anything'})
+                    self.assertEqual(self.ask('POST','/api/recovery/start',body=malicious,cookie=cookie,headers=permitted)[0],400)
+                    launch.assert_not_called()
+                self.assertEqual(self.console.seen,[])
+            finally: self.server.recovery_root = None
+
+
 if __name__ == "__main__":
     unittest.main()
