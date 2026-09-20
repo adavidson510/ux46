@@ -77,6 +77,11 @@ class ManageTests(unittest.TestCase):
         with self.assertRaises(ValueError):manage.restore(self.root,point['id'])
         self.assertEqual(outside.read_text(),'private')
 
+    def test_manifest_cannot_point_source_at_private_state(self):
+        for source in (self.root,self.root/'source',self.base):
+            manage.save(self.root/'installation.json',{**self.manifest,'source':str(source)})
+            with self.assertRaisesRegex(ValueError,'must stay separate'):manage.prepare_customization(self.root)
+
     def test_active_registered_process_prevents_source_undo(self):
         point=manage.checkpoint(self.root,self.source)
         manage.save(self.root/'control/console.json',{'pid':os.getpid()})

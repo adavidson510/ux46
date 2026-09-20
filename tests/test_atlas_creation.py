@@ -72,9 +72,11 @@ def test_workspace_customization_uses_source_cwd_but_keeps_records_private():
     import ux46_manage as manage
     import ux46_recovery as recovery
     from ux46_local import initialize
+    import tempfile
+    source_temp=tempfile.TemporaryDirectory(prefix='ux46-source-fixture-')
     h=ConsoleHarness()
     try:
-        root=h.tmp.resolve();source=root/'editable-source';source.mkdir();(source/'README.md').write_text('editable fixture')
+        root=h.tmp.resolve();source=Path(source_temp.name).resolve();(source/'README.md').write_text('editable fixture')
         initialize(root)
         manage.save(root/'installation.json',{'schema_version':1,'id':'customization-fixture','source':str(source),'state':str(root),'release':'fixture','files':manage.inventory(source)})
         h.service.recovery_gate=recovery.Gate(root)
@@ -96,4 +98,5 @@ def test_workspace_customization_uses_source_cwd_but_keeps_records_private():
         assert not (source/'sessions').exists()
         assert not (source/'project.json').exists()
         assert (root/'recovery-points'/result['customization']['recovery_point']/'point.json').exists()
-    finally:h.close()
+    finally:
+        h.close();source_temp.cleanup()

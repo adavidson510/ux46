@@ -60,6 +60,8 @@ def inventory(source):
 def installed(root):
     manifest = read(root/'installation.json')
     if manifest.get('schema_version') != 1 or Path(manifest['state']) != root or not Path(manifest['source']).is_absolute(): raise ValueError('Installation identity does not match')
+    source=Path(manifest['source']).resolve()
+    if source==root or source in root.parents or root in source.parents: raise ValueError('Editable source and private data must stay separate')
     return manifest
 
 
