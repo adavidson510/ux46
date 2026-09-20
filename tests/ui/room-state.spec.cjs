@@ -251,3 +251,85 @@ test('uncertain customization is not automatically repeated and manual check kee
   await expect.poll(()=>writes.length).toBe(2);expect(writes[0]).toEqual(writes[1]);
   await expect(page.locator('#draft')).toHaveValue('unsent words');
 });
+
+test('listening survives redraws, seeks, and releases media when changing agents', async ({page}) => {
+  await fixture(page);
+  // Forty seconds of silent PCM exercises actual browser media/Range behavior.
+  const wav = Buffer.alloc(44 + 8000 * 2 * 40);
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
+  let release, started;
+  const held = new Promise(resolve => release = resolve);
+  const requested = new Promise(resolve => started = resolve);
+  await page.route('**/api/room/**/speak', async route => {
+    started(); await held;
+    await route.fulfill({json: {audio_url: '/api/audio/fixture.wav', complete: true}});
+  });
+  await page.route('**/api/audio/fixture.wav', async route => {
+    await route.fulfill({body: wav, contentType: 'audio/wav', headers: {'Accept-Ranges': 'bytes'}});
+  });
+  await page.evaluate(() => { state.voice.enabled = true; renderStream(); });
+  await page.getByRole('button', {name: 'Listen to response · local voice'}).click();
+  await requested;
+  await expect(page.getByText('Preparing audio…')).toBeVisible();
+  await page.evaluate(() => renderStream());
+  await expect(page.getByText('Preparing audio…')).toBeVisible();
+  release();
+  const seek = page.getByRole('slider', {name: 'Audio position'});
+  await expect(seek).toBeEnabled();
+  await page.evaluate(() => {
+    const audio = document.querySelector('audio'); audio.pause(); audio.currentTime = 15;
+    window.playingElement = audio; renderStream();
+  });
+  expect(await page.evaluate(() => document.querySelector('audio') === window.playingElement)).toBe(true);
+  await page.getByRole('button', {name: 'Forward 10 seconds'}).click();
+  expect(await page.evaluate(() => document.querySelector('audio').currentTime)).toBeCloseTo(25, 0);
+  await page.getByRole('combobox', {name: 'Playback speed'}).selectOption('1.5');
+  expect(await page.evaluate(() => document.querySelector('audio').playbackRate)).toBe(1.5);
+  await page.screenshot({path: test.info().outputPath('response-listening.png')});
+  await page.evaluate(() => resetAgentState());
+  await expect(page.locator('audio')).toHaveCount(0);
+  expect(await page.evaluate(() => state.audio.size)).toBe(0);
+});
+
+test('earlier chapter notice follows unambiguous replacements without moving drafts', async ({page}) => {
+  await fixture(page);
+  await page.setViewportSize({width: 390, height: 844});
+  await page.evaluate(() => {
+    state.desk.raw = {chapters: [
+      {agent: agentId(), previous_room: state.room, room: 'fixture/new', mode: 'replace'},
+      {agent: agentId(), previous_room: 'fixture/new', room: 'fixture/newest', mode: 'replace'},
+      {agent: agentId(), previous_room: state.room, room: 'fixture/branch', mode: 'branch'},
+    ]}; renderChapterNotice();
+  });
+  await expect(page.locator('#chapterNotice')).toContainText('Earlier chapter');
+  await expect(page.getByRole('button', {name: 'Open current chapter'})).toBeVisible();
+  expect(await page.evaluate(() => currentChapter(agentId(), state.room))).toBe('fixture/newest');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  expect(await page.evaluate(() => state.room)).toBe('fixture/alpha');
+  await page.evaluate(() => {
+    state.desk.raw.chapters.push({agent: agentId(), previous_room: state.room, room: 'fixture/ambiguous', mode: 'replace'});
+    renderChapterNotice();
+  });
+  await expect(page.locator('#chapterNotice')).toBeHidden();
+});
+
+
+test('public UI preserves the configured local identity and its existing draft keys', async ({page}) => {
+  await fixture(page);
+  await page.route('**/api/agents', route => route.fulfill({json: {
+    default: 'owner-agent', agents: [{id: 'owner-agent', kind: 'local', label: 'My agent'}]}}));
+  await page.evaluate(() => loadAgents());
+  expect(await page.evaluate(() => agentId())).toBe('owner-agent');
+  expect(await page.evaluate(() => apiUrl('/api/bootstrap'))).toBe('/api/bootstrap');
+  expect(await page.evaluate(() => agentKey('atlas.room'))).toBe('atlas.room');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  // A later catalog update cannot reinterpret the selected identity in flight.
+  await page.route('**/api/agents', route => route.fulfill({json: {
+    default: 'replacement', agents: [{id: 'replacement', kind: 'local'}]}}));
+  await page.evaluate(() => loadAgents());
+  expect(await page.evaluate(() => agentId())).toBe('owner-agent');
+});

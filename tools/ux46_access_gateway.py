@@ -50,6 +50,7 @@ import hmac
 import http.client
 import json
 import os
+import re
 import secrets
 import stat
 import sys
@@ -66,6 +67,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from atlas_console import AuthBoundary  # noqa: E402
+from atlas_voice import audio_response  # noqa: E402
 from ux46_service_control import ServiceControl  # noqa: E402
 import ux46_recovery as recovery  # noqa: E402
 
@@ -624,6 +626,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._refuse(HTTPStatus.NOT_FOUND, "no such brand asset")
             return
 
+        if path == '/api/modules' and getattr(server, 'modules', None) is not None:
+            self._drain()
+            if self.command not in {'GET', 'HEAD'}:
+                self._refuse(405, 'Use GET for module settings'); return
+            self._refuse(200, json.dumps(server.modules), content_type='application/json'); return
+
         if server.recovery_root and path.startswith('/api/recovery/'):
             self._recovery_control(path, decision)
             return
@@ -649,6 +657,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         files={'/':('index.html','text/html; charset=utf-8'),
                '/index.html':('index.html','text/html; charset=utf-8'),
                '/app.js':('app.js','text/javascript; charset=utf-8'),
+               '/modules.js':('modules.js','text/javascript; charset=utf-8'),
                '/styles.css':('styles.css','text/css; charset=utf-8'),
                '/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
                '/tell.js':('tell.js','text/javascript; charset=utf-8'),
@@ -885,6 +894,31 @@ class GatewayHandler(BaseHTTPRequestHandler):
         headers = [(name, value) for name, value in response.headers.items()
                    if name.casefold() not in skip and name.casefold() != "content-length"]
         length = response.headers.get("Content-Length")
+        # Older agent adapters return the complete WAV even for a Range
+        # request. Adapt that authenticated response here so player upgrades
+        # don't require interrupting every agent to replace its adapter.
+        # Only fixed audio routes and bounded, complete representations qualify.
+        is_audio = re.fullmatch(r"/api/(?:agents/[^/]+/api/)?audio/[a-zA-Z0-9_-]+\.wav", self.path)
+        if (self.command == "GET" and response.status == 200 and is_audio
+                and response.headers.get_content_type() == "audio/wav"
+                and length and length.isdigit() and int(length) <= 64 * 1024 * 1024):
+            data = response.read(int(length))
+            if len(data) != int(length):
+                self.close_connection = True
+                self._refuse(HTTPStatus.BAD_GATEWAY, "the audio response was incomplete")
+                return
+            status, data, audio_headers = audio_response(data, self.headers.get("Range", ""))
+            self.send_response_only(status)
+            self._emit_login()
+            for name, value in headers:
+                if name.casefold() not in {"accept-ranges", "content-range"}:
+                    self.send_header(name, value)
+            for name, value in audio_headers:
+                self.send_header(name, value)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         bodyless = (self.command == "HEAD" or response.status in (204, 304)
                     or 100 <= response.status < 200)
 
@@ -997,6 +1031,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visualization-root", action="append", default=[], help="Explicit directory of local HTML visualization fragments")
     parser.add_argument("--visualization-kit", default="", help="Installed visualization assets directory")
     parser.add_argument("--workspace-ui-dir", default="", help="Opt-in fixed UI assets; independent of native workers")
+    parser.add_argument("--modules-config", default="", help="Optional private JSON of enabled email, tell and constellation modules")
     parser.add_argument("--recovery-root", default="", help="Explicit private UX46 installation whose recovery stays reachable without the console")
     parser.add_argument("--boards-store", default=str(Path.home() / ".local/state/ux46/boards.sqlite3"),
                         help="Owner conversation boards SQLite store")
@@ -1064,11 +1099,23 @@ def serve(args) -> int:
     server = GatewayServer(("127.0.0.1", args.port), Gate(stored, args.username), auth,
                            console, tell, brand_dir, args.public_brand, args.verbose,
                            recovery_root=getattr(args, 'recovery_root', '') or None)
+    server.modules = None
+    if args.modules_config:
+        try:
+            path = Path(args.modules_config).expanduser()
+            if path.stat().st_size > 65536: raise ValueError('too large')
+            modules = json.loads(path.read_text())
+            if (not isinstance(modules, dict) or set(modules) - {'email', 'tell', 'constellation'}
+                    or any(type(value) is not bool for value in modules.values())):
+                raise ValueError('invalid module settings')
+            server.modules = dict(email=False, tell=False, constellation=True) | modules
+        except (OSError, ValueError):
+            parser.error('--modules-config must contain only boolean email, tell and constellation settings')
     from ux46_board_gateway import BoardAPI
     server.boards = BoardAPI(args.boards_store)
     if args.workspace_store:
         from ux46_workspace_api import WorkspaceAPI
-        server.workspace_api = WorkspaceAPI(args.workspace_store,args.constellation_client or None)
+        server.workspace_api = WorkspaceAPI(args.workspace_store,args.constellation_client or None, modules=server.modules)
     if args.visualization_root:
         if not args.visualization_kit:parser.error('--visualization-root requires --visualization-kit')
         from ux46_visualizations import Visualizations

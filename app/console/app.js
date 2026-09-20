@@ -130,7 +130,8 @@ const OUTBOX_KEY = "atlas.outbox";
    ever names an id from it, and every API path is prefixed with that id so a
    remote agent answers with its own rooms, files, audio and history. The
    local agent keeps the unprefixed paths it has always used. */
-const DEFAULT_AGENT = "local";
+let DEFAULT_AGENT = "local";
+let localAgentResolved = false;
 function agentId() { return state.agent || DEFAULT_AGENT; }
 function isRemoteAgent() { return agentId() !== DEFAULT_AGENT; }
 function apiUrl(path) {
@@ -839,6 +840,7 @@ function adoptDesktopState(envelope) {
   }
   state.desk.desktops = Array.isArray(state_.desktops) ? state_.desktops : [];
   state.desk.liveDesktops = liveDesktops(state_);
+  renderChapterNotice();
   renderNotes();
 }
 
@@ -2879,6 +2881,7 @@ async function closeTab(tab) {
         // Forget where we were before leaving. Otherwise the walk to the next
         // place remembers this room on the way out and puts its tab straight
         // back — which is precisely what the person just closed.
+        clearSpeech();
         state.room = null;
         state.detail = null;
         await openSession(next.agent, next.room, {toTail: true, connect: true});
@@ -2903,6 +2906,7 @@ async function closeTab(tab) {
    and capability answer for it. Native ids and paths stay in Connection
    details. */
 function renderCrumb() {
+  renderChapterNotice();
   const detail = state.detail;
   const crumb = $("#crumb");
   const cap = $("#sessCap");
@@ -2935,6 +2939,34 @@ function renderCrumb() {
       ? "Saved session" : agentLabel());
   }
   if (kind) kind.textContent = detail.capability_short || detail.capability_label || "";
+}
+
+// Chapter lineage is shared across desktops even when their tabs differ.
+// Follow only explicit replacement links, never parallel branches or guesses
+// based on titles. Old chapters remain readable without redirecting drafts.
+function currentChapter(agent, room) {
+  const seen = new Set([room]);
+  let current = room;
+  for (let n = 0; n < 100; n++) {
+    const next = [...new Set((state.desk.raw?.chapters || []).filter(entry =>
+      entry.agent === agent && entry.previous_room === current && entry.mode === "replace").map(entry => entry.room))];
+    if (!next.length) return current === room ? null : current;
+    if (next.length !== 1 || !next[0] || seen.has(next[0])) return null;
+    current = next[0]; seen.add(current);
+  }
+  return null;
+}
+function renderChapterNotice() {
+  const notice = $("#chapterNotice");
+  if (!notice) return;
+  const owner = agentId(), room = state.detail?.id;
+  const next = room ? currentChapter(owner, room) : null;
+  notice.hidden = !next;
+  notice.replaceChildren();
+  if (!next) return;
+  notice.append(el("span", {text: "Earlier chapter · newer work is in the current chapter."}),
+    el("button", {type: "button", class: "linkbtn", text: "Open current chapter",
+      on: {click: () => openSession(owner, next, {connect: true, toTail: true})}}));
 }
 
 // Account availability is live evidence; native_terminal describes an earlier attempt.
@@ -3053,6 +3085,12 @@ function itemHead(item) {
 }
 
 function workTitle(item) {
+  if (item.type === "subAgentActivity") {
+    const labels = {started: "Subagent started", interacted: "Subagent interaction",
+      interrupted: "Subagent interrupted", completed: "Subagent completed"};
+    const label = labels[item.activity_kind] || "Subagent activity";
+    return label + (item.agent_path ? " · " + item.agent_path : "");
+  }
   if (item.type === "commandExecution") return item.command || "command";
   if (item.type === "fileChange") {
     const names = (item.changes || []).map((c) => c.path).filter(Boolean);
@@ -3128,7 +3166,15 @@ function workNode(item, groupKey) {
     if (!output && item.type === "commandExecution") {
       body.appendChild(el("p", {class: "meta", text: "the runtime reported no output for this command"}));
     }
-    if (item.raw_keys) {
+    if (item.type === "subAgentActivity") {
+      if (item.agent_path) body.appendChild(el("p", {class: "meta", text: "Agent: " + item.agent_path}));
+      body.appendChild(el("p", {class: "meta", text: item.agent_thread_id
+        ? "This records an event in the agent’s work. Its task, steps and answer belong to its own conversation and aren’t included in this event."
+        : "This connection didn’t provide the agent details. The console adapter needs the subagent display update."}));
+      if (item.agent_thread_id) body.appendChild(el("details", {}, [
+        el("summary", {text: "Conversation reference"}),
+        el("p", {class: "meta", text: item.agent_thread_id})]));
+    } else if (item.raw_keys) {
       body.appendChild(el("p", {class: "meta",
         text: "this runtime item type is not specially rendered · fields: " + item.raw_keys.join(", ")}));
     }
@@ -3430,6 +3476,8 @@ function replyIcon(kind) {
   const shapes = {
     copy: "M9 9h11v12H9z M15 9V3H3v12h6",
     download: "M12 3v12m-5-5 5 5 5-5 M4 16v5h16v-5",
+    play: "m8 4 12 8-12 8z",
+    pause: "M8 5v14 M16 5v14",
     listen: "M11 4 6 8H3v8h3l5 4z M15 8a6 6 0 0 1 0 8 M18 5a10 10 0 0 1 0 14",
     check: "m5 12 4 4 10-10",
   };
@@ -4203,69 +4251,125 @@ async function answerApproval(approval, decision, answers) {
   }
 }
 
-/* Read one existing reply aloud with the local model. Never automatic, never
-   new text: the server speaks the exact stored message for this item id. */
+/* Speech is requested only by Listen. Keep the media element outside the
+   transcript: routine redraws replace that DOM and must not restart playback.
+   The small controls node is reused; leaving the room disposes both. */
+function clearSpeech() {
+  for (const entry of state.audio.values()) {
+    if (entry.audio) {
+      entry.audio.pause();
+      entry.audio.removeAttribute("src");
+      entry.audio.load();
+      entry.audio.remove();
+    }
+  }
+  state.audio.clear();
+}
+
+function speechTime(seconds) {
+  const value = Math.max(0, Math.floor(Number(seconds) || 0));
+  return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0");
+}
+
 function listenControls(item) {
-  const wrap = el("div", {class: "listen", data: {listen: item.id}});
-  const cached = state.audio.get(item.id);
-  if (cached) {
-    wrap.appendChild(audioPlayer(cached));
-    return wrap;
-  }
-  const button = replyAction("listen", "Listen to response · local voice", (event) => speakItem(item.id, event.currentTarget));
-  wrap.appendChild(button);
-  return wrap;
+  let entry = state.audio.get(item.id);
+  if (entry) return entry.node;
+  entry = {node: el("div", {class: "listen", data: {listen: item.id}}), phase: "idle"};
+  entry.node.appendChild(replyAction("listen", "Listen to response · local voice", () => speakItem(item.id, entry)));
+  return entry.node;
 }
 
-function audioPlayer(speech) {
-  const box = document.createDocumentFragment();
-  const audio = el("audio", {controls: true, preload: "none", src: speech.audio_url});
-  box.appendChild(audio);
-  const bits = [speech.voice, Math.round(speech.duration_s) + "s"];
-  if (speech.cached) bits.push("cached");
-  else if (speech.synth_ms) bits.push("made in " + Math.round(speech.synth_ms / 100) / 10 + "s");
-  if (!speech.complete) {
-    bits.push("first " + speech.spoken_chars + " of " + speech.total_chars
-      + " characters only");
-  }
-  box.appendChild(el("span", {class: "note", text: bits.join(" · ")}));
-  return box;
+function speechFailure(itemId, entry, message) {
+  entry.phase = "error";
+  entry.node.removeAttribute("aria-busy");
+  entry.node.replaceChildren(
+    el("span", {class: "listen-status", role: "status", text: message}),
+    el("button", {class: "linkbtn", type: "button", text: "Try again", on: {click: () => speakItem(itemId, entry)}}));
 }
 
-async function speakItem(itemId, button) {
-  if (!state.detail) return;
-  // Speech is now generated for remote agents too, so a slow clip can land
-  // after a room or agent switch. Pin what it belongs to before the await and
-  // drop it — success or failure — if that has moved on.
-  const roomId = state.detail.id;
-  const seq = state.roomSeq;
-  const gen = state.agentGen;
-  const mine = () => !stale(seq, roomId) && gen === state.agentGen;
-  button.disabled = true;
-  button.replaceChildren(replyIcon("listen"));
-  button.title = "Preparing local audio…";
-  button.setAttribute("aria-label", "Preparing local audio");
-  button.classList.add("reply-preparing");
+function audioPlayer(entry, speech, owner) {
+  const audio = el("audio", {preload: "auto", hidden: true,
+    src: agentPath(owner, speech.audio_url)});
+  entry.audio = audio;
+  document.body.appendChild(audio);
+  const box = el("div", {class: "speech-player", role: "group", "aria-label": "Response audio"});
+  const status = el("span", {class: "listen-status", role: "status", text: "Loading audio…"});
+  const play = el("button", {class: "speech-play", type: "button", disabled: true,
+    "aria-label": "Play response", title: "Play response"}, [replyIcon("play")]);
+  const back = el("button", {class: "speech-skip", type: "button", text: "−10",
+    "aria-label": "Back 10 seconds", title: "Back 10 seconds", disabled: true});
+  const forward = el("button", {class: "speech-skip", type: "button", text: "+10",
+    "aria-label": "Forward 10 seconds", title: "Forward 10 seconds", disabled: true});
+  const seek = el("input", {class: "speech-seek", type: "range", min: "0", max: "0", step: "0.1",
+    value: "0", disabled: true, "aria-label": "Audio position"});
+  const time = el("span", {class: "speech-time", text: "0:00 / —"});
+  const speed = el("select", {class: "speech-speed", "aria-label": "Playback speed"},
+    [0.75, 1, 1.25, 1.5, 2].map(rate => el("option", {value: rate, text: rate + "×", selected: rate === 1})));
+  const duration = () => Number.isFinite(audio.duration) ? audio.duration : 0;
+  const sync = () => {
+    const total = duration();
+    seek.max = String(total); seek.disabled = !total;
+    seek.value = String(audio.currentTime || 0);
+    seek.setAttribute("aria-valuetext", speechTime(audio.currentTime) + " of " + speechTime(total));
+    time.textContent = speechTime(audio.currentTime) + " / " + (total ? speechTime(total) : "—");
+    back.disabled = forward.disabled = !total;
+    play.disabled = audio.readyState < 2;
+    const label = audio.paused ? (audio.ended ? "Replay response" : "Play response") : "Pause response";
+    play.setAttribute("aria-label", label); play.title = label;
+    play.replaceChildren(replyIcon(audio.paused ? "play" : "pause"));
+  };
+  const start = async () => {
+    for (const other of state.audio.values()) if (other !== entry && other.audio) other.audio.pause();
+    try { await audio.play(); }
+    catch (_) { status.textContent = "Ready · press Play to listen"; sync(); }
+  };
+  play.addEventListener("click", () => audio.paused ? void start() : audio.pause());
+  const jump = value => { if (duration()) audio.currentTime = Math.max(0, Math.min(duration(), value)); sync(); };
+  back.addEventListener("click", () => jump(audio.currentTime - 10));
+  forward.addEventListener("click", () => jump(audio.currentTime + 10));
+  seek.addEventListener("input", () => jump(Number(seek.value)));
+  speed.addEventListener("change", () => { audio.playbackRate = Number(speed.value); });
+  for (const event of ["loadedmetadata", "durationchange", "timeupdate", "seeked", "play", "pause", "ended"])
+    audio.addEventListener(event, sync);
+  audio.addEventListener("playing", () => { status.textContent = "Playing"; });
+  audio.addEventListener("pause", () => { status.textContent = audio.ended ? "Finished" : "Paused"; });
+  audio.addEventListener("ended", () => { status.textContent = "Finished"; });
+  audio.addEventListener("waiting", () => { status.textContent = "Buffering…"; });
+  const retry = el("button", {class: "linkbtn", type: "button", text: "Reload audio", hidden: true,
+    on: {click: () => { retry.hidden = true; status.textContent = "Loading audio…"; audio.load(); }}});
+  audio.addEventListener("error", () => { status.textContent = "Audio couldn’t load."; play.disabled = true; retry.hidden = false; });
+  // Listen expresses playback intent; browsers that disallow delayed playback
+  // still expose an enabled Play button rather than silently doing nothing.
+  audio.addEventListener("canplay", () => { sync(); status.textContent = "Ready"; void start(); }, {once: true});
+  audio.addEventListener("canplay", sync);
+  box.append(back, play, forward, seek, time, speed, status, retry);
+  if (speech.complete === false) box.appendChild(el("span", {class: "speech-partial", text:
+    "Partial reading · " + speech.spoken_chars + " of " + speech.total_chars + " characters"}));
+  entry.node.replaceChildren(box);
+  entry.node.removeAttribute("aria-busy");
+  entry.phase = "ready";
+}
+
+async function speakItem(itemId, entry) {
+  if (!state.detail || entry.phase === "preparing") return;
+  state.audio.set(itemId, entry);
+  const roomId = state.detail.id, owner = agentId(), gen = state.agentGen;
+  const mine = () => state.room === roomId && gen === state.agentGen && state.audio.get(itemId) === entry;
+  entry.phase = "preparing";
+  entry.node.setAttribute("aria-busy", "true");
+  entry.node.replaceChildren(el("span", {class: "speech-preparing", role: "status"}, [
+    el("span", {class: "speech-pulse", "aria-hidden": "true"}, [el("i"), el("i"), el("i")]),
+    el("span", {text: "Preparing audio…"})]));
   try {
-    const speech = await api("/api/room/" + encodeURI(roomId) + "/speak", {
-      method: "POST", body: {item_id: itemId, voice: state.voice.preferred || undefined},
+    const speech = await api(agentPath(owner, "/api/room/" + encodeURI(roomId) + "/speak"), {
+      absolute: true, method: "POST", body: {item_id: itemId, voice: state.voice.preferred || undefined},
     });
     if (!mine()) return;
-    state.audio.set(itemId, speech);
-    const host = $("#stream").querySelector('[data-listen="' + CSS.escape(itemId) + '"]');
-    if (host) { host.replaceChildren(); host.appendChild(audioPlayer(speech)); }
+    if (typeof speech.audio_url !== "string" || !/^\/api\/audio\/[a-zA-Z0-9_-]+\.wav$/.test(speech.audio_url))
+      throw new Error("The voice service returned an invalid audio location.");
+    audioPlayer(entry, speech, owner);
   } catch (error) {
-    if (!mine()) return;
-    button.disabled = false;
-    button.replaceChildren(replyIcon("listen"));
-    button.title = "Listen to response · local voice";
-    button.setAttribute("aria-label", "Listen to response · local voice");
-    button.classList.remove("reply-preparing");
-    const host = button.parentElement;
-    if (host) {
-      const note = host.querySelector(".note");
-      if (note) note.textContent = "could not read this aloud: " + error.message;
-    }
+    if (mine()) speechFailure(itemId, entry, "Couldn’t prepare audio. " + error.message);
   }
 }
 
@@ -4393,6 +4497,7 @@ async function selectRoom(roomId, opts) {
     if (intent !== roomSelectionIntent) return false;
     rememberRoomView();
   }
+  if (previous !== roomId) clearSpeech();
   const seq = ++state.roomSeq;
   const cached = roomViews.get(roomId);
   state.room = roomId;
@@ -8980,6 +9085,13 @@ async function loadAgents() {
   // Always this console's own list: an agent does not publish other agents.
   const payload = await api("/api/agents", {absolute: true});
   state.agents = payload.agents || [];
+  // Resolve the installation's existing local identity before restoring its
+  // tabs and drafts. Public defaults must not rename an older installation.
+  if (!localAgentResolved) {
+    const local = state.agents.find(agent => agent.id === payload.default && agent.kind === "local");
+    if (local && /^[a-z][a-z0-9-]{0,31}$/.test(local.id)) DEFAULT_AGENT = local.id;
+    localAgentResolved = true;
+  }
   return payload;
 }
 
@@ -9094,7 +9206,7 @@ function resetAgentState() {
   roomViews.clear();
   attachmentIndex.clear();
   loadUploadDrafts();
-  state.audio = new Map();
+  clearSpeech();
   state.ids = new Set();
   Object.assign(state, {
     eventEpoch: "", eventRecovery: true,
@@ -9816,7 +9928,7 @@ for (const tab of document.querySelectorAll(".dock-tab")) {
 $("#voiceSelect").addEventListener("change", (event) => {
   state.voice.preferred = event.target.value;
   try { window.localStorage.setItem("atlas.voice", state.voice.preferred); } catch (e) { /* ignore */ }
-  state.audio.clear();
+  clearSpeech();
   renderStream();
 });
 $("#moreFold").addEventListener("click", () => { toggleFold(); renderReadingControls(); dismissOverlay(); });

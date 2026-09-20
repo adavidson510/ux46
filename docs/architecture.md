@@ -72,3 +72,9 @@ undo outside the editable tree. Source points exclude local caches and Git inter
 undo preserves prior source and carries local Git history forward. The special
 workspace project stores portable records under private data while its native
 working directory points at installed source.
+
+An independently deployed access gateway can serve `/modules.js` with the UI.
+When its upstream predates optional modules, `--modules-config /private/modules.json`
+explicitly selects `email`, `tell`, and `constellation` using boolean values. The
+settings endpoint remains authenticated. Without this option it forwards the
+installed console’s settings; host preferences stay outside reusable source.

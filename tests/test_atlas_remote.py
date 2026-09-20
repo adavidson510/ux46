@@ -505,7 +505,7 @@ class ClientScopingTests(unittest.TestCase):
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
-        start = APP_JS.index('const DEFAULT_AGENT = "local";')
+        start = APP_JS.index('let DEFAULT_AGENT = "local";')
         end = APP_JS.index("/* ---------------------------------------------------------------- helpers */")
         block = APP_JS[start:APP_JS.index("\n}\n", APP_JS.index("function agentLabel", start)) + 3]
         self.assertLess(start, end)
