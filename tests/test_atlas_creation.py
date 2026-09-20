@@ -66,3 +66,34 @@ def test_agent_create_without_source_and_file_exact_origin(factory,runtime,metho
             assert matching
         assert h.post('/api/room/'+room+'/release',{})[0]==200
     finally:h.close()
+
+
+def test_workspace_customization_uses_source_cwd_but_keeps_records_private():
+    import ux46_manage as manage
+    import ux46_recovery as recovery
+    from ux46_local import initialize
+    h=ConsoleHarness()
+    try:
+        root=h.tmp.resolve();source=root/'editable-source';source.mkdir();(source/'README.md').write_text('editable fixture')
+        initialize(root)
+        manage.save(root/'installation.json',{'schema_version':1,'id':'customization-fixture','source':str(source),'state':str(root),'release':'fixture','files':manage.inventory(source)})
+        h.service.recovery_gate=recovery.Gate(root)
+        body={'client_id':'source-project-fixture'}
+        h.start_runtime()
+        with patch.object(h.service.workers,'start_fresh',wraps=h.service.workers.start_fresh) as start:
+            status,_=h.call('POST','/api/customize/start',body=body,csrf=False)
+            assert status==403
+            status,_=h.call('POST','/api/customize/start',body={**body,'cwd':'/outside'})
+            assert status==400
+            start.assert_not_called()
+            status,result=h.call('POST','/api/customize/start',body=body)
+            assert status==200 and result['state']=='created',result
+            assert start.call_args.args[0]==str(source)
+            _,again=h.call('POST','/api/customize/start',body=body)
+            assert again['new_room']['id']==result['new_room']['id']
+            assert start.call_count==1
+        assert list((root/'projects/ux46-workspace/sessions').glob('*.origins.json'))
+        assert not (source/'sessions').exists()
+        assert not (source/'project.json').exists()
+        assert (root/'recovery-points'/result['customization']['recovery_point']/'point.json').exists()
+    finally:h.close()

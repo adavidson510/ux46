@@ -139,8 +139,9 @@ read them without an account or permission from us. Reading a file won't change 
 ## Your copy gets to be different
 
 Customize locally for as long as you like. You don't need a GitHub account, a
-public fork, or our approval. Keep a backup before substantial edits. Git can
-give you local undo history, but it is optional and doesn't require an account.
+public fork, or our approval. Choose **Customize my workspace** to save a recovery point and open the source project.
+The [first-change guide](docs/first-change.md) shows how to try a visible change and undo it,
+even if the interface stops loading. Git remains optional.
 
 Base updates are optional too. There is no automatic updater replacing your
 changes. Your AI can compare a later release with your copy and help bring over

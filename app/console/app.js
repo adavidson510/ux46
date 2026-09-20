@@ -5742,6 +5742,43 @@ async function refreshConnection(button) {
 $("#btnSessionRefresh").addEventListener("click", event => refreshConnection(event.currentTarget));
 $("#settingsRefresh").addEventListener("click",event=>refreshConnection(event.currentTarget));
 
+// This explicit entry creates a source-scoped project; ordinary blank rooms
+// retain their own working folders and permissions. Unknown creation is held.
+let customizationRequest = null, customizationBusy = false;
+try { customizationRequest = localStorage.getItem('ux46.customize.request'); } catch (error) {}
+$('#customizeWorkspace').addEventListener('click', () => {
+  $('#workspaceMenu').hidePopover?.(); $('#customizeStart').textContent = customizationRequest ? 'Check previous request' : 'Open source project'; $('#customizeDialog').showModal();
+});
+$('#customizeClose').addEventListener('click', () => $('#customizeDialog').close());
+$('#customizeStart').addEventListener('click', async () => {
+  if (customizationBusy) return;
+  customizationBusy = true; customizationRequest ||= clientId();
+  try { localStorage.setItem('ux46.customize.request',customizationRequest); } catch (error) {}
+  $('#customizeStart').disabled = true;
+  $('#customizeStatus').textContent = 'Saving a recovery point and opening the source project…';
+  try {
+    const result = await api('/api/customize/start', {absolute:true, method:'POST', body:{client_id:customizationRequest}});
+    if (result.state === 'created' && result.new_room?.id) {
+      $('#customizeStatus').textContent = 'Recovery point saved. Use ux46 undo if you want to restore it.';
+      $('#customizeDialog').close();
+      const agent = result.agent || DEFAULT_AGENT;
+      openTab(agent,result.new_room.id,result.new_room); renderTabs();
+      await openSession(agent,result.new_room.id,{toTail:true,connect:true});
+      customizationRequest = null;
+    } else if (result.state === 'failed') {
+      $('#customizeStatus').textContent = result.message || 'The source conversation could not be created.';
+      customizationRequest = null;
+    } else $('#customizeStatus').textContent = result.message || 'The new conversation is not confirmed. Check the workspace before starting another.';
+  } catch (error) {
+    $('#customizeStatus').textContent = error.status >= 400 && error.status < 500 ? error.message : 'The source conversation is not confirmed. Check the previous request; nothing was retried.';
+    if (error.status >= 400 && error.status < 500) customizationRequest = null;
+  } finally {
+    customizationBusy = false; $('#customizeStart').disabled = false;
+    $('#customizeStart').textContent = customizationRequest ? 'Check previous request' : 'Open source project';
+    if (!customizationRequest) { try { localStorage.removeItem('ux46.customize.request'); } catch (error) {} }
+  }
+});
+
 // CLI and UI share the persisted coordinator receipt. Polling reads receipts;
 // it never retries a mutation or infers successful recovery from transport.
 const workspaceRecovery = {mode: "all", agent: null, id: null, job: null, timer: null, busy: false, until: 0};

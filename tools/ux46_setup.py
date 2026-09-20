@@ -40,12 +40,15 @@ def configure(root, config, *, agent='auto', name=None, cli=None):
     config=dict(config, agent=agent, agent_label=name or {'codex':'Codex','claude':'Claude','none':'Connect an agent'}[agent])
     config['cli']=chosen or (agent if agent!='none' else '')
     save(root/'config.json',config)
+    from ux46_doctor import runtime_check
+    readiness = {'command':runtime_check(config), 'native_file_edit':'unverified',
+                 'message':'Command checks do not prove a native task can edit a file. Verify that through requested work in a disposable project.'}
     source=Path(__file__).resolve().parents[1]
     # A small map for the agent's next context window. Command arrays keep
     # paths (including spaces) as arguments rather than executable shell text.
     # The environment points memory tools at this copy's private data.
     connection={'schema_version':1,'agent':agent,'name':config['agent_label'],
-        'cli_available':bool(chosen),'login':'provider-managed; not inspected',
+        'cli_available':bool(chosen),'login':'provider-managed; not inspected','readiness':readiness,
         'source':str(source),'data':str(root),'registry':str(root/'registry.json'),
         'launch':[sys.executable,str(source/'tools/ux46'),'run'],
         'memory':[sys.executable,str(source/'tools/ux46_memory.py')],

@@ -9,6 +9,7 @@ session ownership and input/output; they do not replace provider authentication.
 | Area | Source |
 | --- | --- |
 | Installer and local setup | [install.sh](../install.sh), [ux46_setup.py](../tools/ux46_setup.py) |
+| Installed source recovery and lifecycle | [ux46_manage.py](../tools/ux46_manage.py) |
 | Standalone init/run | [ux46_local.py](../tools/ux46_local.py) |
 | Browser workspace | [app/console/](../app/console/) |
 | Codex console and workers | [atlas_console.py](../tools/atlas_console.py), [atlas_native.py](../tools/atlas_native.py), [atlas_workers.py](../tools/atlas_workers.py) |
@@ -62,3 +63,12 @@ from runtime permissions and provider accounts.
 
 Several older files retain the internal `atlas` naming for compatibility.
 `app/static` and `atlas_ui.py` are legacy source, not the current launcher.
+
+The installer keeps a persistent private transaction beside UX46_HOME. It records
+release and archive evidence, exact paths, created-path ownership and setup phase.
+The installed-base manifest records source hashes; reruns resume owned work and
+refuse unrelated destinations. A copied controller supports open/stop and source
+undo outside the editable tree. Source points exclude local caches and Git internals;
+undo preserves prior source and carries local Git history forward. The special
+workspace project stores portable records under private data while its native
+working directory points at installed source.

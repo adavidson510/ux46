@@ -11,10 +11,17 @@ your conversations or changing how an agent runs.
 
 ## Give your AI the problem and a place to work
 
-You can use your existing coding agent to edit `~/ux46`, the source folder created
-by the installer. Tell it the actual location if you installed elsewhere. A new
-conversation may need you to select that folder or give the agent access through
-its normal workspace controls.
+Open the workspace menu and choose **Customize my workspace**, then **Open source
+project**. UX46 saves a recovery point and starts a local Codex conversation with
+the installed source as its working folder. This gives that conversation project
+access to the right files; it does not widen every conversation's permissions.
+Its conversation records remain in private storage.
+
+For another native agent, use `~/.local/bin/ux46 customize` in Terminal. It saves
+the same recovery point and opens the configured CLI in the source folder when
+run interactively. A source checkout without an installed-base manifest can still
+be edited through your native agent's normal folder selection; save your own
+backup first.
 
 Here is a prompt you can adapt:
 
@@ -63,10 +70,25 @@ No exam follows. You now know one useful corner of the codebase.
 
 ## Keep a way back
 
-For a small edit, a copy of the affected files outside the source folder is enough
-to recover. For ongoing work, ask your AI to set up **local Git history**. Git
-records versions on your computer; GitHub is a separate place to publish them.
-You can use the first without joining the second.
+To undo the source change, run these in Terminal. Stopping can interrupt active
+owned work; let it finish first if needed.
+
+```sh
+~/.local/bin/ux46 stop
+~/.local/bin/ux46 undo
+~/.local/bin/ux46 open
+```
+
+Undo restores the latest saved source point. The previous source is preserved in
+a separate backup folder, and private conversations and drafts are untouched.
+The installed repair launcher lives outside editable source, so this works even
+when a changed interface will not load. To save another point, use
+`ux46 snapshot --label "Tabs I like"`; the command prints its ID for `ux46 undo --point ID`.
+
+`ux46 source-status` compares your files with their installed base. Local changes
+are flagged for review before any optional update; no automatic merge or updater
+replaces them. Local Git history is also useful and remains optional. Git records
+versions on your computer; GitHub is a separate place to publish them.
 
 A **diff** shows the before and after. A **commit** saves a named version. Ask the
 AI to show you its diff and explain the effect before you build on a change you

@@ -633,7 +633,7 @@ class ConsoleService:
                 or not isinstance(title, str) or len(title) > 120
                 or (project_id is not None and not isinstance(project_id, str))):
             raise ApiError(HTTPStatus.BAD_REQUEST, "bad_session", "Choose an agent, a project or blank, and a short name.")
-        self.discovery.refresh()
+        self.discovery.refresh(force=True)
         wanted = project_id or "ux46-explorations"
         project = next((p for p in self.discovery._projects if p.id == wanted), None)
         if project is None or not project.root.is_dir():
@@ -651,6 +651,16 @@ class ConsoleService:
         return {"state": "created" if command.get("state") == "created" else command.get("state", "failed"),
                 "message": command.get("message", ""), "new_room": command.get("new_room"),
                 "duplicate": bool(result.get("duplicate"))}
+
+    def project_working_dir(self, project):
+        # The editable workspace has its own private project records. Only
+        # this installed mapping grants that project the source working folder;
+        # a request cannot supply a cwd or widen other projects' access.
+        root = self.recovery_gate.root
+        if root and project.id == 'ux46-workspace' and project.root.resolve() == (root/'projects/ux46-workspace').resolve():
+            import ux46_manage
+            return ux46_manage.installed(root)['source']
+        return str(project.root)
 
     def workspace(self) -> dict:
         """The working set: what this person would plausibly reopen.
@@ -1015,11 +1025,11 @@ class ConsoleService:
             source_effort = source.get("reasoningEffort")
             if not source_model or source_effort not in choices[source_model].get("efforts", []):
                 source_effort = None
-            # A new project session starts at its canonical project root, not
-            # a generic hub cwd inherited from the source thread. No history
+            # A new project session starts at its configured working folder,
+            # including the explicit installed-source mapping. No history
             # or instructions are passed to the app-server.
             native_attempted = True
-            fresh = self.workers.start_fresh(str(projects[0].root), room=identity,
+            fresh = self.workers.start_fresh(self.project_working_dir(projects[0]), room=identity,
                 model=source_model, effort=source_effort, project_id=source.get("projectId"),
                 developer_instructions=(chapters.developer_instructions(chapter_brief["brief"], identity=identity)
                                         if rolling else None))
@@ -1396,7 +1406,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             suffix = scoped.group(2) if scoped else path
             # Drafts, queue editing/cancellation, reads and recovery receipts
             # stay usable while new native work is held.
-            launches = method == "POST" and (suffix in {"/api/sessions", "/api/test-thread", "/api/approvals/answer", "/api/connection/refresh"}
+            launches = method == "POST" and (suffix in {"/api/sessions", "/api/test-thread", "/api/approvals/answer", "/api/connection/refresh", "/api/customize/start"}
                 or bool(re.fullmatch(r"/api/room/[^/]+/[^/]+/(submit|pending|command|continue|attach)", suffix)))
             if method == "PATCH" and re.fullmatch(r"/api/room/[^/]+/[^/]+/pending/[^/]+", suffix):
                 launches = self._body().get("editing") is False
@@ -1509,6 +1519,24 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def _api(self, method: str, path: str, query: dict, decision: AuthDecision) -> None:
         service = self.service
         get = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
+
+        if path == '/api/customize/start' and method == 'POST':
+            import hashlib
+            from ux46_manage import prepare_customization
+            body = self._body()
+            if set(body) != {'client_id'} or not isinstance(body.get('client_id'),str) or not CLIENT_ID_RE.fullmatch(body['client_id']):
+                raise ApiError(HTTPStatus.BAD_REQUEST,'bad_customization','Use one stable customization request ID')
+            root = service.recovery_gate.root
+            if not root:
+                raise ApiError(HTTPStatus.CONFLICT,'customize_unavailable','This console has no installed-source mapping. Use your native agent’s folder selection.')
+            if recovery.read_json(root/'config.json',{}).get('agent') != 'codex':
+                raise ApiError(HTTPStatus.CONFLICT,'customize_cli','Run ux46 customize in Terminal to open your native agent in the source project.')
+            try:
+                prepared = prepare_customization(root,hashlib.sha256(body['client_id'].encode()).hexdigest()[:32])
+            except (OSError,ValueError,KeyError):
+                raise ApiError(HTTPStatus.CONFLICT,'customize_unavailable','A source recovery point could not be prepared. Use ux46 source-status in Terminal.')
+            created = service.create_session({'client_id':body['client_id'],'project_id':prepared['project_id'],'title':'Customize my workspace'})
+            return self._json(HTTPStatus.OK,{**created,'customization':prepared,'agent':'local'})
 
         if path.startswith("/api/tell/"):
             if query:

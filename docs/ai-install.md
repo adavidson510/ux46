@@ -17,8 +17,9 @@ curl -fsSL https://raw.githubusercontent.com/adavidson510/ux46/main/install.sh |
 If the installer already reported success, **do not install again**. Read the
 printed local guide and connection.json, then continue at **Configure your
 connection** below. CLI detection is only an initial choice; configure your
-actual runtime. If installation refused an existing copy, inspect that copy
-and its connection record before deciding whether another installation is needed.
+actual runtime. If installation was interrupted, rerun the same installer with the same locations
+and release. It resumes only paths owned by its saved transaction. A refusal for
+an unrelated existing path still requires inspecting that copy, not deleting it.
 
 Use captured output for the command: it returns without prompting or starting
 a server. A pseudo-terminal can look like a human terminal; in that environment
@@ -67,9 +68,9 @@ Pass its `environment` to subprocesses that access this installation's memory.
 
 ## Verify without spending a turn
 
-- Run `ux46 doctor` and inspect configuration. Missing CLI and missing login are
+- Run `ux46 doctor --check --json` and inspect configuration. Missing CLI and missing login are
   distinct; doctor does not inspect provider authentication files.
-- Start `ux46 run` on a free loopback port using your normal process supervisor.
+- For the intended installed workspace, use `ux46 open` (or `ux46 start` without opening a browser). Use `ux46 stop` for that installation. For a disposable fixture, `ux46 run --port PORT` remains available.
 - Read `/api/bootstrap`, `/api/modules` and `/api/agents`. Confirm the agent name,
   empty fresh registry, and disabled optional connectors. These are metadata reads.
 - Create or send a real conversation only as part of the human's requested work.
@@ -95,8 +96,7 @@ For documentation, code explanations or the first customization, use
 path welcoming and the operational AI path small. It is an on-demand guide, not
 another always-loaded instruction layer.
 
-Customize any of this source to fit the human. Save a local snapshot or use local
-Git history before substantial edits. There is no upstream contribution obligation,
+Use **Customize my workspace** or `ux46 customize --json` to save a source recovery point and identify the installed source. The browser creates a local source-scoped Codex room; its Vault records remain private. For native CLI work, pass the returned source as the working directory through the normal provider entrypoint. Do not turn a generic blank room into full-account access to reach the source. `ux46 stop`, `ux46 undo --point ID`, then `ux46 open` restore the source through the independent launcher. Check `ux46 source-status` before an optional update; local changes require review, not a promised automatic merge. There is no upstream contribution obligation,
 automatic update or shared knowledge service attached to this installation.
 
 ## Another runtime

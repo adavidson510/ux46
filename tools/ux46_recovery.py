@@ -448,12 +448,16 @@ class Coordinator:
                 def save(): write_json(path, job)
                 save(); write_json(self.directory/'latest.json', {'id': request_id})
                 gate = Gate(self.root)
-                prepared = []; unavailable = set()
+                prepared = []; unavailable = set(); source_lock = None
                 def client(target):
                     value = self.client_factory(target.get('endpoint') or {'port': 1}, deadline)
                     value.recovery_id = request_id
                     return value
                 try:
+                    source_lock = (self.directory/'source.lock').open('a')
+                    os.chmod(source_lock.name,0o600)
+                    try: fcntl.flock(source_lock,fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    except BlockingIOError: raise RecoveryBusy('Source undo is in progress; no service was changed')
                     gate.pause(request_id, ['*'] if mode == 'all' else [agent], deadline)
                     if mode == 'all' or agent == 'local':
                         job['held_messages'] = hold_queue(self.root/'state/atlas-console.sqlite3') + hold_queue(self.root/'claude/claude-console.sqlite3')
@@ -520,6 +524,7 @@ class Coordinator:
                         except (OSError, ValueError, http.client.HTTPException):
                             job.update(state='partial', message='Recovery ended, but this adapter’s input hold could not be checked. Queued messages remain held.')
                             job['connections'].append({'agent':target['id'],'state':'admission_unknown'})
+                    if source_lock is not None: source_lock.close()
                     gate.resume(request_id); job['finished_at'] = time.time(); save()
                 return job
 
