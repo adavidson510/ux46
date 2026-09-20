@@ -316,3 +316,20 @@ test('earlier chapter notice follows unambiguous replacements without moving dra
   });
   await expect(page.locator('#chapterNotice')).toBeHidden();
 });
+
+
+test('public UI preserves the configured local identity and its existing draft keys', async ({page}) => {
+  await fixture(page);
+  await page.route('**/api/agents', route => route.fulfill({json: {
+    default: 'owner-agent', agents: [{id: 'owner-agent', kind: 'local', label: 'My agent'}]}}));
+  await page.evaluate(() => loadAgents());
+  expect(await page.evaluate(() => agentId())).toBe('owner-agent');
+  expect(await page.evaluate(() => apiUrl('/api/bootstrap'))).toBe('/api/bootstrap');
+  expect(await page.evaluate(() => agentKey('atlas.room'))).toBe('atlas.room');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  // A later catalog update cannot reinterpret the selected identity in flight.
+  await page.route('**/api/agents', route => route.fulfill({json: {
+    default: 'replacement', agents: [{id: 'replacement', kind: 'local'}]}}));
+  await page.evaluate(() => loadAgents());
+  expect(await page.evaluate(() => agentId())).toBe('owner-agent');
+});

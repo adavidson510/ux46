@@ -130,7 +130,8 @@ const OUTBOX_KEY = "atlas.outbox";
    ever names an id from it, and every API path is prefixed with that id so a
    remote agent answers with its own rooms, files, audio and history. The
    local agent keeps the unprefixed paths it has always used. */
-const DEFAULT_AGENT = "local";
+let DEFAULT_AGENT = "local";
+let localAgentResolved = false;
 function agentId() { return state.agent || DEFAULT_AGENT; }
 function isRemoteAgent() { return agentId() !== DEFAULT_AGENT; }
 function apiUrl(path) {
@@ -9084,6 +9085,13 @@ async function loadAgents() {
   // Always this console's own list: an agent does not publish other agents.
   const payload = await api("/api/agents", {absolute: true});
   state.agents = payload.agents || [];
+  // Resolve the installation's existing local identity before restoring its
+  // tabs and drafts. Public defaults must not rename an older installation.
+  if (!localAgentResolved) {
+    const local = state.agents.find(agent => agent.id === payload.default && agent.kind === "local");
+    if (local && /^[a-z][a-z0-9-]{0,31}$/.test(local.id)) DEFAULT_AGENT = local.id;
+    localAgentResolved = true;
+  }
   return payload;
 }
 
