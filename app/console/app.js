@@ -16,6 +16,12 @@ const state = {
   agentGen: 0,         // generation guard: a reply from the previous agent loses
   agentError: "",      // why the selected agent could not be reached, if so
   seq: 0,
+  eventEpoch: "",
+  eventRecovery: true,
+  roomRead: 0,
+  historyRead: 0,
+  earlierRead: 0,
+  freshness: {room: 0, history: 0, roomError: "", historyError: ""},
   room: null,          // room id
   rooms: new Map(),    // id -> room summary
   detail: null,        // room state payload
@@ -95,6 +101,12 @@ const state = {
 
 /* A response only counts if it belongs to the room the person is still in. */
 function stale(seq, roomId) { return seq !== state.roomSeq || state.room !== roomId; }
+
+function viewFreshnessError() {
+  const f = state.freshness;
+  return f.roomError || f.historyError || (state.eventRecovery ? "Checking for missed updates" : "")
+    || (!f.room || (state.detail?.controllable && !f.history) ? "Waiting for a current view" : "");
+}
 
 const FOLLOW_PX = 48;
 const WORK_TYPES = new Set([
@@ -3752,6 +3764,8 @@ function activityState() {
             text: "Connection lost — UX46 cannot see this session right now"};
   }
   if (state.roomRefreshing) return {kind:"offline",live:false,text:"Checking for newer activity…"};
+  if (viewFreshnessError()) return {kind: "offline", live: false,
+    text: "Last known view — " + viewFreshnessError()};
   if (state.sending) return {kind: "sending", live: true, text: "Sending your message"};
 
   const waiting = state.approvals.filter((a) => a.room === state.room);
@@ -3828,6 +3842,16 @@ function renderActivity() {
   if (now.kind === "failed") {
     line.appendChild(el("button", {class: "act-more", type: "button", text: "Recovery",
       on: {click: () => { openRoomSettings(); $("#connDetails").scrollIntoView({block: "nearest"}); }}}));
+  }
+  if (state.freshness.historyError) {
+    line.appendChild(el("button", {class: "act-more", type: "button", text: "Read latest",
+      on: {click: async () => {
+        const seq = state.roomSeq, roomId = state.room;
+        await loadHistory();
+        if (stale(seq, roomId)) return;
+        if (!state.freshness.historyError) toTail();
+        await refreshRoomState();
+      }}}));
   }
   if (now.steps) {
     line.appendChild(el("span", {class: "act-count",
@@ -4370,6 +4394,7 @@ async function selectRoom(roomId, opts) {
   const seq = ++state.roomSeq;
   const cached = roomViews.get(roomId);
   state.room = roomId;
+  state.freshness = {room: 0, history: 0, roomError: "", historyError: ""};
   state.roomRefreshing = true;
   state.roomError = null; state.roomGone = false;
   state.items = []; state.ids = new Set(); state.cursor = null;
@@ -4398,9 +4423,12 @@ async function selectRoom(roomId, opts) {
     renderTabs(); renderCrumb(); renderTarget(); renderStream();
   }
   setSendState(cached ? "Checking for updates…" : "Opening…","ok");
+  const read = ++state.roomRead;
   try {
     const detail = await api("/api/room/" + encodeURI(roomId));
-    if (stale(seq,roomId)) return false;
+    if (stale(seq,roomId) || gen !== state.agentGen || read !== state.roomRead) return false;
+    state.freshness.room = Date.now();
+    state.freshness.roomError = "";
     state.detail = detail;
     state.rooms.set(detail.id,Object.assign(state.rooms.get(detail.id) || {},detail));
     // A background refresh must never replace text typed into the warm view.
@@ -4432,13 +4460,15 @@ async function selectRoom(roomId, opts) {
     if (opts && opts.connect) await maybeConnect(agent, roomId, seq, gen);
     return true;
   } catch(error) {
-    if (stale(seq,roomId)) return false;
+    if (stale(seq,roomId) || gen !== state.agentGen || read !== state.roomRead) return false;
     state.roomRefreshing=false;
+    state.freshness.roomError = "Conversation could not be checked";
     state.roomGone=error.status===404;
     if (cached && !state.roomGone) {
       state.detail={...state.detail,ownership:{state:"unknown",detected:false}};
       renderTarget();
       setSendState("Showing the saved view — connection could not be checked. Your draft is kept.","warn");
+      renderActivity(); renderTabs();
     } else {
       state.detail=null;
       state.roomError={message:error.message,gone:state.roomGone,room:roomId};
@@ -4470,31 +4500,51 @@ async function loadHistory(seq, roomId) {
   if (!detail || !detail.controllable) return;
   seq = seq === undefined ? state.roomSeq : seq;
   roomId = roomId || detail.id;
-  const payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc");
-  if (stale(seq, roomId)) return;
-  const ascending = payload.items.slice().reverse();
-  state.items = ascending;
-  state.tail = ascending;
-  state.ids = new Set(ascending.map((i) => i.id));
-  state.cursor = payload.next_cursor || null;
-  state.complete = !!payload.complete;
-  state.historySource = payload.source || "";
-  state.historyNote = payload.note || "";
-  state.historyUnavailable = payload.unavailable
-    ? {message: payload.message || "", code: payload.error_code || ""} : null;
-  state.approvals = (detail.approvals || []).map((a) => Object.assign({room: detail.id}, a));
-  renderStream();
-  renderActivity();
+  const gen = state.agentGen, read = ++state.historyRead;
+  try {
+    const payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc");
+    if (stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead) return;
+    if (payload.unavailable) {
+      state.historyUnavailable = {message: payload.message || "History unavailable", code: payload.error_code || ""};
+      throw new Error(state.historyUnavailable.message);
+    }
+    const ascending = payload.items.slice().reverse();
+    state.items = ascending;
+    state.tail = ascending;
+    state.ids = new Set(ascending.map((i) => i.id));
+    state.cursor = payload.next_cursor || null;
+    state.complete = !!payload.complete;
+    state.historySource = payload.source || "";
+    state.historyNote = payload.note || "";
+    state.historyUnavailable = null;
+    state.freshness.history = Date.now();
+    state.freshness.historyError = "";
+    renderStream();
+    renderActivity();
+  } catch (error) {
+    if (stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead) return;
+    state.freshness.historyError = "History could not be checked";
+    renderActivity();
+    renderStream();
+    return false;
+  }
 }
 
 async function loadEarlier() {
   const detail = state.detail;
   if (!detail || !state.cursor) return;
+  const roomId = detail.id, seq = state.roomSeq, gen = state.agentGen;
+  const cursor = state.cursor, read = ++state.earlierRead, historyRead = state.historyRead;
   const stream = $("#stream");
   state.following = false;
   const before = stream.scrollHeight;
-  const payload = await api("/api/room/" + encodeURI(detail.id)
-    + "/history?limit=40&direction=desc&cursor=" + encodeURIComponent(state.cursor));
+  const payload = await api("/api/room/" + encodeURI(roomId)
+    + "/history?limit=40&direction=desc&cursor=" + encodeURIComponent(cursor));
+  // Same room names on two agents are different conversations. A newer
+  // history read also invalidates this page's cursor and scroll adjustment.
+  if (stale(seq, roomId) || gen !== state.agentGen || read !== state.earlierRead
+      || historyRead !== state.historyRead || cursor !== state.cursor) return;
+  if (payload.unavailable) throw new Error(payload.message || "History unavailable");
   const older = payload.items.slice().reverse().filter((i) => !state.ids.has(i.id));
   for (const item of older) state.ids.add(item.id);
   state.items = older.concat(state.items);
@@ -4528,29 +4578,55 @@ function mergeTail(page) {
 
 async function refreshTail() {
   const detail = state.detail;
-  if (!detail || !detail.controllable) return;
-  const seq = state.roomSeq;
-  const roomId = detail.id;
+  if (!detail || !detail.controllable) return true;
+  const seq = state.roomSeq, roomId = detail.id, gen = state.agentGen;
+  const read = ++state.historyRead;
+  const obsolete = () => stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead;
   const stream = $("#stream");
-  const payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=25&direction=desc");
-  if (stale(seq, roomId)) return;
-  // Read intent and position AFTER the request: someone may have scrolled
-  // up while the network was busy.
-  const keep = stream.scrollTop;
-  const following = state.following && !state.sel && !state.anchor;
-  state.tail = payload.items.slice().reverse();
-  settleAccepted();
-  // Reading back sits on a page of its own; the activity line still updates,
-  // but the loaded history and the viewport are left exactly where they are.
-  if (state.anchor) { renderActivity(); return; }
-  const {added, changed} = mergeTail(state.tail);
-  if (!added && !changed) { renderActivity(); return; }
-  renderStream();
-  renderActivity();
-  if (following) { toTail(); followLayout(); }
-  else {
-    stream.scrollTop = keep;
-    if (added) { state.newCount += added; updateNewPill(); }
+  // Catch up to the previously observed tail, not merely the newest 25 items.
+  // Otherwise a suspended browser could silently splice over a missing interval.
+  const previous = (state.tail.length ? state.tail : state.items).at(-1)?.id;
+  let rows = [], cursor = null, payload;
+  try {
+    for (let page = 0; page < 20; page++) {
+      payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc"
+        + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
+      if (obsolete()) return false;
+      if (payload.unavailable) throw new Error(payload.message || "History unavailable");
+      rows.push(...payload.items);
+      if (!previous || rows.some(item => item.id === previous) || payload.complete) break;
+      if (!payload.next_cursor || cursor === payload.next_cursor || page === 19) {
+        throw new Error("History catch-up exceeded its bounded window");
+      }
+      cursor = payload.next_cursor;
+    }
+    const keep = stream.scrollTop;
+    const following = state.following && !state.sel && !state.anchor;
+    state.tail = rows.slice(0, 40).reverse();
+    state.freshness.history = Date.now();
+    state.freshness.historyError = "";
+    settleAccepted();
+    if (state.anchor) { renderActivity(); return true; }
+    const empty = !state.items.length;
+    const {added, changed} = mergeTail(rows.reverse());
+    if (empty) {
+      state.cursor = payload.next_cursor || null;
+      state.complete = !!payload.complete;
+    }
+    if (!added && !changed) { renderActivity(); return true; }
+    renderStream();
+    renderActivity();
+    if (following) { toTail(); followLayout(); }
+    else {
+      stream.scrollTop = keep;
+      if (added) { state.newCount += added; updateNewPill(); }
+    }
+    return true;
+  } catch (error) {
+    if (obsolete()) return false;
+    state.freshness.historyError = "History could not be checked";
+    renderActivity();
+    return false;
   }
 }
 
@@ -5322,25 +5398,30 @@ function flash(text) {
 }
 
 async function refreshRoomState() {
-  if (!state.room) return;
-  const seq = state.roomSeq;
-  const roomId = state.room;
+  if (!state.room || state.roomRefreshing) return false;
+  const seq = state.roomSeq, roomId = state.room, gen = state.agentGen;
+  const read = ++state.roomRead;
+  const obsolete = () => stale(seq, roomId) || gen !== state.agentGen || read !== state.roomRead;
   try {
     const detail = await api("/api/room/" + encodeURI(roomId));
-    if (stale(seq, roomId)) return;
+    if (obsolete()) return false;
     state.detail = detail;
+    state.freshness.room = Date.now();
+    state.freshness.roomError = "";
     state.approvals = (detail.approvals || []).map((a) => Object.assign({room: detail.id}, a));
-    if ((detail.native || {}).active_turn) state.accepted = null;   // the real turn took over
+    if ((detail.native || {}).active_turn) state.accepted = null;
     settleAccepted();
-    renderTarget();
-    renderCrumb();
-    reportDraftState();
-    renderActivity();
+    renderTarget(); renderCrumb(); reportDraftState(); renderActivity();
     renderGoalResumeControl();
-    // The open conversation is one of the rows in the desktop status panel,
-    // and this read is the freshest thing the browser has about it.
     if (state.ui.dock === "attention") renderAttentionPanel();
-  } catch (error) { /* leave the last known state on screen */ }
+    return true;
+  } catch (error) {
+    if (obsolete()) return false;
+    state.freshness.roomError = "Conversation could not be checked";
+    renderActivity(); renderTabs();
+    if (state.ui.dock === "attention") renderAttentionPanel();
+    return false;
+  }
 }
 
 /* Why taking this session did not work, kept on screen until it is acted on.
@@ -7456,9 +7537,8 @@ function roomStatusOf(tab) {
   if (tab.agent === agentId() && tab.room === state.room && state.detail) {
     // The console holds this one — but only while it is still connected. A
     // dropped connection makes what it holds a memory, not an observation.
-    const off = state.connKind === "off";
-    return {detail: state.detail, current: !off, reading: false,
-            error: off ? "the connection to this console dropped" : ""};
+    const error = state.connKind === "off" ? "the connection to this console dropped" : viewFreshnessError();
+    return {detail: state.detail, current: !error, reading: state.roomRefreshing, error};
   }
   const entry = roomStatusCache().get(tabKey(tab.agent, tab.room));
   if (!entry) return null;
@@ -7479,8 +7559,8 @@ async function loadRoomStatus(tab, gen) {
   // but never spend a request on it.
   if (tab.agent === agentId() && tab.room === state.room && state.detail) {
     entry.detail = state.detail;
-    entry.at = Date.now();
-    entry.error = "";
+    entry.at = state.freshness.room;
+    entry.error = viewFreshnessError();
     return;
   }
   if (entry.reading) return;
@@ -8714,19 +8794,31 @@ async function pollEvents() {
   for (;;) {
     const gen = state.agentGen;
     try {
-      const payload = await api("/api/events?after=" + state.seq + "&timeout=25");
+      const payload = await api("/api/events?after=" + state.seq + "&timeout=25"
+        + "&epoch=" + encodeURIComponent(state.eventEpoch));
       // A reply from the agent we just left must not advance this agent's
       // sequence or redraw its rooms.
       if (gen !== state.agentGen) continue;
+      const reconnect = state.connKind === "off";
+      const reset = payload.gap || (state.eventEpoch && payload.epoch !== state.eventEpoch)
+        || payload.seq < state.seq;
+      state.eventRecovery = state.eventRecovery || reconnect || reset;
       state.seq = payload.seq;
-      setConn("live", "live");
+      state.eventEpoch = payload.epoch || "";
+      setConn("reachable", "live");
+      // Older adapters cannot prove lossless event delivery. Reconcile their
+      // selected snapshot each poll instead of trusting an empty event batch.
+      const reconcile = state.eventRecovery || !payload.epoch || viewFreshnessError()
+        || Date.now() - state.freshness.room > 30000;
+      const roomSeq = state.roomSeq, roomId = state.room;
       let touched = false;
       let lifecycle = false;
       let approvalChanged = false;
       let queueChanged = false;
-      // One poll returns every event since the last one, so a burst of native
-      // events costs one history read and at most one room read.
+      // Each bounded page invalidates projections; the next poll immediately
+      // continues from its returned cursor when more events remain.
       for (const event of payload.events || []) {
+        if (gen !== state.agentGen || stale(roomSeq, roomId)) break;
         if (event.type === "native" && (event.room === state.room
             || (event.rooms || []).includes(state.room))) {
           if (event.terminal) {
@@ -8771,8 +8863,15 @@ async function pollEvents() {
       }
       // active_turn lives in the room state, so a turn opening or closing has
       // to be read there rather than guessed from the item stream.
-      if (lifecycle) await refreshRoomState();
-      if (touched) await refreshTail();
+      if (gen !== state.agentGen || stale(roomSeq, roomId)) continue;
+      const roomOK = lifecycle || reconcile ? await refreshRoomState() : true;
+      if (gen !== state.agentGen || stale(roomSeq, roomId)) continue;
+      const historyOK = touched || reconcile ? await refreshTail() : true;
+      if (gen !== state.agentGen || stale(roomSeq, roomId)) continue;
+      if (reconcile && roomOK && historyOK && !payload.more) {
+        state.eventRecovery = false;
+        renderActivity(); renderTabs();
+      }
       if (queueChanged) {
         await loadPending(state.room);
         redrawKeepingPlace();
@@ -8787,6 +8886,7 @@ async function pollEvents() {
       }
     } catch (error) {
       if (gen === state.agentGen) {
+        state.eventRecovery = true;
         setConn(isRemoteAgent() ? agentLabel() + " unavailable" : "offline", "off");
       }
       await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -8939,6 +9039,8 @@ function resetAgentState() {
   state.audio = new Map();
   state.ids = new Set();
   Object.assign(state, {
+    eventEpoch: "", eventRecovery: true,
+    freshness: {room: 0, history: 0, roomError: "", historyError: ""},
     room: null, detail: null, items: [], tail: [], cursor: null, complete: true,
     sel: null, anchor: null, searchHits: [], newCount: 0, openWork: {}, openGroups: {}, openTurns: {},
     accepted: null, outcome: null, conflict: null, historyUnavailable: null,
@@ -9020,6 +9122,8 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   if (gen !== state.agentGen) return;
   state.node = payload.node || "";
   state.seq = payload.seq || 0;
+  state.eventEpoch = "";
+  state.eventRecovery = true;
   const voice = payload.voice || {};
   let preferred = "";
   try { preferred = window.localStorage.getItem("atlas.voice") || ""; } catch (e) { preferred = ""; }

@@ -1033,34 +1033,7 @@ class Journal:
 # events
 # ---------------------------------------------------------------------------
 
-class Events:
-    def __init__(self):
-        self._cond = threading.Condition()
-        self._events: list[dict] = []
-        self._seq = 0
-
-    @property
-    def seq(self) -> int:
-        return self._seq
-
-    def publish(self, event: dict) -> None:
-        with self._cond:
-            self._seq += 1
-            self._events.append(dict(event, seq=self._seq, at=time.time()))
-            del self._events[:-EVENT_LIMIT]
-            self._cond.notify_all()
-
-    def since(self, after: int, timeout: float = 25.0, room: str = "") -> dict:
-        deadline = time.time() + timeout
-        with self._cond:
-            while True:
-                events = [e for e in self._events if e["seq"] > after]
-                if room:
-                    events = [e for e in events
-                              if e.get("room") in (room, None, "") or e.get("global")]
-                if events or time.time() >= deadline:
-                    return {"seq": self._seq, "events": events[-100:]}
-                self._cond.wait(timeout=max(0.1, deadline - time.time()))
+from ux46_events import EventLog as Events
 
 
 # ---------------------------------------------------------------------------
@@ -2785,7 +2758,7 @@ class RivetHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, service.events.since(
                 int(get("after", "0") or 0),
                 min(float(get("timeout", "25") or 25), 30.0),
-                get("room")))
+                get("room"), get("epoch")))
 
         if method == "GET" and path == "/api/attention":
             # Nothing here reads a checkpoint, so nothing here claims urgency.

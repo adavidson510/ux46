@@ -18,6 +18,20 @@ session ownership and input/output; they do not replace provider authentication.
 | Human workspace projections | [ux46_workspace_api.py](../tools/ux46_workspace_api.py) |
 | Optional remote agents | [atlas_remote.py](../tools/atlas_remote.py) |
 | Optional private access gateway | [ux46_access_gateway.py](../tools/ux46_access_gateway.py) |
+| Bounded event pages and restart detection | [ux46_events.py](../tools/ux46_events.py) |
+
+Event replies acknowledge only the returned page, with a continuation flag for
+another page. A process identity (`epoch`) and explicit gap flag tell the browser
+when it must reread state. Events invalidate a view; they are not a transcript or
+proof that a conversation is current. Older adapters without this contract get
+snapshot reconciliation on every poll. New adapters also get periodic snapshots,
+and failed reads retain the last-known content with a visible freshness notice.
+
+History and room reads belong to the selected agent, room and read generation.
+Late replies cannot replace a newer read or enter another conversation. History
+catch-up reads back to the last observed item, up to 20 pages of 40 items. If that
+bounded window cannot close the gap, the view remains explicitly stale. These
+reads do not reconnect workers, resend input, or overwrite a draft.
 
 The standalone launcher separates source from private configuration and state.
 The registry starts empty. Native metadata enriches explicitly filed sessions;

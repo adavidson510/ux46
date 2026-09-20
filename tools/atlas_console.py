@@ -183,41 +183,7 @@ class AuthBoundary:
 # event log (long-poll)
 # ---------------------------------------------------------------------------
 
-class EventLog:
-    def __init__(self, limit: int = EVENT_LIMIT):
-        self.limit = limit
-        self._events: list[dict] = []
-        self._seq = 0
-        self._cond = threading.Condition()
-
-    def publish(self, event: dict) -> int:
-        with self._cond:
-            self._seq += 1
-            event = dict(event, seq=self._seq, at=time.time())
-            self._events.append(event)
-            del self._events[: max(0, len(self._events) - self.limit)]
-            self._cond.notify_all()
-            return self._seq
-
-    @property
-    def seq(self) -> int:
-        with self._cond:
-            return self._seq
-
-    def since(self, after: int, timeout: float = 25.0, room: str = "") -> dict:
-        deadline = time.time() + timeout
-        with self._cond:
-            while True:
-                events = [e for e in self._events if e["seq"] > after]
-                if room:
-                    events = [
-                        e for e in events
-                        if (e.get("room") in (room, None, "")
-                            or room in (e.get("rooms") or []) or e.get("global"))
-                    ]
-                if events or time.time() >= deadline:
-                    return {"seq": self._seq, "events": events[-100:]}
-                self._cond.wait(timeout=max(0.1, deadline - time.time()))
+from ux46_events import EventLog
 
 
 # ---------------------------------------------------------------------------
@@ -1710,7 +1676,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             after = int(get("after", "0") or 0)
             room = get("room")
             timeout = min(float(get("timeout", "25") or 25), 30.0)
-            return self._json(HTTPStatus.OK, service.events.since(after, timeout, room))
+            return self._json(HTTPStatus.OK, service.events.since(after, timeout, room, get("epoch")))
 
         if method == "GET" and path == "/api/approvals":
             try:

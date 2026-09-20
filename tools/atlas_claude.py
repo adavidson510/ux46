@@ -187,37 +187,7 @@ class AdapterError(Exception):
 # the event log (long-poll), same shape the console already reads
 # ---------------------------------------------------------------------------
 
-class EventLog:
-    def __init__(self, limit: int = 500):
-        self.limit = limit
-        self._events: list[dict] = []
-        self._seq = 0
-        self._cond = threading.Condition()
-
-    def publish(self, event: dict) -> int:
-        with self._cond:
-            self._seq += 1
-            event = dict(event, seq=self._seq, at=time.time())
-            self._events.append(event)
-            del self._events[: max(0, len(self._events) - self.limit)]
-            self._cond.notify_all()
-            return self._seq
-
-    @property
-    def seq(self) -> int:
-        with self._cond:
-            return self._seq
-
-    def since(self, after: int, timeout: float = 25.0, room: str = "") -> dict:
-        deadline = time.time() + timeout
-        with self._cond:
-            while True:
-                found = [e for e in self._events if e["seq"] > after]
-                if room:
-                    found = [e for e in found if e.get("room") in (room, None, "")]
-                if found or time.time() >= deadline:
-                    return {"seq": self._seq, "events": found[-100:]}
-                self._cond.wait(timeout=max(0.1, deadline - time.time()))
+from ux46_events import EventLog
 
 
 # ---------------------------------------------------------------------------
@@ -1918,7 +1888,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/events":
             return self._json(HTTPStatus.OK, service.events.since(
                 int(get("after", "0") or 0),
-                min(float(get("timeout", "25") or 25), 30.0), get("room")))
+                min(float(get("timeout", "25") or 25), 30.0), get("room"), get("epoch")))
         if method == "GET" and path == "/api/attention":
             return self._json(HTTPStatus.OK, service.attention())
         if method == "GET" and path == "/api/approvals":

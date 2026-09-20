@@ -48,6 +48,20 @@ python3 scripts/test.py
 python3 scripts/check_public.py
 ```
 
+For conversation loading and connection state, run the browser journeys too:
+
+```sh
+npm ci --ignore-scripts
+npx playwright install chromium
+npm run test:ui
+```
+
+These need Node.js 22 or newer. They open the shipped interface in a disposable
+Chromium browser with made-up conversations and delayed replies. No provider
+login, real conversation, or model call is involved. The checks cover moving
+between rooms and agents, catching up after a restart, and keeping unsent words.
+Browser downloads and test dependencies stay outside the installed UX46 runtime.
+
 The publication guard checks **staged files** in a Git checkout: the files
 selected for the next commit. Review and stage your intended changes before
 running it. In a downloaded source copy without Git history, it checks the source

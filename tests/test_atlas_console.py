@@ -344,7 +344,9 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(payload["total"], 1)
 
     def test_checkpoint_is_reported_not_verified(self):
-        status, payload = self.h.call("GET", "/api/attention")
+        # This example checks attribution, not whether its fixed date has aged.
+        with patch.object(console.discovery, "checkpoint_age_days", return_value=1):
+            status, payload = self.h.call("GET", "/api/attention")
         self.assertEqual(status, 200)
         needs = [room["id"] for room in payload["needs_person"]]
         self.assertIn("fixture/console-work", needs)

@@ -2845,7 +2845,7 @@ class HermesHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, service.events.since(
                 int(get("after", "0") or 0),
                 min(float(get("timeout", "25") or 25), 30.0),
-                get("room")))
+                get("room"), get("epoch")))
 
         if method == "GET" and path == "/api/attention":
             return self._json(HTTPStatus.OK, service.attention())
