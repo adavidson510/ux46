@@ -471,6 +471,7 @@
     const settings=data.settings,b=data.briefs[0];
     panel.replaceChildren(h('div',{class:'ws-actions'},[h('h2',{text:'Your email brief'}),btn('Prepare now',()=>action({action:'brief'},panel))]));
     panel.append(h('p',{class:'ws-sub',text:settings.enabled?`Ready by ${String(settings.hour).padStart(2,'0')}:${String(settings.minute).padStart(2,'0')} · ${settings.timezone}. Prepares ten minutes early; catches up after this computer wakes.`:'Morning email brief is paused.'}));
+    if(settings.enabled&&(!data.scheduler?.at||Date.now()/1000-data.scheduler.at>900))panel.append(h('p',{class:'ws-warning',text:'The background scheduler has not checked in recently. Prepare now works; check the scheduled job before relying on tomorrow’s brief.'}));
     if(!data.configured)panel.append(h('p',{class:'ws-warning',text:'Connect your mail accounts and native synthesis before preparing a brief.'}));
     if(data.job?.state==='running')panel.append(h('p',{role:'status',text:'Preparing email… You can keep working.'}));
     if(data.job?.state==='failed'||data.job?.state==='unknown')panel.append(h('p',{class:'ws-warning',text:data.job.message}));

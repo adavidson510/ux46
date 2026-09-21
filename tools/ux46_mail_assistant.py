@@ -59,7 +59,7 @@ class MailAssistant:
             job={**job,'state':'unknown','message':'Preparation was interrupted. No message was sent. Start a new preparation when ready.'}
         return {'configured':bool(self.config().get('accounts')),'settings':self.settings(),'preferences':self.preferences(),
           'briefs':briefs,'drafts':sorted(drafts,key=lambda x:x['updated'],reverse=True)[:30],'job':job,
-          'daily_attempt':self.get('mail_assistant','daily-attempt'),'unread':sum(not b.get('seen') for b in briefs),'filing_last':self.get('mail_assistant','filing-last'),'filing_policy':self.get('mail_assistant','filing-policy') or {'enabled':False,'archive_routine':False,'mark_read':False},'delivery':'Email view in UX46; no email forwarding configured'}
+          'scheduler':self.get('mail_assistant','last-tick'),'daily_attempt':self.get('mail_assistant','daily-attempt'),'unread':sum(not b.get('seen') for b in briefs),'filing_last':self.get('mail_assistant','filing-last'),'filing_policy':self.get('mail_assistant','filing-policy') or {'enabled':False,'archive_routine':False,'mark_read':False},'delivery':'Email view in UX46; no email forwarding configured'}
 
     def action(self,args):
         action=args['action']
@@ -89,7 +89,12 @@ class MailAssistant:
         if action=='seen':
             b=self.get('mail_briefs',args['id'])
             if not b:raise ValueError('Missing brief')
-            b['seen']=True;self.put('mail_briefs',b['id'],b);return b
+            with self.mail.db() as db:
+                for ident,raw in db.execute('SELECT id,body FROM mail_briefs').fetchall():
+                    old=json.loads(raw)
+                    if old['at']<=b['at']:
+                        old['seen']=True;db.execute('UPDATE mail_briefs SET body=? WHERE id=?',(encoded(old).decode(),ident))
+            b['seen']=True;return b
         if action=='save':return self.save_draft(args)
         if action=='send':return self.send(args)
         if action in ('brief','draft'):
@@ -240,6 +245,7 @@ class MailAssistant:
         return d
 
     def tick(self):
+        self.put('mail_assistant','last-tick',{'at':time.time()})
         settings=self.settings()
         if not settings['enabled']:return {'state':'paused'}
         now=datetime.now(ZoneInfo(settings['timezone']));day=now.date().isoformat()
