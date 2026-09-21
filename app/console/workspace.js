@@ -114,7 +114,7 @@
     const subs=n("details",{class:"mail-subscriptions"},[n("summary",{text:"Subscriptions · "+(data.mix.subscriptions||0)+" messages"}),n("p",{class:"ws-sub",text:"Subscription and billing messages by sender. Active plans, renewals and spending are not yet verified."})]);
     for(const s of data.subscriptions||[])subs.appendChild(n("div",{class:"subscription-row"},[n("span",{text:s.sender_domain}),n("strong",{text:String(s.messages)})]));
     subs.appendChild(button("Show subscription mail",()=>{mail.category="subscriptions";mail.lane="all";mail.selected=null;void loadEmail();}));host.appendChild(subs);
-    host.appendChild(n("footer",{class:"ws-foot",text:data.checker+" · Categorization is local; no email is sent, archived or marked read."}));
+    host.appendChild(n("footer",{class:"ws-foot",text:data.checker+" · Mailbox filing and Send have separate controls and receipts."}));
     if(!data.coverage_complete)host.appendChild(n("p",{class:"ws-warning",text:"Some accounts are still syncing or need a connection check. Counts cover indexed mail only."}));
   }
   function renderMailDetail(host,item) {
@@ -123,6 +123,7 @@
       n("p",{class:"mail-why",text:item.reason}),n("p",{class:"mail-snippet",text:item.snippet||"No preview text available. Open the original in Gmail."}));
     for(const warning of item.warnings)host.appendChild(n("p",{class:"ws-warning",text:warning}));
     host.appendChild(n("a",{class:"ws-primary",href:item.gmail_url,target:"_blank",rel:"noopener noreferrer",text:"Open in Gmail ↗"}));
+    host.appendChild(n("div",{class:"ws-actions"},[button("Mark handled in Gmail",()=>window.__mailAssistant.file(item,host)),button("Read full thread",()=>window.__mailAssistant.read(item.account,item.thread,host)),button("Prepare reply",()=>window.__mailAssistant.draft(item.account,item.thread,host))]));
     const note=n("p",{class:"ws-sub",role:"status"});
     const act=async action=>{try{await call("/api/email/attention",{account:item.account,thread:item.thread,revision:item.revision,
       base_version:item.ack_revision,action});await loadEmail();}catch(e){note.textContent=e.message;}};
@@ -315,7 +316,7 @@
     const key=crypto.randomUUID();
     f.addEventListener("submit",async e=>{e.preventDefault();try{await call("/api/constellation/feedback",{key,id:r.id,revision:r.revision,use_id:key,
       verdict:verdict.value,reason:reason.value,evidence:evidence.value,suggestion:suggestion.value});note.textContent="Saved. Applied outcomes inform future ranking and review; interest stays separate.";f.querySelector('button').disabled=true;}catch(ex){note.textContent=ex.message;}});
-    feedback.appendChild(f);card.appendChild(feedback);return card;
+    feedback.appendChild(f);card.appendChild(feedback);if(window.__work)window.__work.lesson(r,card);return card;
   }
   async function loadSchedule() {
     const host=$w('scheduleBody');
@@ -434,4 +435,67 @@
     void scheduleBadge();
     if(!$w("viewEmail").hidden&&!mail.rules&&!document.activeElement?.matches('input,select,textarea'))void loadEmail(true);
   },60000);
+})();
+
+/* Email preparation belongs to Email, independently of Signals and learning. */
+(() => {
+  const h=(tag,attrs={},children=[])=>el(tag,attrs,children);
+  const btn=(label,action)=>h('button',{type:'button',class:'ws-button',text:label,on:{click:action}});
+  let data=null,loading=false,editor=null;
+  async function call(path,body){const r=await fetch('/api/email/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-Atlas-CSRF':window.__atlas?.state.csrf||''}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.message||'Email action failed');return d;}
+  const message=(host,e)=>{let p=host.querySelector('.mail-assistant-status');if(!p){p=h('p',{class:'mail-assistant-status',role:'status'});host.append(p);}p.textContent=e.message||String(e);};
+  async function action(body,host){try{const d=await call('assistant-action',body);await refresh();if(body.action==='file'||body.action==='undo-filing')message(host,d.state==='applied'?'Filed in Gmail. Undo is available under Gmail filing.':d.state);return d;}catch(e){message(host,e);}}
+  const input=(label,value,area=false)=>h(area?'textarea':'input',{'aria-label':label,value:area?undefined:value,rows:area?9:undefined,text:area?value:undefined});
+  const field=(label,node)=>h('label',{class:'ws-field'},[h('span',{text:label}),node]);
+  function openDraft(d){
+    if(editor?.isConnected){editor.scrollIntoView();return;}
+    const modal=h('dialog',{class:'mail-compose','aria-label':'Review email reply'}),status=h('p',{role:'status'});
+    editor=modal;
+    const to=input('To',d.to),cc=input('Cc',d.cc),subject=input('Subject',d.subject),body=input('Reply',d.body,true);
+    let saved=d;const frozen=['sending','sent','unknown'].includes(d.state);
+    for(const x of [to,cc,subject,body])x.disabled=frozen;
+    const close=btn('Close',()=>{if(!frozen&&[to.value!==saved.to,cc.value!==saved.cc,subject.value!==saved.subject,body.value!==saved.body].some(Boolean)&&!confirm('Close without saving your latest edits?'))return;modal.close();modal.remove();editor=null;});
+    modal.addEventListener('cancel',e=>{e.preventDefault();close.click();});
+    const send=btn('Send this reply',async()=>{send.disabled=true;try{saved=await call('assistant-action',{action:'send',id:saved.id,revision:saved.revision,review_hash:saved.review_hash});status.textContent=saved.state==='sent'?'Sent from '+saved.from:saved.state==='unknown'||saved.state==='sending'?'Send outcome is uncertain. Check Sent in Gmail; do not resend.':saved.error||saved.state;for(const x of [to,cc,subject,body])x.disabled=['sending','sent','unknown'].includes(saved.state);save.disabled=xFrozen();await refresh();}catch(e){status.textContent=e.message;send.disabled=false;}});
+    const xFrozen=()=>['sending','sent','unknown'].includes(saved.state);
+    send.disabled=true;
+    const save=btn('Save and review',async()=>{try{saved=await call('assistant-action',{action:'save',id:saved.id,base_revision:saved.revision,to:to.value,cc:cc.value,subject:subject.value,body:body.value});status.textContent='Saved. Check the account, recipients and message above, then Send.';send.disabled=false;await refresh();}catch(e){status.textContent=e.message;}});save.disabled=frozen;
+    for(const x of [to,cc,subject,body])x.addEventListener('input',()=>{send.disabled=true;status.textContent='Edits need saving before Send.';});
+    modal.append(h('h2',{text:'Review reply'}),h('p',{text:'From: '+d.from}),field('To',to),field('Cc',cc),field('Subject',subject),field('Reply',body),h('p',{class:'ws-sub',text:d.note||''}),h('p',{class:'ws-sub',text:'Outgoing attachments: none. Incoming attachments '+(d.incoming_attachments.length?'not read: '+d.incoming_attachments.join(', '):'none.')}),h('p',{text:'Status: '+d.state}),status,h('div',{class:'ws-actions'},[save,send,close]));
+    document.body.append(modal);modal.showModal();
+  }
+  function draw(){
+    const host=document.getElementById('emailBody');if(!host||!data||document.getElementById('viewEmail')?.hidden)return;
+    let panel=host.querySelector('#emailAssistant');if(!panel){panel=h('section',{id:'emailAssistant',class:'email-brief'});const head=host.querySelector('.ws-header');if(head)head.after(panel);else host.prepend(panel);}
+    if(panel.contains(document.activeElement))return;
+    const settings=data.settings,b=data.briefs[0];
+    panel.replaceChildren(h('div',{class:'ws-actions'},[h('h2',{text:'Your email brief'}),btn('Prepare now',()=>action({action:'brief'},panel))]));
+    panel.append(h('p',{class:'ws-sub',text:settings.enabled?`Ready by ${String(settings.hour).padStart(2,'0')}:${String(settings.minute).padStart(2,'0')} · ${settings.timezone}. Prepares ten minutes early; catches up after this computer wakes.`:'Morning email brief is paused.'}));
+    if(!data.configured)panel.append(h('p',{class:'ws-warning',text:'Connect your mail accounts and native synthesis before preparing a brief.'}));
+    if(data.job?.state==='running')panel.append(h('p',{role:'status',text:'Preparing email… You can keep working.'}));
+    if(data.job?.state==='failed'||data.job?.state==='unknown')panel.append(h('p',{class:'ws-warning',text:data.job.message}));
+    if(data.daily_attempt?.state==='failed')panel.append(h('p',{class:'ws-warning',text:'Scheduled preparation failed. Your previous brief is below; Prepare now retries explicitly.'}));
+    if(b){
+      panel.append(h('p',{class:'ws-sub',text:'Prepared '+new Date(b.at*1000).toLocaleString()}),h('p',{text:b.summary}));
+      for(const item of b.items){const row=h('article',{class:'brief-item'},[h('strong',{text:item.subject}),h('p',{text:item.summary}),h('a',{href:item.gmail_url,target:'_blank',rel:'noopener noreferrer',text:'Open original in Gmail'})]);
+        const d=data.drafts.find(d=>d.id===item.draft_id);if(d)row.append(btn(d.state==='sent'?'View sent reply':'Review prepared reply',()=>openDraft(d)));panel.append(row);}
+      panel.append(h('p',{class:'ws-sub',text:b.coverage+(b.coverage_complete?'':' Some accounts have incomplete or stale coverage.')}));
+      if(!b.seen)panel.append(btn('Mark brief read',()=>action({action:'seen',id:b.id},panel)));
+    }else panel.append(h('p',{text:'No email brief has been prepared yet.'}));
+    const details=h('details',{},[h('summary',{text:'Email schedule and drafting preferences'})]);
+    const hour=input('Ready by',`${String(settings.hour).padStart(2,'0')}:${String(settings.minute).padStart(2,'0')}`);hour.type='time';
+    const zone=input('Time zone',settings.timezone),pref=input('Drafting preferences',data.preferences.text,true);
+    details.append(field('Ready by',hour),field('Time zone',zone),btn(settings.enabled?'Pause morning brief':'Enable morning brief',()=>action({action:'settings',base_revision:settings.revision,enabled:!settings.enabled,hour:Number(hour.value.split(':')[0]),minute:Number(hour.value.split(':')[1]),timezone:zone.value},details)),btn('Save schedule',()=>action({action:'settings',base_revision:settings.revision,enabled:settings.enabled,hour:Number(hour.value.split(':')[0]),minute:Number(hour.value.split(':')[1]),timezone:zone.value},details)),field('Preferences for future drafts',pref),btn('Save preferences',()=>action({action:'preferences',base_revision:data.preferences.revision,text:pref.value},details)),h('p',{class:'ws-sub',text:'Preferences guide future suggestions. Your edits are preserved; no draft is sent automatically.'}));panel.append(details);
+    const filing=h('details',{},[h('summary',{text:'Gmail filing and undo'}),h('p',{class:'ws-sub',text:'Categories become Gmail labels. Mail needing your decision or reply stays in the inbox. Routine auto-filing covers newsletters and receipts without attention flags; security warnings stay visible.'})]);
+    const policy=data.filing_policy;
+    const enabled=h('input',{type:'checkbox',checked:policy.enabled}),archive=h('input',{type:'checkbox',checked:policy.archive_routine}),read=h('input',{type:'checkbox',checked:policy.mark_read});
+    enabled.checked=policy.enabled;archive.checked=policy.archive_routine;read.checked=policy.mark_read;
+    filing.append(field('Apply category labels in Gmail',enabled),field('Archive routine mail without action needed',archive),field('Mark archived routine mail read',read),btn('Save filing policy',()=>action({action:'filing-policy',enabled:enabled.checked,archive_routine:archive.checked,mark_read:read.checked},filing)),btn('Recent mailbox changes',async()=>{try{const result=await call('assistant-action',{action:'filing-history'});let history=filing.querySelector('.filing-history');if(!history){history=h('div',{class:'filing-history'});filing.append(history);}history.replaceChildren();for(const r of result.items){const row=h('p',{text:r.category+' · '+r.state+' · '+new Date(r.at*1000).toLocaleString()});if(r.state==='applied')row.append(btn('Undo',()=>action({action:'undo-filing',id:r.id},filing)));history.append(row);}}catch(e){message(filing,e);}}));panel.append(filing);
+    const drafts=h('details',{},[h('summary',{text:'Saved replies · '+data.drafts.length})]);
+    for(const d of data.drafts)drafts.append(btn(d.subject+' · '+d.state,()=>openDraft(d)));panel.append(drafts);
+  }
+  async function refresh(){if(loading||window.__ux46modules?.email===false)return;loading=true;try{data=await call('assistant');draw();let notice=document.getElementById('emailBriefNotice');if(!notice){notice=btn('',()=>{window.__atlas.showView('email');draw();});notice.id='emailBriefNotice';notice.classList.add('email-brief-notice');document.body.append(notice);}notice.hidden=!data.unread;notice.textContent='Your email brief is ready · Open Email';}catch{}finally{loading=false;}}
+  window.__mailAssistant={file:async(item,host)=>action({action:'file',account:item.account,thread:item.thread,category:item.category,handled:true,mark_read:true},host),draft:async(account,thread,host)=>action({action:'draft',account,thread},host),read:async(account,thread,host)=>{try{const data=await call('thread',{account,thread});const details=h('details',{open:true},[h('summary',{text:'Full thread'+(data.complete?'':' · incomplete')})]);for(const m of data.messages)details.append(h('p',{text:m.from+' · '+m.date}),h('pre',{class:'mail-thread-text',text:m.text}),h('p',{class:'ws-sub',text:m.attachments.length?'Attachments not read: '+m.attachments.join(', '):''}));host.append(details);}catch(e){message(host,e);}},refresh};
+  const host=document.getElementById('emailBody');if(host)new MutationObserver(()=>{if(!host.querySelector('#emailAssistant'))draw();}).observe(host,{childList:true});
+  void refresh();setInterval(()=>{if(document.visibilityState==='visible')void refresh();},10000);
 })();

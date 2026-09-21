@@ -108,7 +108,7 @@ codebase before changing one thing.
 | **Session Vault** | Keep a project's useful context with a pointer to its native conversation | A fresh registry; no sweep of old chats |
 | **Constellation** | Find and reuse sourced lessons without loading the whole history | An empty local store |
 | **Signals / Tell** | Connect to a separate Tell messaging service | Optional; service not bundled |
-| **Email** | Bring configured mail into a workspace view | Off; needs account/OAuth setup |
+| **Email** | Separate morning brief, reviewed replies and reversible Gmail filing | Off; [account/OAuth and scheduler setup](docs/email.md) |
 | **Scheduled & Usage** | See configured tasks and collected usage | Collectors need configuration |
 
 Remote access, more machines, and local voice are further setup projects. They

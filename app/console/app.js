@@ -4885,6 +4885,7 @@ function settleAccepted() {
 /* The destination and its connection state belong to the session heading;
    the composer keeps only the field and what it can do with it. */
 function renderTarget() {
+  window.dispatchEvent(new Event("ux46-room"));
   const detail = state.detail;
   const own = $("#ownState");
   const send = $("#btnSend");

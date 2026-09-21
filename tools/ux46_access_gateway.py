@@ -660,6 +660,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                '/modules.js':('modules.js','text/javascript; charset=utf-8'),
                '/styles.css':('styles.css','text/css; charset=utf-8'),
                '/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
+        '/work.js':('work.js','text/javascript; charset=utf-8'),
                '/tell.js':('tell.js','text/javascript; charset=utf-8'),
                '/tell.css':('tell.css','text/css; charset=utf-8'),
                '/workspace.css':('workspace.css','text/css; charset=utf-8')}

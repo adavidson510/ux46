@@ -1407,13 +1407,22 @@ def command_checkpoint(
         },
         "record_path": str(record.path.resolve()),
     }
+    # An optional owner-configured source packet, inside this existing turn.
+    # Unchanged evidence is suppressed; a failed reader cannot block a checkpoint.
+    try:
+        from ux46_work_checkpoint import packet
+        pending = packet(record.identity, reporter)
+    except Exception:
+        pending = None
+    if pending:
+        result['room_review'] = pending
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print(
-            f"Checkpointed {record.identity}: {args.state} / {args.need}"
-        )
+        print(f"Checkpointed {record.identity}: {args.state} / {args.need}")
         print(record.path.resolve())
+        if pending:
+            print("Changed suggestions for this room: " + json.dumps(pending, ensure_ascii=False))
     return 0
 
 

@@ -19,6 +19,7 @@ from typing import Any
 
 
 SKILLS: dict[str, dict[str, Any]] = {
+    "ux46-work": {"description": "Assess room suggestions, test ideas and publish current results with evidence.", "source": "skills/ux46-work", "files": ("SKILL.md",)},
     "session-vault": {"description": "Portable project memory and native session pointers.",
         "source": "skills/session-vault", "files": ("SKILL.md",)},
     "constellation": {

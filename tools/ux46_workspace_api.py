@@ -2,6 +2,7 @@
 import json
 import secrets
 import sqlite3
+import time
 from http.client import HTTPConnection
 from urllib.parse import urlsplit, parse_qs
 from constellation_store import Store, Principal, Conflict, Unavailable
@@ -28,7 +29,12 @@ class WorkspaceAPI(BoardAPI):
         self.modules = modules if modules is not None else {'constellation': True, 'email': True}
         self.constellation=None if constellation_config or not self.modules.get('constellation') else Store(Path(directory)/'constellation.sqlite3')
         self.email=EmailStore(Path(directory)/'email.sqlite3') if self.modules.get('email') else None
+        from ux46_work import WorkStore
+        self.work_refresh=0
+        self.work=WorkStore(Path(directory)/'work.sqlite3')
         self.schedule=ScheduleStore(directory)
+        from ux46_mail_assistant import MailAssistant
+        self.mail_assistant=MailAssistant(directory) if self.email else None
         from ux46_devices import DeviceStore
         self.devices=DeviceStore(Path(directory)/'devices.sqlite3')
         from ux46_agent_actions import RefreshJobs
@@ -61,8 +67,29 @@ class WorkspaceAPI(BoardAPI):
             if not self.usage_report_path.exists():return {'responses':[], 'coverage':'Usage collection has not run yet.'}
             if self.usage_report_path.stat().st_size>8*1024*1024:raise ValueError('Usage report is too large')
             return json.loads(self.usage_report_path.read_text())
+        if path=='/api/work/view':
+            if time.monotonic()-self.work_refresh>60:
+                self.work_refresh=time.monotonic()
+                self.work.refresh_sources(lambda ident:self.dispatch('/api/constellation/get',{'id':ident}))
+            return self.work.view(**{k:args[k] for k in ('agent','room','lane') if k in args})
+        if path=='/api/work/action':
+            result=self.work.action(args)
+            if args.get('action')=='outcome':
+                source=self.work.get('work_sources',result['source'])
+                if source and source['kind']=='constellation' and source.get('lesson_id'):
+                    payload={'key':'experiment-'+result['id']+'-'+str(result['version']),'id':source['lesson_id'],
+                        'revision':int(result['source_revision']),'use_id':'experiment-'+result['id'],'base_revision':result.get('learning_feedback_revision',0),
+                        'verdict':result['outcome'],'reason':result['reason'][:600],'evidence':result['evidence'][:600]}
+                    try:
+                        receipt=self.dispatch('/api/constellation/feedback',payload)
+                        result=self.work.mutate('work_experiments',result['id'],result['version'],lambda old:{**old,'learning_feedback':'recorded','learning_feedback_revision':receipt['revision']})
+                    except (ValueError,OSError,PermissionError):result['learning_feedback']='pending; outcome saved locally'
+            return result
         if path=='/api/schedule/view':return self.schedule.view()
         if path=='/api/schedule/action':return self.schedule.action(args)
+        if path=='/api/email/assistant':return self.mail_assistant.status()
+        if path=='/api/email/assistant-action':return self.mail_assistant.action(args)
+        if path=='/api/email/thread':return self.mail_assistant.provider(args['account']).thread(args['thread'])
         if path=='/api/email/view':return self.email.view(**{k:args[k] for k in ('account','category','lane','project') if k in args})
         if path=='/api/email/status':
             view=self.email.view()
@@ -73,10 +100,10 @@ class WorkspaceAPI(BoardAPI):
 
     def handle(self,handler):
         path=urlsplit(handler.path).path
-        if not path.startswith(('/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/')):return False
+        if not path.startswith(('/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/','/api/work/')):return False
         try:
-            allowed_get={'/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
-                         '/api/constellation/changes','/api/email/view','/api/email/status'}
+            allowed_get={'/api/work/view','/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
+                         '/api/constellation/changes','/api/email/view','/api/email/status','/api/email/assistant'}
             if handler.command in ('GET','HEAD'):
                 if path not in allowed_get:raise ValueError('Use POST for this operation')
                 args={k:v[-1] for k,v in parse_qs(urlsplit(handler.path).query).items()}
