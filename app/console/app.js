@@ -7162,6 +7162,7 @@ function invalidateRoomPages() {
 /* --------------------------------------------------------------- the board */
 async function renderBoard() {
   const host = $("#ccBody");
+  if (!host) return; // Command Center is retired; Attention remains the workspace view.
   let payload;
   try { payload = await api("/api/attention"); } catch (error) {
     host.replaceChildren(el("p", {class: "empty", text: "Cannot read attention: " + error.message}));
@@ -7330,6 +7331,7 @@ function reportedRow(room) {
 
 function updateNeedsCount() {
   const badge = $("#needsCount");
+  if (!badge) return;
   const approvals = (state.attention && state.attention.approvals ? state.attention.approvals.length
     : state.approvals.length);
   badge.textContent = String(approvals);
@@ -7689,10 +7691,9 @@ function attentionSorted(rows) {
 /* ------------------------------------------- the status of this desktop
    This panel is the state of every conversation open on this desktop, in the
    order the strip has them, and nothing else. Work that is not open here —
-   an old project, a checkpoint somebody wrote three days ago — belongs in the
-   command center, which is one button away at the bottom of the panel. A
-   register that lists work you are not doing is a register you learn to
-   ignore.
+   an old project, a checkpoint somebody wrote three days ago — remains
+   available through project navigation. This register stays focused on the
+   conversations open here.
 
    Each row's state is read live, from that tab's own agent, over exactly one
    read-only route: GET /api/room/<room>, addressed through the tab's agent
@@ -8337,9 +8338,9 @@ function setAttentionOrder(order) {
 
 /* ------------------------------------------------------------- views/shell */
 function showView(which) {
+  if (which === "board") which = "console"; // Retired navigation targets return to the conversation.
   $("#app").dataset.workspaceView = ["email", "constellation", "schedule", "usage"].includes(which) ? which : "";
   $("#viewConsole").hidden = which !== "console";
-  $("#viewBoard").hidden = which !== "board";
   $("#viewTell").hidden = which !== "tell";
   for (const [kind,name] of [["schedule","Schedule"],["usage","Usage"]]) {
     $("#view"+name).hidden = which !== kind;
@@ -8350,14 +8351,12 @@ function showView(which) {
   $("#btnEmail").setAttribute("aria-pressed", String(which === "email"));
   $("#btnConstellation").setAttribute("aria-pressed", String(which === "constellation"));
   if (["email", "constellation", "schedule", "usage"].includes(which) && window.__workspace) window.__workspace.open(which);
-  $("#btnBoard").setAttribute("aria-pressed", String(which === "board"));
   $("#btnConsole").setAttribute("aria-pressed", String(which === "console"));
   $("#btnTell").setAttribute("aria-pressed", String(which === "tell"));
   for (const id of ["#btnFold", "#btnEarlier", "#btnFocus", "#btnMore"]) {
     const node = $(id);
     if (node) node.hidden = which !== "console";
   }
-  if (which === "board") renderBoard();
   if (which === "tell" && window.__tell) window.__tell.open();
 }
 
@@ -9175,8 +9174,7 @@ async function pollEvents() {
       }
       if (approvalChanged) {
         await refreshRoomState();
-        if (!$("#viewBoard").hidden) await renderBoard();
-        else { await renderBoardCountOnly(); renderStream(); }
+        await renderBoardCountOnly(); renderStream();
         renderTabs();          // the orange dot follows live requests only
         if (state.ui.dock === "attention") loadAttention();
       }
@@ -10072,15 +10070,11 @@ $("#btnEarlier").addEventListener("click", loadEarlier);
 $("#btnFocus").addEventListener("click", () => toggleFocus());
 $("#btnDetails").addEventListener("click", (event) => openPanel("details", event.currentTarget));
 
-/* left drawer: navigation, projects and the command center */
+/* left drawer: navigation and projects */
 for (const [id,view] of [["btnEmail","email"],["btnConstellation","constellation"],["btnSchedule","schedule"],["btnUsage","usage"]]) {
   $("#"+id).addEventListener("click", () => { showView(view); dismissOverlay(); });
 }
 $("#btnConsole").addEventListener("click", () => { showView("console"); dismissOverlay(); });
-$("#btnBoard").addEventListener("click", () => {
-  showView($("#viewBoard").hidden ? "board" : "console");
-  dismissOverlay();
-});
 $("#btnTell").addEventListener("click", () => {
   showView($("#viewTell").hidden ? "tell" : "console");
   dismissOverlay();
@@ -10187,11 +10181,6 @@ $("#btnAttention").addEventListener("click", (event) => {
 });
 $("#attnSort").addEventListener("click", () => {
   setAttentionOrder(state.attn.order === "urgency" ? "project" : "urgency");
-});
-$("#attnCommandCenter").addEventListener("click", () => {
-  // The legacy command center is still the full record; this is the way in.
-  showView("board");
-  dismissOverlay();
 });
 for (const tab of document.querySelectorAll(".dock-tab")) {
   tab.addEventListener("click", () => openPanel(tab.dataset.panel, tab));

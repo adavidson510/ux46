@@ -128,11 +128,6 @@
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-console" /></svg>
         <span class="lbl">Console</span>
       </button>
-      <button class="navbtn" id="btnBoard" type="button" aria-pressed="false" title="Command center">
-        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-board" /></svg>
-        <span class="lbl">Command center</span>
-        <span class="count" id="needsCount" hidden>0</span>
-      </button>
       <button class="navbtn" id="btnTell" type="button" aria-pressed="false" title="Signals">
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-tell" /></svg>
         <span class="lbl">Signals</span>
@@ -333,10 +328,6 @@
         </form>
       </section>
 
-      <section class="view" id="viewBoard" hidden aria-label="Command center">
-        <div class="cc" id="ccBody"></div>
-      </section>
-
       <section class="view workspace-view" id="viewSchedule" hidden aria-label="Scheduled tasks"><div class="workspace-surface" id="scheduleBody"></div></section>
       <section class="view workspace-view" id="viewUsage" hidden aria-label="Project usage"><div class="workspace-surface" id="usageBody"></div></section>
       <section class="view workspace-view" id="viewEmail" hidden aria-label="Email"><div class="workspace-surface" id="emailBody"></div></section>
@@ -390,12 +381,6 @@
           </button>
         </div>
         <div class="panel-list attn-list" id="attnList"></div>
-        <div class="panel-acts">
-          <button class="attn-open-cc" id="attnCommandCenter" type="button">
-            <span>Open command center</span>
-            <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-arrow" /></svg>
-          </button>
-        </div>
       </section>
 
       <section class="panel" id="panelNav" hidden>
