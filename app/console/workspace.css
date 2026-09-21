@@ -47,3 +47,7 @@
 .workspace-return{position:sticky;top:0;z-index:5;padding:12px clamp(18px,4vw,52px);background:var(--ink-050);border-bottom:1px solid var(--line);}
 .workspace-return .ws-button{min-height:44px;font-size:14px;}
 body:has(#viewEmail:not([hidden])) #emailBriefNotice{display:none;}
+
+/* Room ideas must never squeeze the actual Canvas out of its drawer. */
+.room-work{flex:0 1 auto;min-height:0;max-height:45%;overflow:auto;padding:10px 12px;border-top:1px solid var(--line);border-bottom:0}
+.room-review{margin-top:10px}.room-review>summary{cursor:pointer;padding:8px 0;font-size:13px}.room-review>.ws-button{margin:8px 0}

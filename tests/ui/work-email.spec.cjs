@@ -115,3 +115,38 @@ test('email notice can be dismissed on mobile, stays closed after refresh, and r
  expect(writes).toEqual([]);
  await page.screenshot({path:test.info().outputPath('email-notice-phone.png')});
 });
+
+test('returning from Signals keeps Canvas visible with many room ideas, even when expanded',async({page})=>{
+ const work={...empty,routes:Array.from({length:8},(_,i)=>({id:'idea'+i,title:'Room idea '+i,reason:'A suggestion linked to this room.',status:'Waiting for room review',needs_review:true}))};
+ await fixture(page,work);
+ await page.route('**/api/boards/**',r=>r.fulfill({json:{version:1,board:{title:'What you can use today',reporter:'Fixture',sections:[{title:'Available now',items:[{label:'Website changes',value:'Live',state:'done',detail:'Verified on the website.'}]}]}}}));
+ await page.addScriptTag({url:'/work.js'});
+ await page.evaluate(()=>{__atlas.state.detail={id:'demo/room',project_id:'demo',session:'room'};__atlas.applyShell();__atlas.showView('tell');__atlas.showView('console');__atlas.openPanel('board');});
+ await expect(page.locator('#boardBody')).toContainText('What you can use today');
+ await expect(page.locator('.room-review')).not.toHaveAttribute('open','');
+ await expect(page.getByText('Room idea 0',{exact:true})).toBeHidden();
+ const board=await page.locator('#boardBody').boundingBox(),footer=await page.locator('#roomWork').boundingBox();
+ expect(board.height).toBeGreaterThan(150);expect(footer.y).toBeGreaterThanOrEqual(board.y+board.height);
+ await page.locator('.room-review>summary').click();
+ await expect(page.getByText('Room idea 0',{exact:true})).toBeVisible();
+ expect((await page.locator('#boardBody').boundingBox()).height).toBeGreaterThan(150);
+ work.routes[0].status='Already covered';await page.evaluate(()=>__work.refresh());
+ await expect(page.locator('.room-review')).toHaveAttribute('open','');
+ await page.screenshot({path:test.info().outputPath('canvas-room-review.png')});
+});
+
+test('switching rooms during an outstanding review read loads the new room without stale cards',async({page})=>{
+ await fixture(page);
+ let release;const held=new Promise(resolve=>{release=resolve;});let started;
+ const requested=new Promise(resolve=>{started=resolve;});
+ await page.route('**/api/work/view?**',async route=>{
+  const room=new URL(route.request().url()).searchParams.get('room');
+  if(room==='demo/room'){started();await held;return route.fulfill({json:{...empty,routes:[{id:'old',title:'Old room idea',needs_review:true}]}});}
+  return route.fulfill({json:{...empty,routes:[{id:'new',title:'New room idea',needs_review:true}]}});
+ });
+ await page.addScriptTag({url:'/work.js'});await requested;
+ await page.evaluate(()=>{__atlas.state.room='demo/other';window.dispatchEvent(new Event('ux46-room'));});
+ release();
+ await expect(page.locator('#roomWork')).toContainText('New room idea');
+ await expect(page.locator('#roomWork')).not.toContainText('Old room idea');
+});
