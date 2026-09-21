@@ -316,7 +316,7 @@ async function consoleFetch(url, options) {
   try { refusal = await response.clone().json(); } catch (_) { return response; }
   if (refusal.error !== "bad_csrf") return response;
   if (!csrfRefresh) csrfRefresh = (async () => {
-    const fresh = await fetch("/api/bootstrap", {headers: {Accept: "application/json"}});
+    const fresh = await fetch("/api/bootstrap", {headers: {Accept: "application/json"}, signal: options.signal});
     if (!fresh.ok) throw new Error("Could not refresh this page's connection");
     const bootstrap = await fresh.json();
     if (!bootstrap.csrf) throw new Error("Refresh this page to reconnect");
@@ -4892,6 +4892,7 @@ function renderTarget() {
   const cont = $("#btnContinue");
   const plus = $("#btnPlus");
   renderModelControl();
+  renderCommandQueue();
   if (!detail) {
     own.textContent = "";
     own.className = "ownership";
@@ -9583,6 +9584,7 @@ async function boot() {
 
   await enterAgent(isRemoteAgent() ? null : bootstrap, wantedRoom);
   void checkDesktopDevice();scheduleLayoutPoll();
+  renderCommandQueue();scheduleCommandQueue();
   // Once per page load, across every agent — not again on each switch.
   await recoverAttempts();
   pollEvents();
@@ -9760,6 +9762,128 @@ function commandDraftChanged() {
   else closeCommands();
   renderTarget();
 }
+/* Commands wait here without taking over a running native turn. Each browser
+   stores its own queue; Web Locks serialize dispatch across its UX46 windows.
+   Persist "running" before POST: a closed/crashed dispatcher leaves an unknown
+   outcome, never an invitation to replay a goal change or new chapter. */
+const COMMAND_QUEUE_PREFIX = "ux46.commandQueue.v1.";
+const COMMAND_QUEUE_LOCK = "ux46.commandQueue.dispatch.v1";
+let commandQueueTimer = 0;
+function queuedCommands() {
+  const entries = [];
+  try {for (let i=0;i<localStorage.length;i++) {
+    const key=localStorage.key(i); if (!key?.startsWith(COMMAND_QUEUE_PREFIX)) continue;
+    try {const entry=JSON.parse(localStorage.getItem(key));
+      if (entry?.id && key===COMMAND_QUEUE_PREFIX+entry.id && entry.agent && entry.room && entry.thread_id && typeof entry.command==='string') entries.push(entry);
+    } catch (_) { /* A malformed local record is not executable. */ }
+  }
+  } catch (_) { /* Storage-disabled browsers can still use immediate commands. */ }
+  return entries.sort((a,b)=>a.at-b.at || a.id.localeCompare(b.id));
+}
+function saveQueuedCommand(entry) {localStorage.setItem(COMMAND_QUEUE_PREFIX+entry.id,JSON.stringify(entry));}
+function canQueueCommand(command) {
+  const name=commandName(command), argument=command.trim().slice(command.trim().split(/\s/)[0].length).trim();
+  return ["/compact","/new","/refresh"].includes(name) || (["/model","/effort"].includes(name) && Boolean(argument))
+    || (name==='/goal' && ['resume','clear'].includes(argument));
+}
+function commandTurnRunning(detail) {
+  const n=detail?.native || {};
+  return n.active_run === true || Boolean(n.active_turn && n.active_turn!==detail?.native_terminal?.turn_id);
+}
+function queueCommand(command, attempt, context) {
+  if (!navigator.locks || !attempt.thread_id) throw new Error('This browser cannot safely save a command queue. Your command is kept in the composer.');
+  if (queuedCommands().length>=100) throw new Error('Dismiss finished commands before adding more to the queue.');
+  const entry={...context,id:attempt.client_id,thread_id:attempt.thread_id,command,at:Date.now(),state:'pending',message:'Waiting for this conversation to finish its turn.'};
+  saveQueuedCommand(entry); renderCommandQueue(); scheduleCommandQueue(); return entry;
+}
+async function cancelQueuedCommand(id) {
+  await navigator.locks.request(COMMAND_QUEUE_LOCK,async()=>{
+    const entry=queuedCommands().find(e=>e.id===id);
+    if (entry?.state==='pending') saveQueuedCommand({...entry,state:'cancelled',message:'Cancelled before running.'});
+  });
+  renderCommandQueue();
+}
+function renderCommandQueue() {
+  let host=$('#commandQueue');
+  if (!host) {host=el('section',{id:'commandQueue',class:'command-queue','aria-label':'Queued commands',hidden:true});$('#composer').before(host);}
+  const entries=queuedCommands(); host.hidden=!entries.length;host.replaceChildren();
+  if (!entries.length) return;
+  host.append(el('strong',{text:'Commands'}),el('p',{class:'command-queue-note',text:'Saved in this browser. Waiting commands run while UX46 is open, including after you reopen it.'}));
+  for (const entry of entries) {
+    const labels={pending:'Queued',running:'Running',complete:'Done',failed:'Needs attention',uncertain:'Result unknown',cancelled:'Cancelled'};
+    const row=el('div',{class:'command-queue-row'},[
+      el('div',{},[el('strong',{text:entry.command}),el('span',{text:' · '+(entry.title || entry.room)+' · '+(entry.result?.state==='accepted'?'Started':labels[entry.state] || entry.state)}),el('p',{class:'command-queue-note',text:entry.message || ''})])]);
+    if (entry.state==='pending') row.append(el('button',{type:'button',class:'ghost',text:'Cancel','aria-label':'Cancel queued '+entry.command,on:{click:()=>void cancelQueuedCommand(entry.id)}}));
+    if (entry.state==='complete' && entry.result?.new_room) row.append(el('button',{type:'button',class:'linkbtn',text:'Open new conversation',on:{click:()=>void openQueuedChapter(entry)}}));
+    if (!['pending','running'].includes(entry.state)) row.append(el('button',{type:'button',class:'ghost',text:'Dismiss','aria-label':'Dismiss '+entry.command,on:{click:()=>{localStorage.removeItem(COMMAND_QUEUE_PREFIX+entry.id);renderCommandQueue();}}}));
+    host.append(row);
+  }
+}
+async function openQueuedChapter(entry) {
+  const next=entry.result.new_room, room=typeof next==='string'?next:next.id;
+  if (entry.result.chapter) await finishChapter(entry.agent,entry.room,next,entry.result.chapter,entry.desktop,entry.tab,entry.localOnly);
+  await openTabForTyping(entry.agent,room);
+}
+function scheduleCommandQueue() {
+  clearTimeout(commandQueueTimer);
+  if (queuedCommands().some(e=>['pending','running'].includes(e.state))) commandQueueTimer=setTimeout(()=>void drainCommandQueue(),2000);
+}
+async function drainCommandQueue() {
+  if (!navigator.locks || !state.csrf) {scheduleCommandQueue();return;}
+  try {
+    await navigator.locks.request(COMMAND_QUEUE_LOCK,{ifAvailable:true},async lock=>{
+      if (!lock) return;
+      const blocked=new Set();
+      for (const entry of queuedCommands()) {
+        const target=entry.agent+'\n'+entry.thread_id;
+        if (entry.state==='running') {
+          saveQueuedCommand({...entry,state:'uncertain',message:'The window closed before confirming the result. Check the session; UX46 will not repeat this command.'});
+          blocked.add(target);continue;
+        }
+        if (entry.state==='uncertain') {blocked.add(target);continue;}
+        if (entry.state!=='pending' || blocked.has(target)) continue;
+        blocked.add(target); // One operation per native session per pass.
+        const path=agentPath(entry.agent,'/api/room/'+encodeURI(entry.room));
+        let detail;
+        try {detail=await api(path,{absolute:true,signal:AbortSignal.timeout(10000)});}
+        catch (_) {continue;} // Failed reads cannot establish that a session is idle.
+        if (!detail?.id || !detail.native?.thread_id) continue;
+        if (detail.id!==entry.room || detail.native.thread_id!==entry.thread_id) {
+          saveQueuedCommand({...entry,state:'failed',message:'This conversation now points to a different native session. The command was not run.'});continue;
+        }
+        if ((!Object.hasOwn(detail.native || {},'active_turn') && typeof detail.native?.active_run!=='boolean')
+            || commandTurnRunning(detail) || detail.approvals?.length || detail.ownership?.state!=='atlas_owned') continue;
+        if (Array.isArray(detail.commands) && !detail.commands.some(c=>commandName(c.name || c.usage || '')===commandName(entry.command))) {
+          saveQueuedCommand({...entry,state:'failed',message:'This agent no longer advertises that command.'});continue;
+        }
+        saveQueuedCommand({...entry,state:'running',message:'Running against the original conversation.'});renderCommandQueue();
+        let result;
+        try {
+          result=await api(path+'/command',{absolute:true,method:'POST',signal:AbortSignal.timeout(30000),body:{command:entry.command,client_id:entry.id,thread_id:entry.thread_id}});
+        } catch (error) {
+          // A settings/compact refusal says no work started. Goal resume can
+          // report busy after starting a turn, so never blindly replay it.
+          const waiting=error.code==='connection_busy' && entry.command.trim()!=='/goal resume';
+          const uncertain=!error.status || error.status>=500 || (error.code==='connection_busy' && !waiting);
+          saveQueuedCommand({...entry,state:waiting?'pending':uncertain?'uncertain':'failed',message:waiting?'Waiting for the current turn.':uncertain?'The result could not be confirmed. Check the session; this command will not be repeated.':error.message});
+          continue;
+        }
+        const outcome=result?.command || {};
+        const unknown=['uncertain','unconfirmed'].includes(outcome.state) || !outcome.state;
+        const failed=['unsupported','failed','needs_input','needs_idle','needs_sign_in'].includes(outcome.state);
+        saveQueuedCommand({...entry,state:unknown?'uncertain':failed?'failed':'complete',message:commandMessage(outcome) || (unknown?'The result could not be confirmed. Check the session; this command will not be repeated.':'Command completed.'),result:outcome});
+        if (entry.agent===agentId() && entry.room===state.room) {
+          // Read the result without moving navigation or touching a new draft.
+          void refreshRoomState();
+        }
+      }
+    });
+  } catch (error) {flash('Command queue needs attention: '+error.message);}
+  finally {renderCommandQueue();scheduleCommandQueue();}
+}
+window.addEventListener('storage',event=>{if(event.key?.startsWith(COMMAND_QUEUE_PREFIX)){renderCommandQueue();scheduleCommandQueue();}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){renderCommandQueue();scheduleCommandQueue();}});
+
 async function sendCommand(command, fromDraft) {
   if (state.sending || state.roomRefreshing || !state.detail) {
     return {ok: false, message: "This conversation is still sending, reconnecting, or loading. Try again when it finishes."};
@@ -9783,6 +9907,21 @@ async function sendCommand(command, fromDraft) {
   try {attempt = JSON.parse(localStorage.getItem(key));} catch(e) {}
   if (!attempt || attempt.command !== command || attempt.thread_id !== threadId) attempt = {client_id:clientId(),command,thread_id:threadId};
   try {localStorage.setItem(key,JSON.stringify(attempt));} catch(e) {}
+  const queueContext={agent:commandAgent,room:roomId,title:state.detail.title || roomId,desktop:sourceDesktop,tab:sourceTab,localOnly:sourceLocalOnly};
+  const saveWaiting = async () => {
+    queueCommand(command,attempt,queueContext);
+    localStorage.removeItem(key);
+    if (fromDraft && stillCurrent()) await settleDraftAfterSend(roomId,seq,snapshot.trim(),snapshot,true);
+    if (stillCurrent()) setReceipt(name+" queued. It will run after this turn; you can cancel it above the composer.","saved");
+    return {ok:true,queued:true};
+  };
+  if (canQueueCommand(command) && commandSupported(name) && (commandTurnRunning(state.detail)
+      || queuedCommands().some(e=>e.agent===commandAgent && e.thread_id===threadId && ['pending','running','uncertain'].includes(e.state)))) {
+    state.sending=true;closeCommands();
+    try {return await saveWaiting();}
+    catch(error) {setReceipt(error.message,"warn");return {ok:false,message:error.message};}
+    finally {state.sending=false;renderTarget();}
+  }
   state.sending = true; clearTimeout(draftTimer); closeCommands(); renderTarget(); setSendState("Running " + name + "…","ok");
   try {
     const result = await api(agentPath(commandAgent, "/api/room/" + encodeURI(roomId) + "/command"), {absolute:true,method:"POST",body:attempt});
@@ -9844,6 +9983,9 @@ async function sendCommand(command, fromDraft) {
         }
       } catch (_) { /* A failed read leaves the original busy warning intact. */ }
       if (!stillCurrent()) return;
+    }
+    if (busy && canQueueCommand(command) && tone!=='saved' && command.trim()!=='/goal resume') {
+      try {return await saveWaiting();} catch(queueError) {text=queueError.message;}
     }
     if (stillCurrent()) setReceipt(text,tone); else flash(text);
     return {ok: false, message: text};
