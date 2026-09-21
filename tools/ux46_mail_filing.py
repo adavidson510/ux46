@@ -77,16 +77,32 @@ class MailFiling:
         policy=self.a.get('mail_assistant','filing-policy') or {}
         if not policy.get('enabled'):return {'state':'paused'}
         view=self.a.mail.view(lane='all',limit=1000);changed=[]
+        # Filing decisions belong to the indexed messages, not to later replies
+        # that may arrive between the metadata check and this scheduled pass.
+        with self.a.mail.db() as db:
+            indexed={}
+            for account,body in db.execute('SELECT account,body FROM mail_messages'):
+                message=json.loads(body)
+                if not set(message['labels'])&{'SENT','TRASH','SPAM'}:
+                    indexed.setdefault((account,message['thread']),[]).append(message)
+        rules=self.a.mail.rules()
         for item in view['items']:
             if len(changed)>=20:break
             if 'INBOX' not in item['labels'] or item['warnings']:continue
             quiet=not item['need'] and item['category'] in ('newsletters','receipts')
+            messages=indexed.get((item['account'],item['thread']),[])
+            if not messages:continue
+            for message in messages:
+                classification=self.a.mail.classify(item['account'],message,rules)
+                if message['warnings'] or classification['need'] or classification['category'] not in ('newsletters','receipts'):
+                    quiet=False
             if re.search(r'action required|reply required|please respond|please confirm|approval needed|payment failed|past due',item['subject']+' '+item['snippet'],re.I):quiet=False
             handled=quiet and policy.get('archive_routine',False)
             expected='UX46/'+LABELS[item['category']]
             if expected in item['labels'] and not handled:continue
-            try:r=self.apply(item['account'],item['thread'],item['category'],handled,handled and policy.get('mark_read',False))
+            try:r=self.apply(item['account'],item['thread'],item['category'],handled,handled and policy.get('mark_read',False),
+                             expected_messages=[m['id'] for m in messages])
             except (ValueError,OSError,Conflict):
                 changed.append({'state':'needs-review','account':item['account'],'thread':item['thread']});continue
-            if r['state'] not in ('unchanged','nothing-to-file'):changed.append({'id':r['id'],'state':r['state']})
+            if r['state'] not in ('unchanged','nothing-to-file'):changed.append({'id':r.get('id',''),'state':r['state']})
         result={'state':'checked','at':time.time(),'changes':changed};self.a.put('mail_assistant','filing-last',result);return result
