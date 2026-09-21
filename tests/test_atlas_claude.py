@@ -254,9 +254,10 @@ class AdapterCase(unittest.TestCase):
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.service.running(room) is None:
-                # Let the settling write land before anybody reads it.
-                time.sleep(0.2)
-                if self.service.running(room) is None:
+                # Process exit precedes catalog refresh and the persisted
+                # completion receipt. Wait for that receipt, not a fixed delay.
+                records = self.service.journal.recent(room)
+                if all(record.mode != "running" for record in records):
                     return
             time.sleep(0.05)
         raise AssertionError("the turn never finished")

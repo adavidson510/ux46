@@ -54,9 +54,10 @@ class OwnProcessTests(unittest.TestCase):
                     try:
                         status, answer = client.request('POST','/api/recovery/start',{'mode':'all','request_id':'fixture_recovery_123'})
                         self.assertEqual(status,202)
-                    except (OSError, http.client.HTTPException):
+                    except (OSError, http.client.HTTPException, json.JSONDecodeError):
                         # Stopping the requesting service may lose its HTTP
-                        # response. Read the fixed receipt; never resend POST.
+                        # response, including an empty or truncated JSON body.
+                        # Read the fixed receipt; never resend POST.
                         pass
                     for _ in range(150):
                         receipt = Coordinator(root).receipt('fixture_recovery_123')
