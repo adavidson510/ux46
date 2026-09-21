@@ -443,6 +443,28 @@
   const h=(tag,attrs={},children=[])=>el(tag,attrs,children);
   const btn=(label,action)=>h('button',{type:'button',class:'ws-button',text:label,on:{click:action}});
   let data=null,loading=false,editor=null;
+  const briefNoticeKey='ux46.email.dismissedBrief';
+  let dismissedBrief='';
+  try{dismissedBrief=localStorage.getItem(briefNoticeKey)||'';}catch{}
+  function drawBriefNotice(){
+    let notice=document.getElementById('emailBriefNotice');
+    if(!notice){
+      const open=btn('Your email brief is ready · Open Email',()=>{window.__atlas.showView('email');draw();});
+      const dismiss=btn('×',()=>{
+        // Closing the notice does not mark the brief or Gmail messages read.
+        dismissedBrief=data?.briefs?.[0]?.id||'';
+        try{localStorage.setItem(briefNoticeKey,dismissedBrief);}catch{}
+        drawBriefNotice();
+      });
+      dismiss.setAttribute('aria-label','Dismiss email brief notification');
+      dismiss.classList.add('email-brief-dismiss');
+      notice=h('div',{id:'emailBriefNotice',class:'email-brief-notice'},[open,dismiss]);
+      document.body.append(notice);
+    }
+    const brief=data?.briefs?.[0];
+    notice.hidden=!data?.unread||!brief?.id||brief.id===dismissedBrief;
+  }
+  window.addEventListener('storage',e=>{if(e.key===briefNoticeKey){dismissedBrief=e.newValue||'';drawBriefNotice();}});
   async function call(path,body){const r=await fetch('/api/email/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-Atlas-CSRF':window.__atlas?.state.csrf||''}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.message||'Email action failed');return d;}
   const message=(host,e)=>{let p=host.querySelector('.mail-assistant-status');if(!p){p=h('p',{class:'mail-assistant-status',role:'status'});host.append(p);}p.textContent=e.message||String(e);};
   async function action(body,host){try{const d=await call('assistant-action',body);await refresh();if(body.action==='file'||body.action==='undo-filing')message(host,d.state==='applied'?'Filed in Gmail. Undo is available under Gmail filing.':d.state);return d;}catch(e){message(host,e);}}
@@ -496,7 +518,7 @@
     const drafts=h('details',{},[h('summary',{text:'Saved replies · '+data.drafts.length})]);
     for(const d of data.drafts)drafts.append(btn(d.subject+' · '+d.state,()=>openDraft(d)));panel.append(drafts);
   }
-  async function refresh(){if(loading||window.__ux46modules?.email===false)return;loading=true;try{data=await call('assistant');draw();let notice=document.getElementById('emailBriefNotice');if(!notice){notice=btn('',()=>{window.__atlas.showView('email');draw();});notice.id='emailBriefNotice';notice.classList.add('email-brief-notice');document.body.append(notice);}notice.hidden=!data.unread;notice.textContent='Your email brief is ready · Open Email';}catch{}finally{loading=false;}}
+  async function refresh(){if(loading||window.__ux46modules?.email===false)return;loading=true;try{data=await call('assistant');draw();drawBriefNotice();}catch{}finally{loading=false;}}
   window.__mailAssistant={file:async(item,host)=>action({action:'file',account:item.account,thread:item.thread,category:item.category,handled:true,mark_read:true},host),draft:async(account,thread,host)=>action({action:'draft',account,thread},host),read:async(account,thread,host)=>{try{const data=await call('thread',{account,thread});const details=h('details',{open:true},[h('summary',{text:'Full thread'+(data.complete?'':' · incomplete')})]);for(const m of data.messages)details.append(h('p',{text:m.from+' · '+m.date}),h('pre',{class:'mail-thread-text',text:m.text}),h('p',{class:'ws-sub',text:m.attachments.length?'Attachments not read: '+m.attachments.join(', '):''}));host.append(details);}catch(e){message(host,e);}},refresh};
   const host=document.getElementById('emailBody');if(host)new MutationObserver(()=>{if(!host.querySelector('#emailAssistant'))draw();}).observe(host,{childList:true});
   void refresh();setInterval(()=>{if(document.visibilityState==='visible')void refresh();},10000);

@@ -94,3 +94,24 @@ test('mobile Email has a visible return and hides its own ready notice',async({p
  await expect(page.locator('#viewConsole')).toBeVisible();
  await expect(page.locator('#draft')).toHaveValue('Keep this unfinished message');
 });
+
+test('email notice can be dismissed on mobile, stays closed after refresh, and returns for a new brief',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const mail={configured:true,settings:{enabled:true,hour:5,minute:0,timezone:'America/Los_Angeles'},briefs:[{id:'brief-one',seen:false}],drafts:[],unread:1};
+ const writes=await fixture(page,empty,mail);
+ await page.addScriptTag({url:'/workspace.js'});
+ const notice=page.locator('#emailBriefNotice');
+ await expect(notice).toBeVisible();
+ const dismiss=page.getByRole('button',{name:'Dismiss email brief notification'});
+ const box=await dismiss.boundingBox();expect(box.width).toBeGreaterThanOrEqual(44);expect(box.x+box.width).toBeLessThanOrEqual(390);
+ await dismiss.click();await expect(notice).toBeHidden();
+ await page.evaluate(()=>__mailAssistant.refresh());await expect(notice).toBeHidden();
+ await page.reload();
+ await page.evaluate(()=>{window.__ux46modules={email:true};});
+ await page.addScriptTag({url:'/workspace.js'});
+ await expect(notice).toBeHidden();
+ mail.briefs=[{id:'brief-two',seen:false},...mail.briefs];mail.unread=2;
+ await page.evaluate(()=>__mailAssistant.refresh());await expect(notice).toBeVisible();
+ expect(writes).toEqual([]);
+ await page.screenshot({path:test.info().outputPath('email-notice-phone.png')});
+});
