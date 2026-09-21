@@ -54,6 +54,12 @@ class WorkTests(unittest.TestCase):
         self.assertNotEqual(changed['explanation']['source_digest'],changed['digest'])
         with self.assertRaises(Conflict):
             self.s.action({'action':'explain','id':'idea1','base_version':changed['version'],'source_digest':digest})
+    def test_chosen_room_takes_precedence_over_automatic_source_room(self):
+        self.s.action({'action':'route','source':'idea1','agent':'local','room':'app/old','reason':'Cited source','automatic':True})
+        chosen=self.route()
+        self.assertEqual(self.s.view()['routes'][0]['id'],chosen['id'])
+        latest=self.s.action({'action':'route','source':'idea1','agent':'local','room':'app/old','reason':'Discuss here now'})
+        self.assertEqual(self.s.view()['routes'][0]['id'],latest['id'])
     def test_result_refuses_active_content_urls_and_cross_room_experiment(self):
         with self.assertRaises(ValueError):self.s.action({'action':'result','agent':'local','room':'app/timer','url':'javascript:alert(1)'})
 

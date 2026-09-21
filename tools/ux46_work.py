@@ -101,6 +101,7 @@ class WorkStore(Store):
             explanation=(source or {}).get('explanation',{})
             route['title']=(explanation['title'] if explanation.get('source_digest')==source['digest'] else source['title']) if source else 'Source unavailable'
             if source:route['current_digest']=source['digest']
+        routes.sort(key=lambda r:r.get('chosen_at',0),reverse=True)
         if room:
             routes=[r for r in routes if r['agent']==agent and r['room']==room]
             ids={r['source'] for r in routes};sources=[s for s in sources if s['id'] in ids]
@@ -140,10 +141,10 @@ class WorkStore(Store):
             if not source:raise ValueError('Missing source')
             ident=hashlib.sha256(encoded([source['id'],agent,room])).hexdigest()[:32]
             existing=self.get('work_routes',ident)
-            if existing and (not existing.get('inactive') or args.get('automatic')):return existing
-            if existing:return self.mutate('work_routes',ident,existing['version'],lambda old:{**old,'inactive':False,'reason':text(args['reason'],1000,'Reason')})
+            if existing and args.get('automatic'):return existing
+            if existing:return self.mutate('work_routes',ident,existing['version'],lambda old:{**old,'inactive':False,'reason':text(args['reason'],1000,'Reason'),'chosen_at':time.time()})
             return self.mutate('work_routes',ident,0,lambda _:dict(source=source['id'],agent=agent,room=room,
-                reason=text(args['reason'],1000,'Reason'),assessment='',assessed_digest='',assessed_context=''))
+                reason=text(args['reason'],1000,'Reason'),assessment='',assessed_digest='',assessed_context='',chosen_at=0 if args.get('automatic') else time.time()))
         if action=='unroute':
             return self.mutate('work_routes',args['id'],args['base_version'],lambda old:{**old,'inactive':True})
         if action=='context':
