@@ -51,6 +51,46 @@ test('dismissed Signals can be restored and never imply a tested outcome',async(
  await fixture(page,all);await page.addScriptTag({url:'/work.js'});
  await page.route('**/api/work/action',async route=>{const a=route.request().postDataJSON();if(a.action==='dismiss')s={...s,version:s.version+1,disposition:'dismissed'};if(a.action==='restore')s={...s,version:s.version+1,disposition:'active'};all.sources=[s];await route.fulfill({json:s});});
  await page.evaluate(()=>{document.querySelector('#viewTell').hidden=false;const article=document.createElement('article');article.id='syntheticSignal';document.querySelector('#tellBody').append(article);return __work.signal({id:'post1',board:'working-better',title:'Try clearer controls',human_body:'Try it once',sources:[]},article);});
- await expect(page.locator('#syntheticSignal')).toContainText('not yet tested');await page.locator('#syntheticSignal').getByRole('button',{name:'Dismiss',exact:true}).click();await expect(page.locator('#syntheticSignal')).toBeHidden();
- await page.getByText('Saved, dismissed and tried',{exact:true}).click();await page.getByRole('button',{name:'Restore',exact:true}).click();await expect(page.locator('#syntheticSignal')).toBeVisible();
+ await expect(page.locator('#syntheticSignal')).toContainText('not tried yet');await page.locator('#syntheticSignal').getByRole('button',{name:'Dismiss',exact:true}).click();await expect(page.locator('#syntheticSignal')).toBeHidden();
+ await page.getByText('Saved ideas & results',{exact:true}).click();await page.getByRole('button',{name:'Restore',exact:true}).click();await expect(page.locator('#syntheticSignal')).toBeVisible();
+});
+
+test('Signals starts with three readable ideas and keeps history and action boundaries clear',async({page})=>{
+ const work={...empty,sources:[]};const writes=await fixture(page,work);
+ const posts=Array.from({length:4},(_,i)=>({id:'post'+i,board:'working-better',title:'Technical finding '+i,human_body:'Original detailed note '+i,sources:[],created_at:'2026-09-21T09:00:00Z'}));
+ await page.route('**/api/tell/**',async route=>{
+  const p=new URL(route.request().url()).pathname;
+  await route.fulfill({json:p.endsWith('/summary')?{enabled:true,boards:[{id:'daily-review',label:'Daily review'},{id:'working-better',label:'Working better'}]}:{posts,board:{label:'Working better'}}});
+ });
+ await page.route('**/api/work/action',async route=>{
+  const a=route.request().postDataJSON();writes.push(a);
+  const source={...a.source,version:1,digest:'one',disposition:'active',explanation:{source_digest:'one',title:'Try the simple check first',idea:'An ordinary test may answer this question.',why:'It could avoid an unnecessary model call.',next:'Try one open issue.'}};
+  work.sources.push(source);await route.fulfill({json:source});
+ });
+ await page.addScriptTag({url:'/work.js'});await page.addScriptTag({url:'/tell.js'});
+ await page.evaluate(()=>__atlas.showView('tell'));
+ await expect(page.getByRole('tab',{name:'Ideas to try',exact:true})).toHaveAttribute('aria-selected','true');
+ await expect(page.locator('.tell-post:visible')).toHaveCount(3);
+ await expect(page.locator('.tell-post h3').first()).toHaveText('Try the simple check first');
+ await page.locator('.tell-post').first().getByRole('button',{name:'Explore this',exact:true}).click();
+ await expect(page.getByRole('dialog')).toContainText('does not send a message or start work');
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ expect(writes.some(x=>x.action==='route'||x.action==='experiment')).toBe(false);
+ await page.screenshot({path:test.info().outputPath('signals-desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.evaluate(()=>__atlas.applyShell());
+ await page.screenshot({path:test.info().outputPath('signals-phone.png'),fullPage:true});
+ await page.getByText('Earlier notes · 1',{exact:true}).click();
+ await expect(page.locator('.tell-post:visible')).toHaveCount(4);
+});
+
+test('mobile Email has a visible return and hides its own ready notice',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await fixture(page,empty,{configured:true,settings:{enabled:true,hour:5,minute:0,timezone:'America/Los_Angeles'},briefs:[],drafts:[],unread:1});
+ await page.addScriptTag({url:'/workspace.js'});
+ await page.evaluate(()=>{document.getElementById('draft').value='Keep this unfinished message';__atlas.applyShell();__atlas.showView('email');});
+ await expect(page.getByRole('button',{name:'← Back to conversation',exact:true})).toBeVisible();
+ await expect(page.locator('#emailBriefNotice')).toBeHidden();
+ await page.getByRole('button',{name:'← Back to conversation',exact:true}).click();
+ await expect(page.locator('#viewConsole')).toBeVisible();
+ await expect(page.locator('#draft')).toHaveValue('Keep this unfinished message');
 });

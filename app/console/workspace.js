@@ -4,6 +4,7 @@
   const mail = {account:"",category:"",project:"",lane:"needs",selected:null,data:null,gen:0,rules:false};
   const knowledge = {query:"",gen:0,project:"",kind:"",origin:"",subject:"",mode:"themes",lane:"all",selected:null,tab:"overview",cache:new Map(),snapshot:null,detailGen:0};
   const $w = id => document.getElementById(id);
+  $w("btnEmailBack")?.addEventListener("click",()=>window.__atlas.showView("console"));
   const n = (tag,attrs={},children=[]) => el(tag,attrs,children);
   const button = (label,click,cls="ws-button") => n("button",{type:"button",class:cls,text:label,on:{click}});
   const stamp = x => x ? new Date(x*1000).toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}) : "Not checked yet";

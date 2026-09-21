@@ -6,7 +6,7 @@ Email has its own separate brief and actions.
 
 Dismiss hides a signal across devices and keeps Restore available. Remind
 tomorrow hides it for a day. Neither deletes the source or cancels an experiment.
-Worth exploring records interest and lets you choose a room and explain why it
+Explore this records interest and lets you choose a room and explain why it
 belongs there. Interest is never counted as a successful use.
 
 The Result button beside the conversation opens the current result and room
@@ -56,3 +56,29 @@ Already tracked Tell sources refresh by bounded board reads. Configured shared
 Constellation access remains subject to its existing grants. Cross-account or
 cross-machine delivery is not implied by choosing a room name; install/configure
 that room's receiver before claiming automatic adoption.
+
+## A light workflow for the person using Signals
+
+Start with Ideas to try. Read the idea, why it matters and a small possible next
+step. Dismiss what does not help, or Remind tomorrow. Earlier notes and project
+roundups are available separately; they are not a task list to clear.
+
+Choose Explore this for an idea worth discussing, then Add to room. This saves
+the idea for that room; it does not send a message or start an agent. The room
+can assess it at its next configured checkpoint. For a discussion now, choose
+Open room review, then Ask the agent to review in Result and send the prepared
+request. Your existing draft is never replaced.
+
+Let the agent explain whether it fits, is already covered or deserves one small
+test. Choose the work before it begins. Afterward, ask the agent to record what
+happened and any real measurements; you should not have to maintain a second
+project ledger. A suggestion, a chosen test and a demonstrated benefit remain
+three different things.
+
+An agent can add an owner-local plain-language explanation with action explain,
+a source ID, base_version, source_digest, title, idea, why, next and editor. The
+original Tell note and sources stay intact. Explanations apply only to the exact
+source digest and stop displaying if its evidence changes. They do not change
+an assessment or count as an outcome. Personal explanations are not bundled in
+the public software. Future source notes should use the same plain-language
+structure, with implementation detail in their technical body.

@@ -98,7 +98,8 @@ class WorkStore(Store):
             source=index.get(route['source']);context=rooms.get(route['agent']+':'+route['room'],{}).get('context','')
             route['needs_review']=bool(source and (route.get('assessed_digest')!=source['digest'] or route.get('assessed_context','')!=context))
             route['status']='Waiting for room review' if route['needs_review'] else {'applies':'Worth trying','not-applicable':'Not relevant here','covered':'Already covered','test':'Worth trying'}.get(route.get('assessment'),'Reviewed')
-            route['title']=source['title'] if source else 'Source unavailable'
+            explanation=(source or {}).get('explanation',{})
+            route['title']=(explanation['title'] if explanation.get('source_digest')==source['digest'] else source['title']) if source else 'Source unavailable'
             if source:route['current_digest']=source['digest']
         if room:
             routes=[r for r in routes if r['agent']==agent and r['room']==room]
@@ -117,6 +118,15 @@ class WorkStore(Store):
     def action(self,args):
         action=args['action']
         if action=='observe':return self.observe(args['source'])
+        if action=='explain':
+            def explain(old):
+                if not old.get('digest') or args.get('source_digest')!=old['digest']:
+                    raise Conflict('The source changed; explain the latest version')
+                old['explanation']={k:text(args[k],limit,k) for k,limit in
+                    [('title',120),('idea',450),('why',350),('next',350)]}
+                old['explanation'].update(source_digest=old['digest'],editor=line(args.get('editor','Room agent'),100))
+                return old
+            return self.mutate('work_sources',identifier(args['id']),args['base_version'],explain)
         if action in ('dismiss','restore','snooze','interest'):
             def change(old):
                 if 'kind' not in old:raise ValueError('Missing source')

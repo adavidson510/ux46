@@ -51,3 +51,11 @@ When source evidence changes, reassess whether it affects the existing work;
 do not restart it automatically. At completion, capture only reusable experience
 in Constellation with conditions and sources. Email is a separate workflow and
 its content does not enter this review packet.
+
+For a dense Signal, add a plain-language explanation with action explain, id,
+base_version, source_digest, title, idea, why, next and editor. Preserve the source
+meaning and uncertainty; keep personal content in the owner's work store. The
+UI shows this explanation only while the source digest matches. Original notes
+and sources remain expandable. Readability edits are not assessments or outcomes.
+Do the assessment and record-keeping for the person; ask them to choose the
+useful work, not maintain a second ledger.

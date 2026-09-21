@@ -4,7 +4,7 @@
 "use strict";
 
 (() => {
-  const BOARD_DEFAULT = "daily-review";
+  const BOARD_DEFAULT = "working-better";
   const POLL_MS = 15000;
   const cursorKey = "ux46.tell.activity.cursor";
   const tell = {
@@ -40,6 +40,8 @@
     return date.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
   }
   function boardLabel(id) {
+    const labels = {"working-better":"Ideas to try", "bigger-picture":"Across projects", "invention-watch":"Possibilities", "daily-review":"Project roundup", "activity":"Activity"};
+    if (labels[id]) return labels[id];
     const found = (tell.summary && tell.summary.boards || []).find((board) => board.id === id);
     return (found && found.label) || id.replace(/-/g, " ");
   }
@@ -113,11 +115,12 @@
   }
   function boardTabs() {
     const nav = node("div", {class: "tell-tabs", role: "tablist", "aria-label": "Signals"});
-    for (const board of (tell.summary.boards || [])) {
+    const order = ["working-better", "bigger-picture", "invention-watch", "daily-review", "activity"];
+    for (const board of [...(tell.summary.boards || [])].sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id))) {
       nav.appendChild(node("button", {class: "tell-tab" + (board.id === tell.board ? " on" : ""),
         type: "button", role: "tab", "aria-selected": String(board.id === tell.board),
         id: "tell-tab-" + board.id, "aria-controls": "tell-board-panel",
-        tabindex: board.id === tell.board ? "0" : "-1", text: board.label,
+        tabindex: board.id === tell.board ? "0" : "-1", text: boardLabel(board.id),
         on: {click: () => switchBoard(board.id), keydown: (event) => {
           const tabs = [...nav.querySelectorAll('[role="tab"]')];
           const current = tabs.indexOf(event.currentTarget);
@@ -196,12 +199,15 @@
       ]), node("div", {class: "tell-post-body md"}),
     ]);
     article.querySelector(".tell-post-body").appendChild(markdownFragment(human));
+    article.dataset.originalTitle = post.title || "Something worth noticing";
     if (post.unread) article.querySelector(".tell-post-head").appendChild(node("button", {
       class: "linkbtn tell-mark-read", type: "button", text: "Mark read",
       on: {click: () => void markSeen(post, boardId, generation, article)}}));
     const audit = node("details", {class: "tell-audit", data: {tellDetail: "post-" + post.id}}, [
-      node("summary", {text: "Discussion & sources" + ((post.replies || []).length ? " · " + post.replies.length : "")}),
+      node("summary", {text: "Full note, sources & discussion" + ((post.replies || []).length ? " · " + post.replies.length : "")}),
     ]);
+    const original = node("div", {class:"md tell-original"});
+    original.appendChild(markdownFragment(human)); audit.appendChild(original);
     if (technical || (post.human_body && legacy !== human)) {
       const prose = node("div", {class: "md tell-technical"});
       prose.appendChild(markdownFragment(technical || legacy)); audit.appendChild(prose);
@@ -234,7 +240,8 @@
   function discoveryCard() {
     const d = tell.summary.discovery;
     if (!d) return null;
-    const card = node("section", {class: "tell-discovery"}, [
+    const card = node("details", {class: "tell-discovery", data: {tellDetail:"configuration"}}, [
+      node("summary", {text:"What Signals looks for & settings"}),
       node("div", {class: "tell-focus-heading"}, [tellIcon("focus"),
         node("p", {class: "tell-kicker", text: "WHAT WE'RE EXPLORING"})]),
       node("p", {class: "tell-focus-copy", text: d.focus || "Find useful connections across your work and what matters to you."}),
@@ -354,15 +361,18 @@
     host.appendChild(node("header", {class: "tell-head"}, [
       tellMark(),
       node("div", {class: "tell-heading"}, [node("h1", {text: "Signals"}),node("span", {class:"signals-attribution",text:"Connected by Tell"}),
-        node("p", {class: "tell-lede", text: "Useful connections. Better ways to work. Ideas worth trying."})]),
+        node("p", {class: "tell-lede", text: "A few ideas from your work. Keep the ones worth exploring."})]),
       node("span", {class: "tell-header-art", "aria-hidden": "true"}, [node("i"), node("i"), node("i")]),
       node("button", {class: "tell-close", type: "button", "aria-label": "Close Signals and return to conversation",
         title: "Return to conversation", on: {click: () => $("#btnConsole").click()}}, [tellIcon("close")]),
     ]));
     const discovery = discoveryCard();
-    if (discovery) host.appendChild(discovery);
+    host.appendChild(node("div", {class:"tell-workflow"}, [
+      node("p", {text:"Read the idea → choose a room → let the agent assess it."}),
+      node("p", {class:"tell-muted",text:"Dismiss what is not useful, or remind yourself tomorrow. Adding an idea to a room does not start work. The room proposes a small test; afterward, record whether it helped."})
+    ]));
     host.appendChild(boardTabs());
-    if (tell.board === "daily-review") host.appendChild(scheduleCard(tell.summary.schedule));
+    if (tell.board === "daily-review") { const schedule = node("details", {class:"tell-review-history",data:{tellDetail:"schedule"}}, [node("summary",{text:"Roundup schedule"}),scheduleCard(tell.summary.schedule)]); host.appendChild(schedule); }
     if (!payload) { host.appendChild(node("p", {class: "tell-empty", text: "Loading " + boardLabel(tell.board) + "…"})); return; }
     if (tell.board === "activity") {
       const activity = activityNode(payload.activity || payload);
@@ -372,38 +382,34 @@
       host.appendChild(activity);
       return;
     }
-    const explanations = {"daily-review": "The few things worth your attention today.", "working-better": "Small changes that could save you time or effort.", "bigger-picture": "How your projects might help each other.", "invention-watch": "Ideas that might be worth exploring—not claims of novelty or patentability."};
+    const explanations = {"daily-review": "Recent project notes. These summaries are background, not a to-do list.", "working-better": "Small changes that could save you time or effort.", "bigger-picture": "How your projects might help each other.", "invention-watch": "Ideas that might be worth exploring—not claims of novelty or patentability."};
     const failures = (payload.posts || []).filter(isReviewFailure);
     const posts = (payload.posts || []).filter(post => !isReviewFailure(post));
     const section = node("section", {class: "tell-posts", id: "tell-board-panel", role: "tabpanel",
       "aria-labelledby": "tell-tab-" + tell.board}, [
       node("div", {class: "tell-section-head"}, [node("div", {}, [
-        node("h2", {text: tell.board === "daily-review" ? "Worth your attention" : (payload.board || {}).label || boardLabel(tell.board)}),
+        node("h2", {text: tell.board === "daily-review" ? "Latest roundup" : boardLabel(tell.board)}),
         node("p", {text: explanations[tell.board] || ""})]),
-        node("span", {class: "tell-item-count", text: posts.length ? posts.length + (posts.length === 1 ? " finding" : " findings") : "No findings yet"})]),
+        node("span", {class: "tell-item-count", text: posts.length ? posts.length + (posts.length === 1 ? " note" : " notes") : "No findings yet"})]),
     ]);
     if (!posts.length) section.appendChild(node("p", {class: "tell-empty", text: failures.length ? "No completed review is available here yet." : "Nothing has been filed here yet."}));
     const generation = tell.boardGeneration;
     const cards = node("div", {class: "tell-cards"});
-    for (const post of posts) cards.appendChild(postNode(post, tell.board, generation));
+    const limit = tell.board === "daily-review" ? 1 : 3;
+    for (const post of posts.slice(0,limit)) cards.appendChild(postNode(post, tell.board, generation));
     section.appendChild(cards);
-    host.appendChild(section);
-    if (failures.length) host.appendChild(reviewHistory(failures));
-    // One-pixel row spans pack short cards beneath each other. DOM/reading
-    // order stays chronological; resize and expanded details require no polling.
-    if (window.ResizeObserver && posts.length) {
-      cards.classList.add("packed");
-      const fit = card => {
-        const span = String(Math.ceil(card.getBoundingClientRect().height + 14));
-        if (card.dataset.rowSpan !== span) {
-          card.dataset.rowSpan = span;
-          card.style.gridRowEnd = "span " + span;
-        }
-      };
-      tell.layoutObserver = new ResizeObserver(entries => entries.forEach(e => fit(e.target)));
-      for (const card of cards.children) { fit(card); tell.layoutObserver.observe(card); }
+    if (posts.length > limit) {
+      const earlier = node("details", {class:"tell-earlier",data:{tellDetail:"earlier-"+tell.board}}, [node("summary",{text:"Earlier notes · "+(posts.length-limit)})]);
+      const olderCards = node("div",{class:"tell-cards"}); earlier.appendChild(olderCards);
+      earlier.addEventListener("toggle",()=>{if(earlier.open && !olderCards.children.length){
+        for(const post of posts.slice(limit))olderCards.appendChild(postNode(post,tell.board,generation));
+      }});
+      section.appendChild(earlier);
     }
-    observePosts(posts, tell.board, generation, section);
+    host.appendChild(section);
+    if(discovery)host.appendChild(discovery);
+    if (failures.length) host.appendChild(reviewHistory(failures));
+    observePosts(posts.slice(0,limit), tell.board, generation, section);
   }
   function observePosts(posts, boardId, generation, section) {
     if (!window.IntersectionObserver) return;

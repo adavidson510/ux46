@@ -71,3 +71,14 @@
 .tell-review-attempt { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line, #303b4b); }
 .tell-review-attempt > summary { cursor: pointer; }
 .tell-review-attempt p { white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+
+/* Readable ideas first; older reports and configuration stay within reach. */
+.tell-workflow{max-width:760px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--ink-100);}
+.tell-workflow p{margin:0 0 5px;font-size:14px;line-height:1.55;}.tell-workflow p:last-child{margin:0;font-size:12px;}
+.tell-cards{display:flex;flex-direction:column;max-width:860px;gap:12px;}.tell-cards>.tell-post{margin-bottom:0;}
+.tell-post-body{max-width:72ch;font-size:14px;line-height:1.65;}.tell-post-body p+p{margin-top:10px;}
+.tell-earlier{margin-top:18px;}.tell-earlier>.tell-cards{margin-top:10px;}
+.tell-discovery{margin-top:22px;}.tell-discovery>summary{font-size:13px;}.tell-discovery>.tell-focus-heading{margin-top:16px;}
+.work-signal-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}.work-signal-actions>p{flex-basis:100%;margin:0;}
+.work-signal-actions>.ws-button{min-height:38px;}.work-signal-actions>.ws-button:first-of-type{background:var(--lav-wash);color:var(--lav);border-color:var(--lav);}
+.tell-original{font-size:13px;line-height:1.65;color:var(--text-mute);}.work-overview{margin-top:20px;}

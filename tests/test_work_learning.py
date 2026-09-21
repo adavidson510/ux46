@@ -42,6 +42,18 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(self.s.view('local','app/timer')['results'][0]['id'],r['id'])
         self.s.action({'action':'outcome','id':e['id'],'base_version':e['version'],'verdict':'unknown','reason':'No phone use yet','evidence':'Layout test only'})
         self.assertEqual(self.s.view()['metrics']['helped'],0)
+    def test_plain_explanation_keeps_source_and_expires_when_evidence_changes(self):
+        r=self.route();digest=self.item['digest']
+        explained=self.s.action({'action':'explain','id':'idea1','base_version':1,'source_digest':digest,
+            'title':'Make phone buttons easier to tap','idea':'Larger controls may reduce missed taps.',
+            'why':'Small controls are hard to use one handed.','next':'Try one timer screen.','editor':'Room agent'})
+        self.assertEqual(explained['digest'],digest)
+        self.assertEqual(explained['summary'],self.source['summary'])
+        self.assertEqual(explained['explanation']['source_digest'],digest)
+        changed=self.s.observe({**self.source,'summary':'A user reports a different cause'})
+        self.assertNotEqual(changed['explanation']['source_digest'],changed['digest'])
+        with self.assertRaises(Conflict):
+            self.s.action({'action':'explain','id':'idea1','base_version':changed['version'],'source_digest':digest})
     def test_result_refuses_active_content_urls_and_cross_room_experiment(self):
         with self.assertRaises(ValueError):self.s.action({'action':'result','agent':'local','room':'app/timer','url':'javascript:alert(1)'})
 

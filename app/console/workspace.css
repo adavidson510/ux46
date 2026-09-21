@@ -40,3 +40,7 @@
 .mail-thread-text{white-space:pre-wrap;font:inherit;overflow-wrap:anywhere;max-height:400px;overflow:auto}
 .email-brief-notice{position:fixed;bottom:18px;right:20px;z-index:50;padding:12px 18px;background:var(--lav);color:var(--on-accent);border:1px solid var(--line);border-radius:12px}
 .room-work{padding:12px 0;border-bottom:1px solid var(--line)}.room-work h3{margin:10px 0}.room-work p{font-size:13px;overflow-wrap:anywhere}.room-work a{display:inline-block;margin:8px 8px 8px 0}.work-card{padding:12px 0;border-top:1px solid var(--line)}.work-card .ws-button,.work-signal-actions .ws-button{margin:4px}.work-signal-actions{padding-top:8px}.work-dialog{width:min(620px,calc(100vw - 28px));max-height:90vh;overflow:auto;background:var(--ink-100);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:22px}.work-dialog::backdrop{background:#0009}.work-dialog input,.work-dialog textarea,.work-dialog select{width:100%;box-sizing:border-box;background:transparent;color:inherit;border:1px solid var(--line);padding:10px;border-radius:8px}.work-overview{padding:16px;border:1px solid var(--line);border-radius:12px;margin-bottom:18px}.work-article{white-space:pre-wrap;font-family:Georgia,serif;line-height:1.7}.result-shortcut{padding:6px 10px;font-size:12px}
+
+.workspace-return{position:sticky;top:0;z-index:5;padding:12px clamp(18px,4vw,52px);background:var(--ink-050);border-bottom:1px solid var(--line);}
+.workspace-return .ws-button{min-height:44px;font-size:14px;}
+body:has(#viewEmail:not([hidden])) #emailBriefNotice{display:none;}
