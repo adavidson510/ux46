@@ -95,3 +95,7 @@ When its upstream predates optional modules, `--modules-config /private/modules.
 explicitly selects `email`, `tell`, and `constellation` using boolean values. The
 settings endpoint remains authenticated. Without this option it forwards the
 installed console’s settings; host preferences stay outside reusable source.
+
+Room result/review and experiment controls use the private work.sqlite3 owner store;
+Tell and Constellation retain their source records. See [work and learning](work-learning.md).
+Email remains a separate workflow: [briefs, reviewed replies and reversible Gmail filing](email.md).

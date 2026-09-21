@@ -32,6 +32,10 @@ class EmailStore(Store):
                 CREATE TABLE IF NOT EXISTS mail_receipts(id TEXT PRIMARY KEY,body TEXT);
             ''')
 
+        with self.db() as db:
+            row=db.execute("SELECT value FROM metadata WHERE key='mail-label-aliases'").fetchone()
+            self.label_aliases=json.loads(row[0]) if row else {}
+
     def account(self, account, **updates):
         aid=identifier(account)
         with self.db() as db:
@@ -94,7 +98,8 @@ class EmailStore(Store):
         with self.db() as db:db.execute('DELETE FROM mail_messages WHERE account=? AND id=?',(account,mid))
 
     def classify(self,account,message,rules):
-        labels=message['labels'];subject=message['subject'].casefold();words=(subject+' '+message['snippet']).casefold()
+        # Preserve historical labels while new filing uses UX46 names.
+        labels=[self.label_aliases.get(x,('UX46/'+x[5:]) if x.startswith('Pane/') else x) for x in message['labels']];subject=message['subject'].casefold();words=(subject+' '+message['snippet']).casefold()
         category=next((v for k,v in PANE_CATEGORIES.items() if k in labels),'other')
         marketing=any(l in labels for l in ('UX46/Newsletters & Marketing','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'))
         if marketing:category='newsletters'

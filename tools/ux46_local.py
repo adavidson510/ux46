@@ -107,9 +107,9 @@ def run(root, config, port=None, open_browser=False):
             if selected == 'none' and method != 'GET' and path in ('/api/sessions','/api/connection/refresh'):
                 raise console.ApiError(HTTPStatus.CONFLICT,'not_configured','Connect an agent first')
             if not path.startswith(('/api/constellation/', '/api/email/', '/api/schedule/',
-                                    '/api/usage-report/', '/api/desktop-devices/')):
+                                    '/api/usage-report/', '/api/desktop-devices/', '/api/work/')):
                 return super()._api(method, path, query, decision)
-            reads = {'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status'}
+            reads = {'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status', 'assistant'}
             if method not in ('GET', 'POST') or (method == 'GET' and path.rsplit('/', 1)[-1] not in reads):
                 raise console.ApiError(HTTPStatus.METHOD_NOT_ALLOWED, 'bad_method', 'Use POST for changes')
             # ConsoleHandler checked host, loopback, origin and CSRF before

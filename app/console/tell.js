@@ -213,18 +213,7 @@
     if (!replies.length) replyList.appendChild(node("p", {text: "No discussion yet. Comments don't wake another agent."}));
     audit.appendChild(replyList); article.appendChild(audit);
     const feedback = node("div", {class: "tell-feedback"});
-    for (const [label, body] of [["Useful", "Useful — explore this direction."], ["Not now", "Not now — lower the priority of this idea."]]) {
-      const button = node("button", {class: "linkbtn" + (label === "Useful" ? " tell-useful" : ""), type: "button"}, [
-        label === "Useful" ? tellIcon("check") : null, node("span", {text: label})]);
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        try {
-          await api("/api/tell/posts/" + encodeURIComponent(post.id) + "/replies", {
-            method: "POST", body: {body}, absolute: true});
-          button.textContent = "Noted";
-        } catch (error) { button.disabled = false; button.textContent = "Try again"; }
-      }); feedback.appendChild(button);
-    }
+    if (window.__work) void window.__work.signal(post, article);
     const comment = node("details", {class: "tell-comment", data: {tellDetail: "comment-" + post.id}}, [
       node("summary", {}, [tellIcon("comment"), node("span", {text: "Add a thought"})]),
     ]);
