@@ -16,7 +16,7 @@ class EfficiencyApiTests(unittest.TestCase):
     def test_basket_metadata_and_named_file_are_separate(self):
         status, catalog = self.h.call('GET', '/api/skills')
         self.assertEqual(status, 200)
-        self.assertEqual(len(catalog['skills']), 7)
+        self.assertEqual(len(catalog['skills']), 8)
         self.assertNotIn('content', catalog['skills'][0])
         status, body = self.h.call('GET', '/api/skills/ux46-efficiency')
         self.assertEqual(status, 200)

@@ -62,7 +62,7 @@
       paint(s);
       // Exact source-room references only; topic guesses never broadcast.
       for(const ref of (post.sources||[]).slice(0,3)){
-        const room=ref.room||ref.vault;
+        const room=ref.room||ref.vault||ref.label;
         if(typeof room==='string'&&window.__atlas.state.rooms.has(room))await call('action',{action:'route',source:s.id,agent:current().agent,room,automatic:true,reason:'This finding cites work in this room. Assess whether it changes the current work.'});
       }
       void refresh(true);
