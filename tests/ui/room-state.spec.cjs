@@ -16,7 +16,7 @@ const history = (ids, next = null) => ({items: ids.map(item), complete: !next, n
 async function fixture(page) {
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
-    if (url.origin !== 'http://fixture.test') return route.abort();
+    if (url.origin !== 'https://fixture.test') return route.abort();
     if (url.pathname.startsWith('/api/')) return route.fulfill({json: {}});
     const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
     const file = path.join(root, 'app/console', name);
@@ -27,7 +27,7 @@ async function fixture(page) {
     const contentType = name.endsWith('.js') ? 'application/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html';
     await route.fulfill({body, contentType});
   });
-  await page.goto('http://fixture.test/');
+  await page.goto('https://fixture.test/');
   await page.waitForFunction(() => Boolean(window.__atlas));
   await seed(page, 'fixture/alpha');
 }
@@ -447,4 +447,108 @@ test('failed name saves and unresolved drafts keep the desktop and input in plac
   await expect(page.locator('#deskChoiceNote')).toContainText('Your draft is kept here');
   expect(f.read().state.liveDesktops[3].layout.tabs).toHaveLength(2);
   await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+async function commandQueueFixture(page) {
+  await fixture(page);
+  let target=detail('fixture/alpha',{native:{thread_id:'native-alpha',active_turn:'busy-turn'}});
+  const writes=[];
+  await page.route('**/api/room/fixture/alpha',route=>route.fulfill({json:target}));
+  await page.route('**/api/room/fixture/alpha/command',route=>{
+    writes.push(route.request().postDataJSON());
+    return route.fulfill({json:{command:{name:'goal',state:'updated',message:'Goal resumed.'}}});
+  });
+  await page.evaluate(d=>{state.detail=d;state.csrf='fixture-csrf';renderTarget();},target);
+  return {writes,setTarget:d=>{target=d;},idle:()=>{target={...target,native:{...target.native,active_turn:null}};}};
+}
+
+test('busy goal command waits, stays bound to its original room, and preserves a later draft',async({page})=>{
+  const f=await commandQueueFixture(page);
+  expect(await page.evaluate(()=>sendCommand('/goal resume',false))).toEqual({ok:true,queued:true});
+  await expect(page.locator('#commandQueue')).toContainText('Queued');
+  await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(0);
+  await seed(page,'fixture/beta');
+  await page.locator('#draft').fill('new unsent beta words');
+  f.idle();await page.evaluate(()=>drainCommandQueue());
+  expect(f.writes).toHaveLength(1);expect(f.writes[0].thread_id).toBe('native-alpha');
+  await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(1);
+  await expect(page.locator('#draft')).toHaveValue('new unsent beta words');
+  expect(await page.evaluate(()=>state.room)).toBe('fixture/beta');
+  await expect(page.locator('#commandQueue')).toContainText('Goal resumed.');
+  await page.screenshot({path:test.info().outputPath('queued-command-result.png')});
+});
+
+test('queued commands survive reload and can be cancelled before dispatch',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.evaluate(()=>sendCommand('/model example-model',false));
+  await page.reload();
+  await page.evaluate(()=>{state.csrf='fixture-csrf';renderCommandQueue();});
+  await expect(page.locator('#commandQueue')).toContainText('/model example-model');
+  await page.getByRole('button',{name:'Cancel queued /model example-model',exact:true}).click();
+  f.idle();await page.evaluate(()=>drainCommandQueue());
+  expect(f.writes).toHaveLength(0);
+  await expect(page.locator('#commandQueue')).toContainText('Cancelled before running');
+});
+
+test('native target changes and pending approvals prevent queued execution',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.evaluate(()=>sendCommand('/compact',false));
+  f.setTarget(detail('fixture/alpha',{native:{thread_id:'native-alpha',active_turn:null},approvals:[{id:'approval-1'}]}));
+  await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(0);
+  f.setTarget(detail('fixture/alpha',{native:{thread_id:'native-replacement',active_turn:null}}));
+  await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(0);
+  await expect(page.locator('#commandQueue')).toContainText('different native session');
+});
+
+test('unknown command delivery is retained after reload and never automatically replayed',async({page})=>{
+  const f=await commandQueueFixture(page);let posts=0;
+  await page.route('**/api/room/fixture/alpha/command',route=>{posts++;return route.abort('failed');});
+  await page.evaluate(()=>sendCommand('/goal resume',false));f.idle();
+  await page.evaluate(()=>drainCommandQueue());expect(posts).toBe(1);
+  await page.reload();await page.evaluate(()=>{state.csrf='fixture-csrf';return drainCommandQueue();});
+  expect(posts).toBe(1);
+  await expect(page.locator('#commandQueue')).toContainText('Result unknown');
+});
+
+test('two UX46 windows dispatch a shared queued command only once',async({page,context})=>{
+  const f=await commandQueueFixture(page);
+  await page.evaluate(()=>sendCommand('/effort high',false));
+  const other=await context.newPage();const g=await commandQueueFixture(other);
+  f.idle();g.idle();
+  await Promise.all([page.evaluate(()=>drainCommandQueue()),other.evaluate(()=>drainCommandQueue())]);
+  expect(f.writes.length+g.writes.length).toBe(1);
+  await other.close();
+});
+
+test('queuing a composer command clears only that command and preserves FIFO order',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.route('**/api/room/fixture/alpha/draft',route=>route.fulfill({json:{body:route.request().postDataJSON()?.body || '',version:1}}));
+  await page.locator('#draft').fill('/model first-model');
+  await page.evaluate(()=>sendCommand('/model first-model',true));
+  await expect(page.locator('#draft')).toHaveValue('');
+  await page.locator('#draft').fill('my next message');
+  await page.evaluate(()=>sendCommand('/effort high',false));f.idle();
+  await page.evaluate(()=>drainCommandQueue());
+  expect(f.writes.map(w=>w.command)).toEqual(['/model first-model']);
+  await page.evaluate(()=>drainCommandQueue());
+  expect(f.writes.map(w=>w.command)).toEqual(['/model first-model','/effort high']);
+  await expect(page.locator('#draft')).toHaveValue('my next message');
+});
+
+test('abandoned dispatch is shown as unknown and a queued new conversation opens only on request',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.locator('#draft').fill('');
+  await page.evaluate(()=>sendCommand('/new blank',false));
+  await page.route('**/api/room/fixture/alpha/command',route=>route.fulfill({json:{command:{name:'new',state:'created',message:'Conversation created.',new_room:{id:'fixture/new'}}}}));
+  f.idle();await page.evaluate(()=>drainCommandQueue());
+  expect(await page.evaluate(()=>state.room)).toBe('fixture/alpha');
+  await expect(page.getByRole('button',{name:'Open new conversation',exact:true})).toBeVisible();
+  await page.route('**/api/room/fixture/new',route=>route.fulfill({json:detail('fixture/new')}));
+  await page.getByRole('button',{name:'Open new conversation',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>state.room)).toBe('fixture/new');
+  await page.evaluate(()=>{
+    const entry=queuedCommands()[0];saveQueuedCommand({...entry,state:'running'});
+  });
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue')).toContainText('window closed before confirming');
 });

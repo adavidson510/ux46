@@ -1677,3 +1677,9 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 
 .desk-managed{padding:12px 0;border-bottom:1px solid var(--line);}
 .desk-managed .desk-help{margin:4px 0;}
+
+.command-queue {flex:none; max-height:180px; overflow:auto; margin:8px 16px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--ink-100); font-size:13px}
+.command-queue[hidden] {display:none}
+.command-queue-row {display:flex; gap:8px; align-items:center; border-top:1px solid var(--line); padding-top:8px; margin-top:8px}
+.command-queue-row>div {flex:1; min-width:0; overflow-wrap:anywhere}
+.command-queue-note {margin:3px 0; color:var(--text-mute); font-size:12px}

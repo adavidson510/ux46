@@ -35,6 +35,23 @@ catch-up reads back to the last observed item, up to 20 pages of 40 items. If th
 bounded window cannot close the gap, the view remains explicitly stale. These
 reads do not reconnect workers, resend input, or overwrite a draft.
 
+Commands that need an idle session (`/model`, `/effort`, `/compact`, `/new`,
+`/refresh`, `/goal resume` and `/goal clear`) can wait in the browser's saved
+command queue. It binds each action to its original agent, room and native
+thread, shows Cancel and the eventual result, and preserves later drafts and
+navigation. Read-only commands, steering and goal pause keep their immediate
+behavior. A new conversation created in the background offers an explicit Open
+action. Native validation and ownership checks still apply at dispatch.
+
+This queue is local to the browser, separate from the server's ordinary message
+queue. Keep UX46 open to execute waiting commands; if every window is closed,
+queued entries wait until reopening. Web Locks prevent two windows in the same
+browser from dispatching an entry twice. A dispatched action whose outcome was
+lost is shown as unknown and is never automatically repeated; later commands
+for that native thread wait until the unknown entry is reviewed and dismissed.
+Approvals, unreadable state and changed native targets cannot authorize dispatch.
+The queue does not require a native service restart or a model polling loop.
+
 The standalone launcher separates source from private configuration and state.
 The registry starts empty. Native metadata enriches explicitly filed sessions;
 there is no sweep of historical transcripts during initialization.
