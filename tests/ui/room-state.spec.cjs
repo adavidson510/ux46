@@ -223,6 +223,23 @@ test('explicit full recovery is one request with an interruption label and no se
   await page.screenshot({path:test.info().outputPath('workspace-recovery.png')});
 });
 
+test('login refresh summary counts conversations separately from the background connection',async({page})=>{
+ await fixture(page);
+ const items=[...Array.from({length:9},(_,i)=>({room:'fixture/room'+i,title:'Conversation '+i,state:'refreshed'})),...Array.from({length:3},(_,i)=>({room:'fixture/idle'+i,title:'Saved conversation '+i,state:'skipped',detail:'Not connected; its next connection uses the current login.'})),{room:'',title:'Session list connection',state:'refreshed'}];
+ await page.evaluate(items=>{agentActions.job={agent:'local',state:'complete',items};renderAgentRefresh();document.querySelector('#agentActionsDialog').showModal();},items);
+ const status=page.locator('#agentRefreshStatus');
+ await expect(status).toContainText('9 conversations refreshed · 3 not running');
+ await expect(status).toContainText('when you open them');
+ await expect(status).toContainText('background session list was refreshed too');
+ await expect(status).not.toContainText('10 refreshed');
+ await page.getByText('Conversation details',{exact:true}).click();
+ await expect(status).toContainText('Saved conversation 0 · Not running');
+ await page.screenshot({path:test.info().outputPath('refresh-summary.png')});
+ await page.evaluate(items=>{document.querySelector('#agentActionsDialog').close();openWorkspaceRecovery('agent','local');renderWorkspaceRecovery({mode:'agent',agent:'local',state:'partial',connections:items});},[{room:'fixture/current',state:'deferred'},{room:'fixture/idle',state:'not_connected'},{room:'fixture/uncertain',state:'unknown'}]);
+ await expect(page.locator('#workspaceRecoveryStatus')).toContainText('1 not running · 1 waiting to finish · 1 needs attention');
+ await expect(page.locator('#workspaceRecoveryStatus')).not.toContainText('Refresh complete');
+});
+
 test('customization opens the local source project even while another agent is selected', async ({page}) => {
   await fixture(page); await seed(page,'fixture/alpha','other-agent');
   const writes=[];

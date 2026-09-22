@@ -6037,9 +6037,10 @@ function openWorkspaceRecovery(mode = "all", agent = null) {
 }
 function renderWorkspaceRecovery(job) {
   const host = $("#workspaceRecoveryStatus"); host.replaceChildren();
-  host.appendChild(el("p", {text: job.message || job.state}));
+  if(job.mode === "agent") renderRefreshSummary(host,job,job.connections||[]);
+  else host.appendChild(el("p", {text: job.message || job.state}));
   const rows = [...(job.services || []), ...(job.connections || [])];
-  if (rows.length) host.appendChild(el("details", {}, [el("summary", {text: "Recovery results"}),
+  if (rows.length && job.mode !== "agent") host.appendChild(el("details", {}, [el("summary", {text: "Recovery results"}),
     ...rows.map(row => el("p", {text: (row.id || row.agent || "Connection") + (row.room ? " · " + row.room : "") + " · " + row.state}))]));
   if (job.state === "partial" && job.mode === "agent") host.appendChild(el("button", {type: "button", class: "linkbtn", text: "Open full UX46 recovery", on: {click: () => { $("#workspaceRecovery").close(); openWorkspaceRecovery(); }}}));
   const terminal = ["complete", "partial", "failed"].includes(job.state);
@@ -9263,13 +9264,34 @@ function openAgentActions(id,anchor){
   $('#agentActionsHelp').textContent=agent.runtime==='codex'?'Reconnect idle owned sessions using this agent’s saved login. Busy sessions are reported; full recovery can interrupt them.':'Session-wide login refresh is not available for this runtime yet.';
   renderAgentRefresh();$('#agentActionsDialog').showModal();void loadAgentRefresh();
 }
+function renderRefreshSummary(host,job,items){
+  // Count conversations, not the separate catalogue connection.
+  const conversations=items.filter(item=>item.room);
+  const idle=item=>item.state==='not_connected'||(item.state==='skipped'&&String(item.detail||'').startsWith('Not connected;'));
+  const counts={ready:0,idle:0,waiting:0,attention:0};
+  for(const item of conversations){
+    if(item.state==='refreshed')counts.ready++;
+    else if(idle(item))counts.idle++;
+    else if(['waiting','deferred'].includes(item.state))counts.waiting++;
+    else counts.attention++;
+  }
+  host.appendChild(el('p',{text:job.state==='complete'?'Refresh complete. Your conversations are preserved.':job.message||'Checking conversations…'}));
+  const parts=[counts.ready?counts.ready+' conversation'+(counts.ready===1?'':'s')+' refreshed':'',counts.idle?counts.idle+' not running':'',counts.waiting?counts.waiting+' waiting to finish':'',counts.attention?counts.attention+(counts.attention===1?' needs attention':' need attention'):''].filter(Boolean);
+  if(parts.length)host.appendChild(el('p',{class:'agent-refresh-counts',text:parts.join(' · ')}));
+  if(counts.idle)host.appendChild(el('p',{text:'Conversations that are not running will use the saved login when you open them.'}));
+  const readers=items.filter(item=>!item.room);
+  if(readers.length)host.appendChild(el('p',{class:'panel-sub',text:readers.every(item=>item.state==='refreshed')?'The background session list was refreshed too.':'The background session list: '+readers.map(item=>item.state==='waiting'||item.state==='deferred'?'waiting for conversations to finish':item.state).join(', ')+'.'}));
+  if(conversations.length)host.appendChild(el('details',{},[el('summary',{text:'Conversation details'}),...conversations.map(item=>{
+    const title=item.title||state.tabs.find(t=>t.agent===job.agent&&t.room===item.room)?.title||state.rooms.get(item.room)?.title||item.room;
+    const status=item.state==='refreshed'?'Refreshed — ready with the saved login':idle(item)?'Not running — saved login applies when opened':['waiting','deferred'].includes(item.state)?'Waiting for current work or pending input to finish':item.state==='unknown'?'Could not confirm the refresh':item.state==='skipped'?'Not refreshed — connection changed':'Needs attention';
+    return el('p',{text:title+' · '+status});
+  })]));
+  host.appendChild(el('p',{class:'panel-sub',text:'Login refresh does not reload the interface. Reload the page to pick up interface updates.'}));
+}
 function renderAgentRefresh(){
   const job=agentActions.job,host=$('#agentRefreshStatus');host.replaceChildren();
   if(!job){host.textContent=agentActions.loading?'Checking…':'';return;}
-  const counts={};for(const item of job.items||[])counts[item.state]=(counts[item.state]||0)+1;
-  host.appendChild(el('p',{text:job.message||job.state}));
-  if(job.items?.length)host.appendChild(el('p',{class:'agent-refresh-counts',text:[counts.refreshed?counts.refreshed+' refreshed':'',counts.waiting?counts.waiting+' waiting':'',counts.skipped?counts.skipped+' already disconnected':'',(counts.failed||counts.unknown||counts.expired)?'Some need attention':''].filter(Boolean).join(' · ')}));
-  if(job.items?.length)host.appendChild(el('details',{},[el('summary',{text:'Session details'}),...job.items.map(item=>el('p',{text:(item.title||state.tabs.find(t=>t.agent===job.agent&&t.room===item.room)?.title||item.room)+' · '+item.state+(item.detail?' — '+item.detail:'')}))]));
+  renderRefreshSummary(host,job,job.items||[]);
   $('#agentActionsRefresh').disabled=['discovering','refreshing','waiting'].includes(job.state);
   if(!['discovering','refreshing','waiting'].includes(job.state))agentActions.request=null;
 }
