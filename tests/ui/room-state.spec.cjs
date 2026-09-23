@@ -482,7 +482,7 @@ async function commandQueueFixture(page) {
 test('busy goal command waits, stays bound to its original room, and preserves a later draft',async({page})=>{
   const f=await commandQueueFixture(page);
   expect(await page.evaluate(()=>sendCommand('/goal resume',false))).toEqual({ok:true,queued:true});
-  await expect(page.locator('#commandQueue')).toContainText('Queued');
+  await expect(page.locator('#commandQueue')).toContainText('queued');
   await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(0);
   await seed(page,'fixture/beta');
   await page.locator('#draft').fill('new unsent beta words');
@@ -491,7 +491,8 @@ test('busy goal command waits, stays bound to its original room, and preserves a
   await page.evaluate(()=>drainCommandQueue());expect(f.writes).toHaveLength(1);
   await expect(page.locator('#draft')).toHaveValue('new unsent beta words');
   expect(await page.evaluate(()=>state.room)).toBe('fixture/beta');
-  await expect(page.locator('#commandQueue')).toContainText('Goal resumed.');
+  await expect(page.locator('#commandQueue')).toBeHidden();
+  expect(await page.evaluate(()=>queuedCommands()[0].state)).toBe('complete');
   await page.screenshot({path:test.info().outputPath('queued-command-result.png')});
 });
 
@@ -504,7 +505,8 @@ test('queued commands survive reload and can be cancelled before dispatch',async
   await page.getByRole('button',{name:'Cancel queued /model example-model',exact:true}).click();
   f.idle();await page.evaluate(()=>drainCommandQueue());
   expect(f.writes).toHaveLength(0);
-  await expect(page.locator('#commandQueue')).toContainText('Cancelled before running');
+  await expect(page.locator('#commandQueue')).toBeHidden();
+  expect(await page.evaluate(()=>queuedCommands()[0].state)).toBe('cancelled');
 });
 
 test('native target changes and pending approvals prevent queued execution',async({page})=>{
@@ -524,7 +526,7 @@ test('unknown command delivery is retained after reload and never automatically 
   await page.evaluate(()=>drainCommandQueue());expect(posts).toBe(1);
   await page.reload();await page.evaluate(()=>{state.csrf='fixture-csrf';return drainCommandQueue();});
   expect(posts).toBe(1);
-  await expect(page.locator('#commandQueue')).toContainText('Result unknown');
+  await expect(page.locator('#commandQueue')).toContainText('result unknown');
 });
 
 test('two UX46 windows dispatch a shared queued command only once',async({page,context})=>{
@@ -561,11 +563,94 @@ test('abandoned dispatch is shown as unknown and a queued new conversation opens
   expect(await page.evaluate(()=>state.room)).toBe('fixture/alpha');
   await expect(page.getByRole('button',{name:'Open new conversation',exact:true})).toBeVisible();
   await page.route('**/api/room/fixture/new',route=>route.fulfill({json:detail('fixture/new')}));
+  const completed=await page.evaluate(()=>queuedCommands()[0]);
   await page.getByRole('button',{name:'Open new conversation',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>state.room)).toBe('fixture/new');
-  await page.evaluate(()=>{
-    const entry=queuedCommands()[0];saveQueuedCommand({...entry,state:'running'});
-  });
+  await expect(page.locator('#commandQueue')).toBeHidden();
+  await page.evaluate(entry=>{saveQueuedCommand({...entry,state:'running'});},completed);
   await page.evaluate(()=>drainCommandQueue());
   await expect(page.locator('#commandQueue')).toContainText('window closed before confirming');
+});
+
+
+test('queue timer applies a waiting resume once and removes the card without dismissal',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.evaluate(()=>sendCommand('/goal resume',false));
+  await expect(page.locator('#commandQueue')).toContainText('/goal resume · queued');
+  f.idle();
+  await expect.poll(()=>f.writes.length,{timeout:6000}).toBe(1);
+  await expect(page.locator('#commandQueue')).toBeHidden();
+  await page.reload();
+  await page.evaluate(()=>{state.csrf='fixture-csrf';renderCommandQueue();return drainCommandQueue();});
+  expect(f.writes).toHaveLength(1);
+  await expect(page.locator('#commandQueue')).toBeHidden();
+});
+
+test('queue explains each waiting condition and preserves unknown delivery notices',async({page})=>{
+  const f=await commandQueueFixture(page);
+  await page.evaluate(()=>sendCommand('/goal resume',false));
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue')).toContainText('still working on its current reply');
+  await expect(page.locator('#commandQueue')).toContainText('Last checked less than a minute ago');
+  f.setTarget(detail('fixture/alpha',{native:{thread_id:'native-alpha',active_turn:null},approvals:[{id:'a'}]}));
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue')).toContainText('Waiting for your answer or approval');
+  f.setTarget(detail('fixture/alpha',{native:{thread_id:'native-alpha',active_turn:null},ownership:{state:'idle'}}));
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue')).toContainText('not connected here');
+  expect(f.writes).toHaveLength(0);
+  await page.route('**/api/room/fixture/alpha',route=>route.abort('failed'));
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue')).toContainText('Cannot reach this conversation');
+});
+
+test('repeated waiting commands coalesce across windows without changing ordered commands',async({page,context})=>{
+  const f=await commandQueueFixture(page);
+  const other=await context.newPage();await commandQueueFixture(other);
+  await Promise.all([page.evaluate(()=>sendCommand('/goal resume',false)),other.evaluate(()=>sendCommand('/goal resume',false))]);
+  expect(await page.evaluate(()=>queuedCommands().filter(e=>e.state==='pending').length)).toBe(1);
+  await page.evaluate(()=>sendCommand('/goal clear',false));
+  await page.evaluate(()=>sendCommand('/goal resume',false));
+  expect(await page.evaluate(()=>queuedCommands().map(e=>e.command))).toEqual(['/goal resume','/goal clear','/goal resume']);
+  expect(f.writes).toHaveLength(0);
+  await other.close();
+});
+
+test('a blocked goal and a working or finished reply are shown separately',async({page})=>{
+  await commandQueueFixture(page);
+  await page.evaluate(()=>{
+    state.detail.goal_status={state:'known',goal:{status:'blocked',objective:'Finish the fixture'}};
+    renderGoalBadge();
+    state.goalPanelTarget={agent:agentId(),room:state.room};
+    state.goalPanelStatus=state.detail.goal_status;
+    state.goalPanel=state.goalPanelStatus.goal;
+    state.commandMode='goal';renderCommands();
+  });
+  await expect(page.locator('#btnGoal')).toHaveText('Goal needs help');
+  await expect(page.locator('#commandOptions')).toContainText('Automatic continuation is stopped');
+  await expect(page.locator('#commandOptions')).toContainText('This turn: still working on a reply');
+  await expect(page.locator('#btnGoalResume')).toHaveText('Resume after this reply');
+  await page.evaluate(()=>{state.detail.native.active_turn=null;renderCommands();});
+  await expect(page.locator('#commandOptions')).toContainText('This turn: finished. No reply is running.');
+  await expect(page.locator('#btnGoal')).toHaveText('Goal needs help');
+});
+
+
+test('waiting commands use compact rows with optional details on desktop and phone',async({page})=>{
+  await commandQueueFixture(page);
+  await page.evaluate(()=>{state.detail.project_name='GlucaPet';return sendCommand('/goal resume',false);});
+  await page.evaluate(()=>sendCommand('/effort high',false));
+  await expect(page.locator('#commandQueue summary').first()).toHaveText('GlucaPet · /goal resume · queued');
+  await expect(page.locator('#commandQueue details').first()).not.toHaveAttribute('open','');
+  expect((await page.locator('#commandQueue').boundingBox()).height).toBeLessThan(100);
+  await page.screenshot({path:test.info().outputPath('compact-queue-desktop.png')});
+  await page.locator('#commandQueue summary').first().click();
+  await page.evaluate(()=>drainCommandQueue());
+  await expect(page.locator('#commandQueue details').first()).toHaveAttribute('open','');
+  await expect(page.locator('#commandQueue .command-queue-note').first()).toBeVisible();
+  await page.locator('#commandQueue summary').first().click();
+  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>__atlas.applyShell());
+  await page.screenshot({path:test.info().outputPath('compact-queue-phone.png')});
+  const box=await page.locator('#commandQueue').boundingBox();
+  expect(box.width).toBeGreaterThan(300);expect(box.height).toBeLessThan(130);expect(box.x+box.width).toBeLessThanOrEqual(390);
 });

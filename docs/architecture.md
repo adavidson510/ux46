@@ -38,8 +38,11 @@ reads do not reconnect workers, resend input, or overwrite a draft.
 Commands that need an idle session (`/model`, `/effort`, `/compact`, `/new`,
 `/refresh`, `/goal resume` and `/goal clear`) can wait in the browser's saved
 command queue. It binds each action to its original agent, room and native
-thread, shows Cancel and the eventual result, and preserves later drafts and
-navigation. Read-only commands, steering and goal pause keep their immediate
+thread, shows the wait reason and last check, and preserves later drafts and
+navigation. Successful and cancelled commands disappear automatically; failures
+and unknown outcomes remain visible. Repeated identical waiting requests are
+coalesced without changing the order of intervening commands. Goal continuation
+and the current reply’s activity are explained separately. Read-only commands, steering and goal pause keep their immediate
 behavior. A new conversation created in the background offers an explicit Open
 action. Native validation and ownership checks still apply at dispatch.
 

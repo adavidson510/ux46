@@ -7930,8 +7930,8 @@ function goalLabel(status) {
   if (status.state === "unsupported") return "Goal unavailable";
   if (status.state !== "known") return "Goal";
   if (!status.goal) return "No goal";
-  const labels = {active: "active", paused: "paused", blocked: "blocked",
-    usageLimited: "usage limited", complete: "complete"};
+  const labels = {active: "continuing", paused: "paused", blocked: "needs help",
+    usageLimited: "at usage limit", complete: "complete", completed: "complete"};
   return labels[status.goal.status] ? "Goal " + labels[status.goal.status] : "Goal";
 }
 function goalTone(status) {
@@ -7942,12 +7942,30 @@ function goalDescription(status) {
   return status.goal?.objective || status.goal?.text || (status.state === "unknown"
     ? "Goal status unknown" : goalLabel(status));
 }
+function goalContinuation(status) {
+  if (status.state !== 'known') return 'Automatic continuation: status unavailable.';
+  if (!status.goal) return 'No saved goal to continue automatically.';
+  return ({active:'Automatic continuation is on. The goal can continue after the current reply.',
+    blocked:'Automatic continuation is stopped because the agent reported a blocker. Resume retries the goal; it does not resolve the blocker.',
+    paused:'Automatic continuation is paused. The current reply can still finish.',
+    usageLimited:'Automatic continuation is waiting for available usage.',
+    complete:'The goal is complete. No automatic continuation is needed.',
+    completed:'The goal is complete. No automatic continuation is needed.'})[status.goal.status] || 'Automatic continuation: status unavailable.';
+}
+function goalTurnDescription(detail) {
+  if (detail?.approvals?.length) return 'This turn: waiting for your answer or approval.';
+  if (commandTurnRunning(detail)) return 'This turn: still working on a reply.';
+  const n=detail?.native;
+  if (detail?.ownership?.state === 'atlas_owned' && n && (Object.hasOwn(n,'active_turn') || typeof n.active_run === 'boolean'))
+    return 'This turn: finished. No reply is running.';
+  return 'This turn: current activity unavailable.';
+}
 function renderGoalBadge() {
   const button = $("#btnGoal"), status = goalStatus(state.detail);
   button.hidden = !state.detail || status.state === "unsupported";
   button.textContent = goalLabel(status);
   button.dataset.goalTone = goalTone(status);
-  button.title = goalDescription(status);
+  button.title = goalTurnDescription(state.detail) + " " + goalContinuation(status) + " " + goalDescription(status);
   button.setAttribute("aria-label", goalLabel(status) + ": " + goalDescription(status) + ". View goal details");
 }
 
@@ -9689,7 +9707,7 @@ function renderGoalResumeControl() {
     && state.goalPanelStatus?.state === "known" && state.goalPanel?.status === "active"
     && native?.active_turn && native.active_turn !== state.detail?.native_terminal?.turn_id;
   button.disabled = Boolean(alreadyWorking);
-  button.textContent = alreadyWorking ? "Already working" : "Resume goal";
+  button.textContent = alreadyWorking ? "Goal already continuing" : target?.agent === agentId() && target?.room === state.room && commandTurnRunning(state.detail) ? "Resume after this reply" : "Resume goal";
 }
 function positionGoalMenu() {
   const popup = $("#commandPopover");
@@ -9734,7 +9752,8 @@ function renderCommands() {
       : status.state === "unsupported" ? "Goals are unavailable for this session." : "Goal status is unknown."}));
     if (status.message) host.appendChild(el("p", {class:"command-note", text: status.message}));
     if (goal) {
-      host.appendChild(el("p",{class:"command-note",text:(status.state === "known" ? "State: " : "Last known state: ") + (goal.status || "unavailable")}));
+      host.appendChild(el("p",{class:"command-note",text:goalContinuation(status)}));
+      if (current) host.appendChild(el("p",{class:"command-note",text:goalTurnDescription(state.detail)}));
       if (current && status.state === "known") host.appendChild(el("div",{class:"command-tabs"},[
         el("button",{id:"btnGoalResume",type:"button",class:"linkbtn",text:"Resume goal",on:{click:()=>sendCommand("/goal resume",false)}}),
         el("button",{type:"button",class:"ghost",text:"Pause goal",on:{click:()=>sendCommand("/goal pause",false)}}),
@@ -9801,7 +9820,19 @@ function queuedCommands() {
   } catch (_) { /* Storage-disabled browsers can still use immediate commands. */ }
   return entries.sort((a,b)=>a.at-b.at || a.id.localeCompare(b.id));
 }
-function saveQueuedCommand(entry) {localStorage.setItem(COMMAND_QUEUE_PREFIX+entry.id,JSON.stringify(entry));}
+function saveQueuedCommand(entry) {
+  if (!['pending','running'].includes(entry.state) && !entry.finishedAt) entry={...entry,finishedAt:Date.now()};
+  localStorage.setItem(COMMAND_QUEUE_PREFIX+entry.id,JSON.stringify(entry));
+}
+function commandQueueWait(entry, message) {
+  // Avoid constant storage events in every open window; retain a recent check.
+  if (entry.message!==message || Date.now()-(entry.checkedAt || 0)>=15000)
+    saveQueuedCommand({...entry,message,checkedAt:Date.now()});
+}
+function commandQueueAge(at) {
+  const minutes=Math.max(0,Math.floor((Date.now()-at)/60000));
+  return minutes<1?'less than a minute':minutes===1?'1 minute':minutes+' minutes';
+}
 function canQueueCommand(command) {
   const name=commandName(command), argument=command.trim().slice(command.trim().split(/\s/)[0].length).trim();
   return ["/compact","/new","/refresh"].includes(name) || (["/model","/effort"].includes(name) && Boolean(argument))
@@ -9811,11 +9842,16 @@ function commandTurnRunning(detail) {
   const n=detail?.native || {};
   return n.active_run === true || Boolean(n.active_turn && n.active_turn!==detail?.native_terminal?.turn_id);
 }
-function queueCommand(command, attempt, context) {
+async function queueCommand(command, attempt, context) {
   if (!navigator.locks || !attempt.thread_id) throw new Error('This browser cannot safely save a command queue. Your command is kept in the composer.');
-  if (queuedCommands().length>=100) throw new Error('Dismiss finished commands before adding more to the queue.');
-  const entry={...context,id:attempt.client_id,thread_id:attempt.thread_id,command,at:Date.now(),state:'pending',message:'Waiting for this conversation to finish its turn.'};
+  return navigator.locks.request(COMMAND_QUEUE_LOCK,async()=>{
+  const saved=queuedCommands();
+  const previous=saved.filter(e=>e.agent===context.agent && e.thread_id===attempt.thread_id && ['pending','running','uncertain'].includes(e.state)).at(-1);
+  if (previous && ['pending','running'].includes(previous.state) && previous.command.trim()===command.trim()) return previous;
+  if (saved.filter(e=>['pending','running','uncertain'].includes(e.state)).length>=100) throw new Error('There are too many waiting commands. Cancel an unneeded request before adding another.');
+  const entry={...context,id:attempt.client_id,thread_id:attempt.thread_id,command,at:Math.max(Date.now(),(saved.at(-1)?.at || 0)+1),state:'pending',message:'Waiting for this conversation to finish its turn.'};
   saveQueuedCommand(entry); renderCommandQueue(); scheduleCommandQueue(); return entry;
+  });
 }
 async function cancelQueuedCommand(id) {
   await navigator.locks.request(COMMAND_QUEUE_LOCK,async()=>{
@@ -9824,26 +9860,40 @@ async function cancelQueuedCommand(id) {
   });
   renderCommandQueue();
 }
+const commandQueueExpanded=new Map();
 function renderCommandQueue() {
   let host=$('#commandQueue');
   if (!host) {host=el('section',{id:'commandQueue',class:'command-queue','aria-label':'Queued commands',hidden:true});$('#composer').before(host);}
-  const entries=queuedCommands(); host.hidden=!entries.length;host.replaceChildren();
+  const entries=queuedCommands().filter(e=>!['complete','cancelled'].includes(e.state) || (e.state==='complete' && e.result?.new_room));
+  host.hidden=!entries.length;host.replaceChildren();
   if (!entries.length) return;
-  host.append(el('strong',{text:'Commands'}),el('p',{class:'command-queue-note',text:'Saved in this browser. Waiting commands run while UX46 is open, including after you reopen it.'}));
-  for (const entry of entries) {
-    const labels={pending:'Queued',running:'Running',complete:'Done',failed:'Needs attention',uncertain:'Result unknown',cancelled:'Cancelled'};
-    const row=el('div',{class:'command-queue-row'},[
-      el('div',{},[el('strong',{text:entry.command}),el('span',{text:' · '+(entry.title || entry.room)+' · '+(entry.result?.state==='accepted'?'Started':labels[entry.state] || entry.state)}),el('p',{class:'command-queue-note',text:entry.message || ''})])]);
+  const waiting=entries.filter(e=>['pending','running'].includes(e.state));
+  const created=entries.filter(e=>e.state==='complete');
+  const attention=entries.filter(e=>!['pending','running','complete','cancelled'].includes(e.state));
+  for (const entry of [...waiting,...attention,...created]) {
+    const labels={pending:'Queued',running:'Applying',complete:'Applied',failed:'Needs attention',uncertain:'Result unknown',cancelled:'Cancelled'};
+    const time=['pending','running'].includes(entry.state)
+      ? 'Queued '+commandQueueAge(entry.at)+' ago · '+(entry.checkedAt?'Last checked '+commandQueueAge(entry.checkedAt)+' ago':'Not checked yet')
+      : entry.finishedAt?'Recorded '+new Date(entry.finishedAt).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Earlier result · completion time was not recorded';
+    const project=entry.project || entry.tab?.project || entry.title?.replace(/^Next (.+) chapter$/,'$1') || entry.room.split('/')[0];
+    const info=el('details',{class:'command-queue-detail'});
+    info.open=commandQueueExpanded.get(entry.id) ?? ['failed','uncertain'].includes(entry.state);
+    info.addEventListener('toggle',()=>{if(info.isConnected) commandQueueExpanded.set(entry.id,info.open);});
+    info.append(el('summary',{text:project+' · '+entry.command+' · '+(entry.result?.state==='accepted'?'started':labels[entry.state]?.toLowerCase() || entry.state),title:(entry.title || entry.room)+' · '+agentLabel(entry.agent)}),
+      el('p',{class:'command-queue-note',text:entry.message || ''}),el('p',{class:'command-queue-note',text:time}));
+    const row=el('div',{class:'command-queue-row'},[info]);
     if (entry.state==='pending') row.append(el('button',{type:'button',class:'ghost',text:'Cancel','aria-label':'Cancel queued '+entry.command,on:{click:()=>void cancelQueuedCommand(entry.id)}}));
     if (entry.state==='complete' && entry.result?.new_room) row.append(el('button',{type:'button',class:'linkbtn',text:'Open new conversation',on:{click:()=>void openQueuedChapter(entry)}}));
-    if (!['pending','running'].includes(entry.state)) row.append(el('button',{type:'button',class:'ghost',text:'Dismiss','aria-label':'Dismiss '+entry.command,on:{click:()=>{localStorage.removeItem(COMMAND_QUEUE_PREFIX+entry.id);renderCommandQueue();}}}));
+    if (!['pending','running'].includes(entry.state)) row.append(el('button',{type:'button',class:'ghost',text:'Clear notice','aria-label':'Clear notice for '+entry.command,on:{click:()=>{localStorage.removeItem(COMMAND_QUEUE_PREFIX+entry.id);renderCommandQueue();}}}));
     host.append(row);
   }
+
 }
 async function openQueuedChapter(entry) {
   const next=entry.result.new_room, room=typeof next==='string'?next:next.id;
   if (entry.result.chapter) await finishChapter(entry.agent,entry.room,next,entry.result.chapter,entry.desktop,entry.tab,entry.localOnly);
   await openTabForTyping(entry.agent,room);
+  localStorage.removeItem(COMMAND_QUEUE_PREFIX+entry.id);renderCommandQueue();
 }
 function scheduleCommandQueue() {
   clearTimeout(commandQueueTimer);
@@ -9862,18 +9912,23 @@ async function drainCommandQueue() {
           blocked.add(target);continue;
         }
         if (entry.state==='uncertain') {blocked.add(target);continue;}
-        if (entry.state!=='pending' || blocked.has(target)) continue;
+        if (entry.state!=='pending') continue;
+        if (blocked.has(target)) {commandQueueWait(entry,'Waiting for an earlier command for this conversation. Review any unknown result first.');continue;}
         blocked.add(target); // One operation per native session per pass.
         const path=agentPath(entry.agent,'/api/room/'+encodeURI(entry.room));
         let detail;
         try {detail=await api(path,{absolute:true,signal:AbortSignal.timeout(10000)});}
-        catch (_) {continue;} // Failed reads cannot establish that a session is idle.
-        if (!detail?.id || !detail.native?.thread_id) continue;
+        catch (_) {commandQueueWait(entry,'Cannot reach this conversation to check its activity. Nothing has been sent; checking again while this page is open.');continue;}
+        if (!detail?.id || !detail.native?.thread_id) {commandQueueWait(entry,'The connection did not return this conversation’s activity. Nothing has been sent.');continue;}
         if (detail.id!==entry.room || detail.native.thread_id!==entry.thread_id) {
           saveQueuedCommand({...entry,state:'failed',message:'This conversation now points to a different native session. The command was not run.'});continue;
         }
-        if ((!Object.hasOwn(detail.native || {},'active_turn') && typeof detail.native?.active_run!=='boolean')
-            || commandTurnRunning(detail) || detail.approvals?.length || detail.ownership?.state!=='atlas_owned') continue;
+        let wait='';
+        if (detail.approvals?.length) wait='Waiting for your answer or approval in this conversation.';
+        else if (commandTurnRunning(detail)) wait='The agent is still working on its current reply. This command will run after that reply finishes.';
+        else if (detail.ownership?.state!=='atlas_owned') wait='This conversation is not connected here. Open it and reconnect to run this command.';
+        else if (!Object.hasOwn(detail.native,'active_turn') && typeof detail.native.active_run!=='boolean') wait='The connection cannot confirm whether a reply is running. Nothing has been sent.';
+        if (wait) {commandQueueWait(entry,wait);continue;}
         if (Array.isArray(detail.commands) && !detail.commands.some(c=>commandName(c.name || c.usage || '')===commandName(entry.command))) {
           saveQueuedCommand({...entry,state:'failed',message:'This agent no longer advertises that command.'});continue;
         }
@@ -9928,12 +9983,12 @@ async function sendCommand(command, fromDraft) {
   try {attempt = JSON.parse(localStorage.getItem(key));} catch(e) {}
   if (!attempt || attempt.command !== command || attempt.thread_id !== threadId) attempt = {client_id:clientId(),command,thread_id:threadId};
   try {localStorage.setItem(key,JSON.stringify(attempt));} catch(e) {}
-  const queueContext={agent:commandAgent,room:roomId,title:state.detail.title || roomId,desktop:sourceDesktop,tab:sourceTab,localOnly:sourceLocalOnly};
+  const queueContext={agent:commandAgent,room:roomId,project:state.detail.project_name || sourceTab?.project || '',title:state.detail.title || roomId,desktop:sourceDesktop,tab:sourceTab,localOnly:sourceLocalOnly};
   const saveWaiting = async () => {
-    queueCommand(command,attempt,queueContext);
+    await queueCommand(command,attempt,queueContext);
     localStorage.removeItem(key);
     if (fromDraft && stillCurrent()) await settleDraftAfterSend(roomId,seq,snapshot.trim(),snapshot,true);
-    if (stillCurrent()) setReceipt(name+" queued. It will run after this turn; you can cancel it above the composer.","saved");
+    if (stillCurrent()) clearReceipt();
     return {ok:true,queued:true};
   };
   if (canQueueCommand(command) && commandSupported(name) && (commandTurnRunning(state.detail)
