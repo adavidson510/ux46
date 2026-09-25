@@ -1,7 +1,7 @@
 const {test, expect} = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
-const root = path.resolve(__dirname, '../..');
+const root = process.env.UX46_TEST_UI_ROOT || path.resolve(__dirname, '../..');
 const detail = (room, extra = {}) => ({
   id: room, title: room, runtime: 'codex', controllable: true,
   native: {thread_id: room, active_turn: null}, ownership: {state: 'atlas_owned'},
@@ -154,7 +154,7 @@ test('unavailable history stays stale after successful event transport, then Rea
   await page.route('**/api/room/**/history?**', route => route.fulfill({json: {unavailable: true, items: [], message: 'fixture reader failed'}}));
   expect(await page.evaluate(() => __atlas.refreshTail())).toBe(false);
   await page.evaluate(() => setConn('reachable', 'live'));
-  await expect(page.locator('#activity')).toContainText('History could not be checked');
+  await expect(page.locator('#activity')).toContainText('The agent couldn’t provide recent messages');
   await expect(page.locator('#stream')).toContainText('fixture/alpha-now');
   await page.route('**/api/room/**/history?**', route => route.fulfill({json: history(['recovered-answer'])}));
   await page.route('**/api/room/fixture/alpha', route => route.fulfill({json: detail('fixture/alpha')}));
@@ -175,8 +175,56 @@ test('unclosed history gap is bounded and leaves the previous view intact', asyn
   expect(calls).toBe(20);
   expect(await page.evaluate(() => state.items.map(i => i.id))).toEqual(['fixture/alpha-now']);
   await expect(page.locator('#activity')).toContainText('Last known view');
+  await expect(page.locator('#activity')).toContainText('More messages arrived while you were away');
   await expect(page.getByRole('button', {name: 'Read latest', exact: true})).toBeVisible();
   await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('a dropped history connection retries without resending or hiding a valid view', async ({page}) => {
+  await fixture(page);
+  let calls = 0;
+  const writes = [];
+  page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
+  await page.route('**/api/room/**/history?**', route => ++calls === 1
+    ? route.abort('connectionreset') : route.fulfill({json: history(['new-reply', 'fixture/alpha-now'])}));
+  expect(await page.evaluate(() => __atlas.refreshTail())).toBe(true);
+  expect(calls).toBe(2);
+  expect(writes).toEqual([]);
+  await expect(page.locator('#stream')).toContainText('new-reply');
+  await expect(page.locator('#activity')).not.toContainText('Last known view');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('a history retry cannot follow a tab switch to another agent', async ({page}) => {
+  await fixture(page);
+  let calls = 0;
+  await page.route('**/api/room/**/history?**', async route => {
+    calls++;
+    await seed(page, 'fixture/beta', 'other-agent');
+    await route.abort('connectionreset');
+  });
+  expect(await page.evaluate(() => __atlas.refreshTail())).toBe(false);
+  expect(calls).toBe(1);
+  expect(await page.evaluate(() => state.items.map(i => i.id))).toEqual(['fixture/beta-now']);
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+});
+
+test('returning to the live edge after a large gap opens the latest native page', async ({page}) => {
+  await fixture(page);
+  await page.evaluate(() => {state.following = true;});
+  let calls = 0;
+  await page.route('**/api/room/**/history?**', route => {
+    calls++;
+    return route.fulfill({json: history(['unjoined-' + calls], 'page-' + calls)});
+  });
+  expect(await page.evaluate(() => __atlas.refreshTail())).toBe(true);
+  expect(calls).toBe(20);
+  expect(await page.evaluate(() => state.items.map(i => i.id))).toEqual(['unjoined-1']);
+  expect(await page.evaluate(() => state.cursor)).toBe('page-1');
+  await expect(page.locator('#activity')).not.toContainText('Last known view');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  await page.route('**/api/room/**/history?**', route => route.fulfill({json: history(['unjoined-1'], 'page-1')}));
+  expect(await page.evaluate(() => __atlas.refreshTail())).toBe(true);
 });
 
 test('visible agent refresh keeps its target through navigation and shares the persisted receipt', async ({page}) => {

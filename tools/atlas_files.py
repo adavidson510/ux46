@@ -378,7 +378,9 @@ def _open_regular_beneath(root: Path, relative: Path) -> int:
         current = -1
         return result
     finally:
-        if current >= 0:
+        # Before the first successful step, current still owns root_fd. Closing
+        # it twice can close an unrelated request's newly reused descriptor.
+        if current >= 0 and current != root_fd:
             os.close(current)
         os.close(root_fd)
 

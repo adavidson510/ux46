@@ -31,9 +31,14 @@ and failed reads retain the last-known content with a visible freshness notice.
 
 History and room reads belong to the selected agent, room and read generation.
 Late replies cannot replace a newer read or enter another conversation. History
-catch-up reads back to the last observed item, up to 20 pages of 40 items. If that
-bounded window cannot close the gap, the view remains explicitly stale. These
-reads do not reconnect workers, resend input, or overwrite a draft.
+catch-up reads back to the last observed item, up to 20 pages of 40 items. Pages
+are never spliced across a gap that could not be verified. These
+reads do not reconnect workers, resend input, or overwrite a draft. A dropped
+history read gets one bounded retry. When the gap exceeds the catch-up window,
+a person following the newest messages gets a fresh native page with earlier
+history still reachable. Someone reading older text keeps their place and a
+Read latest action. A missing attachment closes each owned file handle once;
+it must not close a handle another request has just opened.
 
 Commands that need an idle session (`/model`, `/effort`, `/compact`, `/new`,
 `/refresh`, `/goal resume` and `/goal clear`) can wait in the browser's saved

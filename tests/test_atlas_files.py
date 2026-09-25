@@ -6,19 +6,41 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
-from atlas_files import FileStore, FileStoreError, content_disposition  # noqa: E402
+from atlas_files import FileStore, FileStoreError, content_disposition, _open_regular_beneath  # noqa: E402
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"tiny raster attachment"
 
 
 class AtlasFileStoreTests(unittest.TestCase):
+    def test_missing_attachment_does_not_close_a_reused_request_descriptor(self) -> None:
+        # Model another server thread opening a socket immediately after the
+        # failed attachment walk releases its root. It gets the same fd number.
+        with tempfile.TemporaryDirectory() as temporary:
+            original_close = os.close
+            replacement = []
+            def reuse_after_close(fd):
+                original_close(fd)
+                if not replacement:
+                    replacement.append(os.open(os.devnull, os.O_RDONLY))
+                    self.assertEqual(replacement[0], fd)
+            try:
+                with patch('atlas_files.os.close', side_effect=reuse_after_close):
+                    with self.assertRaises(FileStoreError):
+                        _open_regular_beneath(Path(temporary), Path('missing.png'))
+                os.fstat(replacement[0])  # must still belong to the other request
+            finally:
+                if replacement:
+                    try: original_close(replacement[0])
+                    except OSError: pass
+
     def test_upload_persists_preview_metadata_and_download_across_reload(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -4731,19 +4731,49 @@ function rememberRoom(roomId) {
   } catch (e) { /* nothing depends on the URL */ }
 }
 
+// History reads are safe to retry; sends and commands must never use this path.
+// Keep the original room guard through the retry so a tab switch cannot turn
+// an old read into a request against the newly selected agent.
+async function readHistoryPage(path, obsolete) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (obsolete()) return null;
+    try {
+      const payload = await api(path, {signal: AbortSignal.timeout(20000)});
+      if (obsolete()) return null;
+      if (payload?.unavailable || !Array.isArray(payload?.items)) {
+        const error = new Error("The agent could not provide history");
+        error.code = "history_unavailable";
+        error.historyUnavailable = {message: payload?.message || "History unavailable", code: payload?.error_code || ""};
+        throw error;
+      }
+      return payload;
+    } catch (error) {
+      if (obsolete()) return null;
+      const transient = error instanceof TypeError || error.name === "TimeoutError"
+        || error.code === "history_unavailable" || [502, 503, 504].includes(error.status);
+      if (attempt || !transient) throw error;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+  }
+}
+
+function historyReadNotice(error) {
+  if (error.code === "history_gap") return "More messages arrived while you were away — open the latest";
+  if ([401, 403].includes(error.status)) return "Sign in again to load recent messages";
+  if (error.code === "history_unavailable") return "The agent couldn’t provide recent messages — retrying";
+  return "Recent messages couldn’t load — retrying";
+}
+
 async function loadHistory(seq, roomId) {
   const detail = state.detail;
   if (!detail || !detail.controllable) return;
   seq = seq === undefined ? state.roomSeq : seq;
   roomId = roomId || detail.id;
   const gen = state.agentGen, read = ++state.historyRead;
+  const obsolete = () => stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead;
   try {
-    const payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc");
-    if (stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead) return;
-    if (payload.unavailable) {
-      state.historyUnavailable = {message: payload.message || "History unavailable", code: payload.error_code || ""};
-      throw new Error(state.historyUnavailable.message);
-    }
+    const payload = await readHistoryPage("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc", obsolete);
+    if (obsolete()) return;
     const ascending = payload.items.slice().reverse();
     state.items = ascending;
     state.tail = ascending;
@@ -4759,7 +4789,8 @@ async function loadHistory(seq, roomId) {
     renderActivity();
   } catch (error) {
     if (stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead) return;
-    state.freshness.historyError = "History could not be checked";
+    if (error.historyUnavailable) state.historyUnavailable = error.historyUnavailable;
+    state.freshness.historyError = historyReadNotice(error);
     renderActivity();
     renderStream();
     return false;
@@ -4822,23 +4853,43 @@ async function refreshTail() {
   // Catch up to the previously observed tail, not merely the newest 25 items.
   // Otherwise a suspended browser could silently splice over a missing interval.
   const previous = (state.tail.length ? state.tail : state.items).at(-1)?.id;
-  let rows = [], cursor = null, payload;
+  let rows = [], cursor = null, payload, newest;
   try {
     for (let page = 0; page < 20; page++) {
-      payload = await api("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc"
-        + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
+      payload = await readHistoryPage("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc"
+        + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""), obsolete);
       if (obsolete()) return false;
-      if (payload.unavailable) throw new Error(payload.message || "History unavailable");
+      if (!newest) newest = payload;
       rows.push(...payload.items);
       if (!previous || rows.some(item => item.id === previous) || payload.complete) break;
       if (!payload.next_cursor || cursor === payload.next_cursor || page === 19) {
-        throw new Error("History catch-up exceeded its bounded window");
+        // At the live edge, reopen a fresh native page rather than repeatedly
+        // searching the same bounded window. Never splice over an unknown gap.
+        // Someone reading older text keeps their place and an explicit action.
+        if (page === 19 && state.following && !state.sel && !state.anchor) {
+          state.items = newest.items.slice().reverse();
+          state.tail = state.items.slice();
+          state.ids = new Set(state.items.map(item => item.id));
+          state.cursor = newest.next_cursor || null;
+          state.complete = !!newest.complete;
+          state.historySource = newest.source || "";
+          state.historyNote = "Showing the newest messages. Use Load earlier to read back.";
+          state.historyUnavailable = null;
+          state.freshness.history = Date.now();
+          state.freshness.historyError = "";
+          settleAccepted(); renderStream(); renderActivity(); toTail(); followLayout();
+          return true;
+        }
+        const error = new Error("History catch-up exceeded its bounded window");
+        error.code = "history_gap";
+        throw error;
       }
       cursor = payload.next_cursor;
     }
     const keep = stream.scrollTop;
     const following = state.following && !state.sel && !state.anchor;
     state.tail = rows.slice(0, 40).reverse();
+    state.historyUnavailable = null;
     state.freshness.history = Date.now();
     state.freshness.historyError = "";
     settleAccepted();
@@ -4860,7 +4911,7 @@ async function refreshTail() {
     return true;
   } catch (error) {
     if (obsolete()) return false;
-    state.freshness.historyError = "History could not be checked";
+    state.freshness.historyError = historyReadNotice(error);
     renderActivity();
     return false;
   }
