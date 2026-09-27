@@ -140,8 +140,9 @@ test('new final opens a turn preview once; Back retains overview and room switch
   const text = previewText({type: 'chart', title: 'This turn comparison', chart: {type: 'bar', labels: ['A', 'B'], values: [3, 5], unit: 'examples'}});
   await page.evaluate(() => {
     state.detail.controllable = true; state.following = true; state.sel = null; state.anchor = null;
-    state.items = [{id: 'earlier', type: 'agentMessage', phase: 'final_answer', text: 'Earlier reply'}];
-    state.ids = new Set(['earlier']); state.tail = state.items.slice();
+    state.items = [{id: 'earlier', type: 'agentMessage', phase: 'final_answer', text: 'Earlier reply'},
+      {id: 'new-final', type: 'agentMessage', phase: 'final_answer', text: '```ux46-preview\n{"type":'}];
+    state.ids = new Set(['earlier', 'new-final']); state.tail = state.items.slice();
     window.roomBoard = document.querySelector('#boardBody').firstChild;
   });
   await page.route('**/history?**', route => route.fulfill({json: {items: [{id: 'new-final', type: 'agentMessage', phase: 'final_answer', text}, {id: 'earlier', type: 'agentMessage', phase: 'final_answer', text: 'Earlier reply'}], complete: true}}));

@@ -4900,7 +4900,8 @@ async function refreshTail() {
     settleAccepted();
     if (state.anchor) { renderActivity(); return true; }
     const empty = !state.items.length;
-    const previousFinals = new Set(state.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.id));
+    // A streamed final can keep the same id while its descriptor finishes.
+    const previousPreviews = new Set(state.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer" && previewsIn(item.text).length).map(item => item.id));
     const {added, changed} = mergeTail(rows.reverse());
     if (empty) {
       state.cursor = payload.next_cursor || null;
@@ -4909,7 +4910,7 @@ async function refreshTail() {
     if (!added && !changed) { renderActivity(); return true; }
     renderStream();
     renderActivity();
-    if (following) offerTurnPreview(previousFinals);
+    if (following) offerTurnPreview(previousPreviews);
     if (following) { toTail(); followLayout(); }
     else {
       stream.scrollTop = keep;
@@ -8815,10 +8816,10 @@ async function openTurnPreview(entry, trigger) {
     if (serial === turnPreview.serial) body.replaceChildren(el("p", {text: "This PDF could not be previewed. Try Download to open it with your PDF reader."}));
   } finally { clearTimeout(timer); }
 }
-function offerTurnPreview(previousFinals) {
+function offerTurnPreview(previousPreviews) {
   if (!isWide() || state.ui.focus || state.ui.overlay || state.ui.dock === "preview" || document.querySelector("dialog[open]")) return;
   if (boardDraft(boardContext())) return;
-  const item = state.items.slice().reverse().find(item => item.type === "agentMessage" && item.phase === "final_answer" && !previousFinals.has(item.id));
+  const item = state.items.slice().reverse().find(item => item.type === "agentMessage" && item.phase === "final_answer" && !previousPreviews.has(item.id));
   const entry = item && previewsIn(item.text)[0];
   if (entry) void openTurnPreview(entry);
 }
