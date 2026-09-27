@@ -340,8 +340,11 @@
 
   <!-- right drawer: one supporting panel at a time -->
   <aside class="dock" id="dock" hidden aria-labelledby="dockTitle">
+    <div id="dockResize" class="dock-resize" role="separator" tabindex="0" aria-label="Panel width" aria-orientation="vertical" aria-controls="dock" title="Drag to resize. Arrow keys adjust width; double-click to reset."></div>
     <div class="dock-head">
       <h2 id="dockTitle">My turns</h2>
+      <button class="linkbtn dock-size-button" id="dockReset" type="button" title="Reset panel width" aria-label="Reset panel width" hidden>Reset</button>
+      <button class="linkbtn dock-size-button" id="dockExpand" type="button" aria-label="Expand panel">Expand</button>
       <button class="iconbtn" id="dockClose" type="button" title="Close panel">
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-close" /></svg>
         <span class="sr-only">Close panel</span>
@@ -352,17 +355,17 @@
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-bell" /></svg>
         <span>Attention</span>
       </button>
-      <button class="dock-tab" type="button" role="tab" data-panel="turns" aria-selected="false">
+      <button class="dock-tab" type="button" role="tab" data-panel="history" aria-selected="false">
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-turns" /></svg>
-        <span>Turns</span>
-      </button>
-      <button class="dock-tab" type="button" role="tab" data-panel="updates" aria-selected="false">
-        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-updates" /></svg>
-        <span>Updates</span>
+        <span>History</span>
       </button>
       <button class="dock-tab" type="button" role="tab" data-panel="board" aria-selected="false">
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-board" /></svg>
         <span>Canvas</span>
+      </button>
+      <button class="dock-tab" id="previewTab" type="button" role="tab" data-panel="preview" aria-selected="false" hidden>
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-updates" /></svg>
+        <span>Preview</span>
       </button>
       <button class="dock-tab" type="button" role="tab" data-panel="notes" aria-selected="false">
         <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-notes" /></svg>
@@ -385,6 +388,9 @@
 
       <section class="panel" id="panelNav" hidden>
         <p class="panel-sub" id="navSub"></p>
+        <label class="history-filter">Show <select id="navFilter" aria-label="History filter">
+          <option value="both">Turns &amp; updates</option><option value="turns">Turns</option><option value="updates">Updates</option>
+        </select></label>
         <input class="panel-search" id="navSearch" type="search" placeholder="Search…"
                autocomplete="off" aria-label="Search this session" />
         <div class="panel-list" id="navList"></div>
@@ -405,6 +411,14 @@
         <p class="board-note" id="boardNote" role="status"></p>
         <div class="board-scroll" id="boardBody"></div>
         <div class="panel-acts" id="boardActs"></div>
+      </section>
+
+      <section class="panel" id="panelPreview" hidden>
+        <div class="preview-tools"><button class="linkbtn" id="previewBack" type="button">Back to room Canvas</button>
+          <a id="previewDownload" class="linkbtn" download hidden>Download</a>
+        </div>
+        <p class="preview-origin" id="previewOrigin"></p>
+        <div class="preview-content" id="previewBody"></div>
       </section>
 
       <section class="panel" id="panelNotes" hidden>

@@ -107,3 +107,11 @@ installed console’s settings; host preferences stay outside reusable source.
 Room result/review and experiment controls use the private work.sqlite3 owner store;
 Tell and Constellation retain their source records. See [work and learning](work-learning.md).
 Email remains a separate workflow: [briefs, reviewed replies and reversible Gmail filing](email.md).
+
+The [Canvas guide](canvas.md) distinguishes the saved room overview from a
+temporary preview attached to an agent reply. Resizing and expanding reuse the
+same DOM and preserve editing state. Turn previews bind to their originating
+agent/room; late PDF reads cannot replace a newer preview or enter another room.
+Managed PDF bytes use a verified PDF blob in the browser viewer; arbitrary
+HTML and external iframe URLs are not admitted. History shares one search
+surface with Both/Turns/Updates filtering and generation-checked responses.

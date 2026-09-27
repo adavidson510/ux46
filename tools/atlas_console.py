@@ -1238,7 +1238,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             # a stored reply. Same origin only: no data:, no blob:, no remote.
             ("Content-Security-Policy",
              "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-             "media-src 'self'; connect-src 'self'; form-action 'none'; "
+             "media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; "
              "frame-ancestors 'none'; base-uri 'none'"),
         ]
 

@@ -678,7 +678,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type',mime);self.send_header('Content-Length',str(len(body)))
         self.send_header('Cache-Control','no-store, private');self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Referrer-Policy','no-referrer');self.send_header('X-Frame-Options','DENY')
-        self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'")
+        self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         if self.command!='HEAD':self.wfile.write(body)
         return True

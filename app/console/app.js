@@ -1256,7 +1256,7 @@ function publishCustomizations() {
   const wanted = {version: 1, theme: state.theme || "dark"};
   if (isWide()) {
     wanted.left = state.ui.left || "wide";
-    wanted.dock = state.ui.dock || "";
+    wanted.dock = state.ui.dock === "preview" ? "board" : state.ui.dock || "";
   }
   if (Object.keys(wanted).every((key) => held[key] === wanted[key])) return;
   queueLayoutOp({kind: "custom", customizations: wanted});
@@ -1944,7 +1944,7 @@ function desktopCustomizations(previous) {
   return Object.assign({}, previous || {}, {
     version: 1,
     theme: state.theme || "dark",
-    dock: state.ui.dock || "",
+    dock: state.ui.dock === "preview" ? "board" : state.ui.dock || "",
     left: state.ui.left || "wide",
   });
 }
@@ -3552,6 +3552,9 @@ function mdVisualization(src, at) {
     const url = '/api/visualizations/render?path=' + encodeURIComponent(ref.path);
     wrap.appendChild(el('iframe', {src: url, title, sandbox: 'allow-scripts', loading: 'lazy', referrerpolicy: 'no-referrer'}));
     wrap.appendChild(el('a', {href: url, target: '_blank', rel: 'noopener noreferrer', text: 'Open visualization ↗'}));
+    const preview = {type: "visualization", title, path: ref.path, agent: agentId(), room: state.room};
+    wrap.appendChild(el("button", {class: "linkbtn", type: "button", text: "Open preview",
+      on: {click: event => void openTurnPreview(preview, event.currentTarget)}}));
   } catch (_) {
     wrap.appendChild(el('span', {text: 'This visualization reference is incomplete or unavailable.'}));
   }
@@ -3772,7 +3775,8 @@ function mdBlocks(lines, host, depth) {
         body.push(lines[j]);
         j += 1;
       }
-      host.appendChild(mdCodeBlock(body.join("\n"), fence[2], closed));
+      const preview = closed && fence[2].trim() === "ux46-preview" ? parseTurnPreview(body.join("\n")) : null;
+      host.appendChild(preview ? turnPreviewCard(preview) : mdCodeBlock(body.join("\n"), fence[2], closed));
       i = closed ? j + 1 : j;
       continue;
     }
@@ -4185,6 +4189,7 @@ function messageNode(item) {
 }
 
 function renderStream() {
+  clearForeignPreview();
   const earlier = $("#btnEarlier");
   if (earlier) {
     earlier.disabled = !state.cursor;
@@ -4895,6 +4900,7 @@ async function refreshTail() {
     settleAccepted();
     if (state.anchor) { renderActivity(); return true; }
     const empty = !state.items.length;
+    const previousFinals = new Set(state.items.filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.id));
     const {added, changed} = mergeTail(rows.reverse());
     if (empty) {
       state.cursor = payload.next_cursor || null;
@@ -4903,6 +4909,7 @@ async function refreshTail() {
     if (!added && !changed) { renderActivity(); return true; }
     renderStream();
     renderActivity();
+    if (following) offerTurnPreview(previousFinals);
     if (following) { toTail(); followLayout(); }
     else {
       stream.scrollTop = keep;
@@ -6174,25 +6181,26 @@ function updatesOf() {
   return (finals.length ? finals : state.items.filter((i) => i.type === "agentMessage"))
     .slice().reverse();
 }
-function entriesFor(kind) { return kind === "turns" ? turnsOf() : updatesOf(); }
+function entriesFor(kind) {
+  if (kind === "turns") return turnsOf();
+  if (kind === "updates") return updatesOf();
+  const updates = new Set(updatesOf().map(item => item.id));
+  return state.items.filter(item => item.type === "userMessage" || updates.has(item.id)).slice().reverse();
+}
 
-/* Turns and Updates share one panel; changing which one is showing resets the
-   search and asks the server again. Reopening the same one keeps your place. */
+// One History entry, with a retained query across the three views.
 function setupNav(kind, force) {
-  const changed = force || state.navKind !== kind;
-  state.navKind = kind;
-  if (!changed) { renderNavList($("#navSearch").value.trim()); return; }
-  state.searchHits = [];
-  $("#navSearch").value = "";
-  $("#navSearch").placeholder = kind === "turns"
-    ? "Search everything you have said in this session…"
-    : "Search the runtime's final answers…";
-  $("#navSub").textContent = kind === "turns"
-    ? "Your inputs across this session's native history"
-    : "Final answers as reported by the runtime";
-  $("#navFoot").textContent = "";
-  renderNavList("");
-  runNavSearch("");
+  const filter = kind === "history" ? ($("#navFilter").value || "both") : kind;
+  const changed = force || state.navKind !== filter;
+  state.navKind = filter;
+  $("#navFilter").value = filter;
+  $("#navSearch").placeholder = "Search turns and updates…";
+  $("#navSub").textContent = filter === "both" ? "Your turns and the agent’s answers"
+    : filter === "turns" ? "Your turns" : "The agent’s answers";
+  const query = $("#navSearch").value.trim();
+  if (changed) { state.searchHits = []; state.navSearched = false; $("#navFoot").textContent = ""; }
+  renderNavList(query);
+  if (changed) void runNavSearch(query);
 }
 
 function openNav(kind, trigger) {
@@ -6201,8 +6209,9 @@ function openNav(kind, trigger) {
 
 /* The whole native history is searched on the server, so a question from
    twenty minutes ago is findable without paging through every tool result. */
-let navSearchTimer = null;
+let navSearchTimer = null, navSearchRead = 0;
 async function runNavSearch(query) {
+  const read = ++navSearchRead, gen = state.agentGen;
   const detail = state.detail;
   if (!detail || !detail.controllable) return;
   const kind = state.navKind;
@@ -6210,13 +6219,11 @@ async function runNavSearch(query) {
   const seq = state.roomSeq;
   try {
     const payload = await api("/api/room/" + encodeURI(roomId) + "/search?kinds="
-      + (kind === "turns" ? "human" : "final")
+      + (kind === "both" ? "human,final" : kind === "turns" ? "human" : "final")
       + "&limit=60&q=" + encodeURIComponent(query || ""));
-    if (stale(seq, roomId) || state.navKind !== kind) return;
+    if (stale(seq, roomId) || gen !== state.agentGen || read !== navSearchRead || state.navKind !== kind || $("#navSearch").value.trim() !== query) return;
     state.searchHits = payload.hits || [];
-    $("#navSub").textContent = kind === "turns"
-      ? "Your inputs across this session's native history"
-      : "Final answers as reported by the runtime";
+    state.navSearched = payload.source !== "unavailable";
     $("#navFoot").textContent = payload.source === "unavailable"
       ? (payload.note || "this runtime exposes no searchable history for this session")
       : payload.total + " found in " + payload.searched_items + " native items · "
@@ -6225,7 +6232,8 @@ async function runNavSearch(query) {
              ? "read from the session's turns, capped" : "read page by page");
     renderNavList(query);
   } catch (error) {
-    if (stale(seq, roomId)) return;
+    if (stale(seq, roomId) || gen !== state.agentGen || read !== navSearchRead || state.navKind !== kind) return;
+    state.navSearched = false;
     $("#navFoot").textContent = "Search unavailable: " + error.message
       + " — the loaded page is still listed.";
   }
@@ -6237,7 +6245,8 @@ function renderNavList(query) {
   host.replaceChildren();
   const needle = (query || "").toLowerCase();
 
-  if (state.searchHits.length) {
+  if (state.navSearched || state.searchHits.length) {
+    if (!state.searchHits.length) host.appendChild(el("p", {class: "empty", text: "No match."}));
     for (const hit of state.searchHits) {
       const loaded = state.ids.has(hit.item_id);
       host.appendChild(el("button", {
@@ -8445,8 +8454,54 @@ function readPref(key) {
   try { return window.localStorage.getItem(key) || ""; } catch (e) { return ""; }
 }
 
-const PANEL_TITLES = {attention: "Your workspace", turns: "My turns", updates: "Updates",
+const PANEL_TITLES = {attention: "Your workspace", history: "History", turns: "History", updates: "History", preview: "Turn preview",
                       source: "Original text", board: "Canvas", notes: "Notes", details: "Room settings"};
+
+// Width belongs to this device. Expanding is temporary and never replaces the
+// board, its open details, or an unsaved edit with another rendering.
+const dockSize = {width: Number(readPref("atlas.dockWidth")) || 0, expanded: false,
+  inert: new Map(), drag: null};
+function dockWidthLimits() {
+  const side = $("#side");
+  const sideWidth = side && !side.hidden ? side.getBoundingClientRect().width : 0;
+  return {min: 300, max: Math.max(300, Math.floor(window.innerWidth - sideWidth - 400))};
+}
+function applyDockSize() {
+  const dock = $("#dock"), handle = $("#dockResize"), limits = dockWidthLimits();
+  if (dock.hidden) dockSize.expanded = false;
+  dock.dataset.expanded = String(dockSize.expanded);
+  if (dockSize.width && isWide()) dock.style.setProperty("--dock-size", Math.min(limits.max, Math.max(limits.min, dockSize.width)) + "px");
+  else dock.style.removeProperty("--dock-size");
+  handle.hidden = !isWide() || dockSize.expanded;
+  handle.setAttribute("aria-valuemin", String(limits.min));
+  handle.setAttribute("aria-valuemax", String(limits.max));
+  handle.setAttribute("aria-valuenow", String(Math.round(dock.getBoundingClientRect().width)));
+  $("#dockReset").hidden = !dockSize.width || !isWide() || dockSize.expanded;
+  $("#dockExpand").textContent = dockSize.expanded ? "Restore" : "Expand";
+  $("#dockExpand").setAttribute("aria-label", dockSize.expanded ? "Restore panel size" : "Expand panel");
+  if (dockSize.expanded) {
+    dock.setAttribute("role", "dialog"); dock.setAttribute("aria-modal", "true");
+    for (const node of $("#app").children) {
+      if (node === dock) continue;
+      if (!dockSize.inert.has(node)) dockSize.inert.set(node, node.inert);
+      node.inert = true;
+    }
+  } else {
+    for (const [node, wasInert] of dockSize.inert) node.inert = wasInert;
+    dockSize.inert.clear();
+  }
+}
+function setDockExpanded(expanded) {
+  dockSize.expanded = expanded;
+  applyShell();
+  $("#dockExpand").focus();
+}
+function setDockWidth(width, persist = true) {
+  const limits = dockWidthLimits();
+  dockSize.width = width ? Math.round(Math.min(limits.max, Math.max(limits.min, width))) : 0;
+  applyDockSize();
+  if (persist) savePref("atlas.dockWidth", dockSize.width ? String(dockSize.width) : "");
+}
 
 /* One function owns every visible shell state, so a resize, a preference and
    a click can never disagree about what is open. */
@@ -8479,7 +8534,7 @@ function applyShell() {
     if (node) node.setAttribute("aria-expanded", String(dockShown && dockKind === kind));
   }
   for (const tab of document.querySelectorAll(".dock-tab")) {
-    tab.setAttribute("aria-selected", String(tab.dataset.panel === dockKind));
+    tab.setAttribute("aria-selected", String(tab.dataset.panel === dockKind || (tab.dataset.panel === "history" && ["turns", "updates"].includes(dockKind))));
   }
   // A drawer over the console is modal and says so; a docked one is not.
   for (const [node, overlay] of [[$("#side"), app.dataset.left === "overlay"],
@@ -8490,10 +8545,12 @@ function applyShell() {
   $("#dockTitle").textContent = PANEL_TITLES[dockKind] || "Supporting panel";
   $("#btnAttention").setAttribute("aria-expanded", String(dockShown && dockKind === "attention"));
   $("#panelAttention").hidden = dockKind !== "attention";
-  $("#panelNav").hidden = !(dockKind === "turns" || dockKind === "updates");
+  $("#panelNav").hidden = !["history", "turns", "updates"].includes(dockKind);
   $("#panelSource").hidden = dockKind !== "source";
   $("#panelBoard").hidden = dockKind !== "board";
   $("#panelNotes").hidden = dockKind !== "notes";
+  $("#panelPreview").hidden = dockKind !== "preview";
+  applyDockSize();
 }
 
 function renderPanel(force) {
@@ -8504,7 +8561,7 @@ function renderPanel(force) {
     renderAttentionPanel();
     if (force || !state.attn.agents.size) loadAttention();
     scheduleAttentionRefresh();
-  } else if (kind === "turns" || kind === "updates") setupNav(kind, force);
+  } else if (["history", "turns", "updates"].includes(kind)) setupNav(kind, force);
   else if (kind === "source") renderSourcePanel();
   else if (kind === "board") { renderBoardPanel(); if (force || state.board.key !== (boardContext() || {}).key) void loadBoard(force); scheduleBoardPoll(); }
   else if (kind === "notes") { renderNotes(); if (force) void refreshNotes(); }
@@ -8522,22 +8579,25 @@ $("#roomSettingsClose").addEventListener("click", () => $("#roomSettingsDialog")
 
 function openPanel(kind, trigger) {
   if (kind === "details") { openRoomSettings(); return; }
+  if (kind === "preview" && !turnPreview.entry) kind = "board";
+  const restoreBoard = kind === "board" && state.ui.dock === "preview" && state.board.key === boardContext()?.key;
   const wide = isWide();
   state.ui.dock = kind;
   state.ui.overlay = wide ? null : "dock";
   if (trigger) state.lastTrigger = trigger;
-  if (wide && kind !== "source") savePref("atlas.dock", kind);
+  if (wide && kind !== "source" && kind !== "preview") savePref("atlas.dock", kind);
   applyShell();
-  renderPanel();
+  if (!restoreBoard) renderPanel();
+  else scheduleBoardPoll();
   // Opening the register is a deliberate ask for the current picture.
   if (kind === "attention") loadAttention();
-  if (kind === "board") void loadBoard();
+  if (kind === "board" && !restoreBoard) void loadBoard();
   if (kind === "notes") void refreshNotes();
-  const first = kind === "turns" || kind === "updates" ? $("#navSearch")
+  const first = ["history", "turns", "updates"].includes(kind) ? $("#navSearch")
     : kind === "details" ? $("#moreFold")
     : kind === "attention" ? $("#attnSort") : $("#dockClose");
-  if (!wide || kind === "turns" || kind === "updates") setTimeout(() => first && first.focus(), 0);
-  if (kind !== "source") publishCustomizations();
+  if (!wide || ["history", "turns", "updates"].includes(kind)) setTimeout(() => first && first.focus(), 0);
+  if (kind !== "source" && kind !== "preview") publishCustomizations();
 }
 
 function closeDock(returnFocus) {
@@ -8592,6 +8652,7 @@ function closeOverlay(returnFocus) {
 }
 
 function overlayNode() {
+  if (dockSize.expanded) return $("#dock");
   if (state.ui.overlay === "left") return $("#side");
   if (state.ui.overlay === "dock") return $("#dock");
   return null;
@@ -8655,6 +8716,114 @@ function renderSourcePanel() {
 }
 
 /* --------------------------------------------------------------- board */
+/* A turn preview is temporary, room-bound display state. It never writes the
+   saved board. Only managed files and the existing isolated visualization
+   endpoint can supply embedded content; a transcript cannot name a web iframe. */
+const turnPreview = {entry: null, blob: "", request: null, serial: 0};
+function parseTurnPreview(text) {
+  try {
+    if (text.length > 60000) return null;
+    const value = JSON.parse(text);
+    if (!value || typeof value !== "object" || typeof value.title !== "string" || !value.title.trim() || value.title.length > 160) return null;
+    const entry = {type: value.type, title: value.title, agent: agentId(), room: state.room};
+    if (["pdf", "image"].includes(value.type)) {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(value.file_id || "")) return null;
+      if (value.file_agent && !/^[a-z][a-z0-9-]{0,31}$/.test(value.file_agent)) return null;
+      entry.file_id = value.file_id; entry.file_agent = value.file_agent || agentId();
+    } else if (value.type === "chart") {
+      entry.chart = cleanCanvasChart(value.chart); if (!entry.chart) return null;
+    } else if (value.type === "markdown") {
+      if (typeof value.text !== "string" || value.text.length > 50000) return null;
+      entry.text = value.text;
+    } else if (value.type === "visualization") {
+      if (typeof value.path !== "string" || value.path.length > 2000 || !value.path.startsWith("/") || !value.path.endsWith(".html")) return null;
+      entry.path = value.path;
+    } else return null;
+    return entry;
+  } catch (_) { return null; }
+}
+function previewsIn(text) {
+  const found = [];
+  const pattern = /^```ux46-preview\s*\n([\s\S]*?)\n```\s*$/gm;
+  for (const match of String(text || "").slice(0, MD_MAX_CHARS).matchAll(pattern)) {
+    const entry = parseTurnPreview(match[1]); if (entry) found.push(entry);
+    if (found.length === 4) break;
+  }
+  if (!found.length) {
+    const match = /\uE200visualize\uE202([^\uE201]{1,4096})\uE201/.exec(String(text || ""));
+    if (match) try {
+      const ref = JSON.parse(match[1]);
+      const entry = parseTurnPreview(JSON.stringify({type: "visualization", title: ref.title || "Visualization", path: ref.path}));
+      if (entry) found.push(entry);
+    } catch (_) { /* leave malformed references as transcript text */ }
+  }
+  return found;
+}
+function turnPreviewCard(entry) {
+  return el("div", {class: "preview-card"}, [el("strong", {text: entry.title}),
+    el("button", {class: "linkbtn", type: "button", text: "Open preview",
+      on: {click: event => void openTurnPreview(entry, event.currentTarget)}})]);
+}
+function releasePreview() {
+  turnPreview.serial += 1;
+  turnPreview.request?.abort(); turnPreview.request = null;
+  if (turnPreview.blob) URL.revokeObjectURL(turnPreview.blob);
+  turnPreview.blob = "";
+}
+function clearForeignPreview() {
+  const entry = turnPreview.entry;
+  if (!entry || (entry.agent === agentId() && entry.room === state.room)) return;
+  releasePreview(); turnPreview.entry = null;
+  $("#previewTab").hidden = true; $("#previewBody").replaceChildren();
+  if (state.ui.dock === "preview") { state.ui.dock = "board"; applyShell(); renderBoardPanel(); }
+}
+async function openTurnPreview(entry, trigger) {
+  if (entry.agent !== agentId() || entry.room !== state.room) return;
+  releasePreview(); turnPreview.entry = entry;
+  const serial = turnPreview.serial, body = $("#previewBody"), download = $("#previewDownload");
+  body.replaceChildren(); download.hidden = true; download.removeAttribute("href");
+  $("#previewTab").hidden = false;
+  $("#previewOrigin").textContent = entry.title + " · From this reply. Your room Canvas is unchanged.";
+  openPanel("preview", trigger);
+  if (entry.type === "chart") { body.appendChild(canvasChart(entry.chart)); return; }
+  if (entry.type === "markdown") { const article = el("article", {class: "md"}); article.appendChild(markdownFragment(entry.text)); body.appendChild(article); return; }
+  if (entry.type === "visualization") {
+    body.appendChild(el("iframe", {src: "/api/visualizations/render?path=" + encodeURIComponent(entry.path), title: entry.title, sandbox: "allow-scripts", referrerpolicy: "no-referrer"})); return;
+  }
+  const base = agentPath(entry.file_agent, "/api/atlas/files/" + entry.file_id);
+  const query = "?room=" + encodeURIComponent(entry.room);
+  download.href = base + "/download" + query; download.hidden = false;
+  if (entry.type === "image") {
+    const img = el("img", {src: base + "/preview" + query, alt: entry.title});
+    img.addEventListener("error", () => { if (serial === turnPreview.serial) body.replaceChildren(el("p", {text: "This image preview is unavailable. You can still try Download."})); });
+    body.appendChild(img); return;
+  }
+  body.appendChild(el("p", {text: "Opening PDF…"}));
+  const controller = new AbortController(); turnPreview.request = controller;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(download.href, {credentials: "same-origin", signal: controller.signal});
+    if (!response.ok || Number(response.headers.get("Content-Length")) > 20 * 1024 * 1024) throw new Error("PDF unavailable");
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > 20 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new Error("Not a PDF");
+    if (serial !== turnPreview.serial || entry.agent !== agentId() || entry.room !== state.room) return;
+    // Only verified PDF bytes become a blob; HTML/SVG never gain a same-origin frame.
+    turnPreview.blob = URL.createObjectURL(new Blob([bytes], {type: "application/pdf"}));
+    body.replaceChildren(el("iframe", {src: turnPreview.blob, title: entry.title, referrerpolicy: "no-referrer"}),
+      el("p", {class: "preview-origin", text: "If your browser cannot display the PDF, use Download."}));
+  } catch (_) {
+    if (serial === turnPreview.serial) body.replaceChildren(el("p", {text: "This PDF could not be previewed. Try Download to open it with your PDF reader."}));
+  } finally { clearTimeout(timer); }
+}
+function offerTurnPreview(previousFinals) {
+  if (!isWide() || state.ui.focus || state.ui.overlay || state.ui.dock === "preview" || document.querySelector("dialog[open]")) return;
+  if (boardDraft(boardContext())) return;
+  const item = state.items.slice().reverse().find(item => item.type === "agentMessage" && item.phase === "final_answer" && !previousFinals.has(item.id));
+  const entry = item && previewsIn(item.text)[0];
+  if (entry) void openTurnPreview(entry);
+}
+$("#previewBack").addEventListener("click", () => openPanel("board", $("#previewBack")));
+
 /* A board belongs to one agent and one room context. It is workspace-owned
    metadata, never a command to the native process behind that conversation. */
 const BOARD_POLL_MS = 15000;
@@ -8783,19 +8952,23 @@ function chartSvgNode(name, attrs, text) {
 }
 function canvasChart(chart) {
   const unit = chart.unit ? " " + chart.unit : "";
-  const valuesText = chart.labels.map((label, at) => label + " " + chart.values[at] + unit).join(" · ");
+  const valuesText = chart.labels.map((label, at) => (at + 1) + ". " + label + " " + chart.values[at] + unit).join(" · ");
   const summary = (chart.type === "line" ? "Line" : "Bar") + " chart: " + valuesText;
   const figure = el("figure", {class: "canvas-chart"});
   const svg = chartSvgNode("svg", {viewBox: "0 0 300 118", role: "img", "aria-label": summary});
   svg.appendChild(chartSvgNode("title", {}, summary));
-  const left = 26, right = 288, top = 10, bottom = 78;
+  const left = 48, right = 288, top = 14, bottom = 78;
   const rawMin = Math.min(...chart.values), rawMax = Math.max(...chart.values);
   const min = chart.type === "bar" ? Math.min(0, rawMin) : rawMin;
   const max = chart.type === "bar" ? Math.max(0, rawMax) : rawMax;
   const range = max === min ? 1 : max - min;
   const y = (value) => bottom - ((value - min) / range) * (bottom - top);
   const zero = y(0);
-  svg.appendChild(chartSvgNode("line", {x1: left, y1: bottom, x2: right, y2: bottom, class: "canvas-axis"}));
+  const baseline = chart.type === "bar" ? zero : bottom;
+  svg.appendChild(chartSvgNode("line", {x1: left, y1: baseline, x2: right, y2: baseline, class: "canvas-axis"}));
+  const tick = value => Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 1}).format(value);
+  for (const value of [...new Set([min, max])]) svg.appendChild(chartSvgNode("text", {
+    x: left - 5, y: y(value) + 3, "text-anchor": "end", class: "canvas-chart-label"}, tick(value)));
   if (chart.type === "bar") {
     const width = (right - left) / chart.values.length;
     chart.values.forEach((value, at) => {
@@ -8813,10 +8986,19 @@ function canvasChart(chart) {
   const shown = chart.labels.length === 1 ? [0] : [...new Set([0, Math.floor((chart.labels.length - 1) / 2), chart.labels.length - 1])];
   const step = chart.labels.length === 1 ? 0 : (right - left) / (chart.labels.length - 1);
   for (const at of shown) {
-    svg.appendChild(chartSvgNode("text", {x: left + at * step, y: 98, "text-anchor": "middle", class: "canvas-chart-label"}, chart.labels[at]));
+    const x = chart.type === "bar" ? left + (at + .5) * (right - left) / chart.labels.length : left + at * step;
+    svg.appendChild(chartSvgNode("text", {x, y: 98, "text-anchor": "middle", class: "canvas-chart-label"}, String(at + 1)));
   }
   figure.appendChild(svg);
+  // Full labels and exact numbers are readable without opening a disclosure.
+  // Numbered points keep long category names out of the tiny plot itself.
+  const key = el("dl", {class: "canvas-chart-key"});
+  const visible = chart.labels.length <= 8 ? chart.labels.map((_, at) => at) : [0, chart.labels.length - 1];
+  for (const at of visible) key.append(el("dt", {text: (at + 1) + ". " + chart.labels[at]}),
+    el("dd", {text: chart.values[at] + unit}));
+  figure.appendChild(key);
   const details = el("details", {class: "canvas-chart-values"});
+  details.hidden = chart.labels.length <= 8;
   details.append(el("summary", {text: "Chart values"}),
     el("p", {text: valuesText}));
   figure.appendChild(details);
@@ -8921,7 +9103,7 @@ function renderBoardPanel() {
       group.appendChild(chart);
     }
     if (section.image) group.appendChild(canvasImage(section.image));
-    if (!section.items.length) group.appendChild(el("p", {class: "board-empty", text: "Nothing listed."}));
+    if (!section.items.length && !section.chart && !section.image) group.appendChild(el("p", {class: "board-empty", text: "Nothing listed."}));
     for (const item of section.items) {
       const identity = JSON.stringify([section.title, item.label]);
       const occurrence = occurrences.get(identity) || 0;
@@ -9594,8 +9776,8 @@ async function boot() {
   state.ui.left = readPref("atlas.left") === "rail" ? "rail" : "wide";
   const dockPref = readPref("atlas.dock");
   // A remembered panel only reopens where it docks beside the console.
-  if (isWide() && ["attention", "turns", "updates", "board", "notes"].includes(dockPref)) {
-    state.ui.dock = dockPref;
+  if (isWide() && ["attention", "history", "turns", "updates", "board", "notes"].includes(dockPref)) {
+    state.ui.dock = ["turns", "updates"].includes(dockPref) ? "history" : dockPref;
   } else if (!dockPref && window.matchMedia("(min-width:1400px)").matches) {
     // Wide enough that the register costs the conversation nothing. Narrower
     // than that — and on any phone, with or without a keyboard — it stays shut
@@ -10187,6 +10369,7 @@ $("#draft").addEventListener("keydown", (event) => {
 $("#composer").addEventListener("submit", (event) => { event.preventDefault(); send(); });
 $("#btnContinue").addEventListener("click", (event) => continueHere(event.currentTarget));
 
+$("#navFilter").addEventListener("change", () => setupNav("history", true));
 $("#navSearch").addEventListener("input", () => {
   const query = $("#navSearch").value.trim();
   renderNavList(query);
@@ -10223,9 +10406,39 @@ $("#fltComplete").addEventListener("change", renderRoomList);
 /* right drawer */
 $("#btnDock").addEventListener("click", (event) => {
   if (state.ui.dock && ($("#app").dataset.dock !== "closed")) { closeDock(true); return; }
-  openPanel(state.ui.dock || "turns", event.currentTarget);
+  openPanel(state.ui.dock || "history", event.currentTarget);
 });
 $("#dockClose").addEventListener("click", () => closeDock(true));
+$("#dockExpand").addEventListener("click", () => setDockExpanded(!dockSize.expanded));
+$("#dockReset").addEventListener("click", () => { setDockWidth(0); $("#dockResize").focus(); });
+$("#dockResize").addEventListener("dblclick", () => setDockWidth(0));
+$("#dockResize").addEventListener("keydown", (event) => {
+  const limits = dockWidthLimits(), width = $("#dock").getBoundingClientRect().width;
+  const step = event.shiftKey ? 100 : 20;
+  const next = {ArrowLeft: width + step, ArrowRight: width - step, Home: limits.min, End: limits.max}[event.key];
+  if (next !== undefined) { event.preventDefault(); setDockWidth(next); }
+});
+$("#dockResize").addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || !isWide() || dockSize.expanded) return;
+  event.preventDefault();
+  event.currentTarget.focus();
+  dockSize.drag = {id: event.pointerId, x: event.clientX, width: $("#dock").getBoundingClientRect().width, saved: dockSize.width};
+  event.currentTarget.setPointerCapture(event.pointerId);
+  $("#dock").classList.add("resizing");
+});
+$("#dockResize").addEventListener("pointermove", (event) => {
+  if (dockSize.drag && event.pointerId === dockSize.drag.id) setDockWidth(dockSize.drag.width + dockSize.drag.x - event.clientX, false);
+});
+function finishDockResize(cancel) {
+  if (!dockSize.drag) return;
+  const drag = dockSize.drag; dockSize.drag = null;
+  setDockWidth(cancel ? drag.saved : dockSize.width);
+  $("#dock").classList.remove("resizing");
+  if ($("#dockResize").hasPointerCapture(drag.id)) $("#dockResize").releasePointerCapture(drag.id);
+}
+$("#dockResize").addEventListener("pointerup", () => finishDockResize(false));
+$("#dockResize").addEventListener("pointercancel", () => finishDockResize(true));
+$("#dockResize").addEventListener("lostpointercapture", () => finishDockResize(false));
 
 /* Desktops, the tab menu and dragging. None of these reach a runtime. */
 $("#btnDesktops").addEventListener("click", () => openDesktopDialog());
@@ -10386,7 +10599,10 @@ document.addEventListener("keydown", (event) => {
    A docked drawer beside the console is not, so neither applies there. */
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (event.defaultPrevented || document.querySelector("dialog[open]")) return;
   if (workspaceMenu.matches(":popover-open")) return;
+  if (dockSize.drag) { event.preventDefault(); finishDockResize(true); return; }
+  if (dockSize.expanded) { event.preventDefault(); setDockExpanded(false); return; }
   if (state.ui.overlay) { event.preventDefault(); closeOverlay(true); return; }
   if (isWide() && state.ui.dock && document.activeElement
       && $("#dock").contains(document.activeElement)) {
@@ -10396,6 +10612,7 @@ document.addEventListener("keydown", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Tab") return;
+  if (document.querySelector("dialog[open]")) return;
   if (workspaceMenu.matches(":popover-open")) return;
   const node = overlayNode();
   if (!node) return;
