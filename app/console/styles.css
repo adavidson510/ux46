@@ -1741,7 +1741,7 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .conversation-picker[open]{display:flex;flex-direction:column;gap:12px;}
 .conversation-picker .nc-head{flex:none;}
 .conversation-picker h2{font:600 18px/1.4 var(--sans);}
-.conversation-picker .panel-sub{margin:0;font-size:12px;}
+.conversation-picker .panel-sub{margin:0;font-size:12px;text-transform:none;letter-spacing:normal;}
 #conversationSearch{flex:none;width:100%;padding:11px;border:1px solid var(--line);
   border-radius:8px;background:var(--ink-050);color:var(--text);font:16px/1.4 var(--sans);}
 .conversation-choices{overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:6px;}

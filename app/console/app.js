@@ -824,7 +824,7 @@ function renderConversationPicker() {
       el("button", {class: "iconbtn", type: "button", "aria-label": "Options for " + name + " on " + owner,
         data: {choice: target + "options"}, on: {click: () => { $("#conversationPicker").close("options"); openTabMenu(tab, $("#btnConversations")); }}}, [el("span", {"aria-hidden": "true", text: "⋯"})]),
       el("button", {class: "iconbtn", type: "button", disabled: Boolean(tab.closing), "aria-label": "Close " + name + " on " + owner,
-        title: "Close this tab using its existing release action", data: {choice: target + "close"}, on: {click: () => void closeTab(tab)}}, [useIcon("i-close")]));
+        title: "Close this tab and disconnect; conversation history stays saved", data: {choice: target + "close"}, on: {click: () => void closeTab(tab)}}, [useIcon("i-close")]));
     return row;
   });
   host.replaceChildren(...rows);
