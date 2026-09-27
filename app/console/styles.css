@@ -1710,3 +1710,54 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .command-queue-row>button {flex:none; font-size:11px; min-height:28px; padding:3px 8px}
 .command-queue-note {margin:4px 0; color:var(--text-mute); font-size:11px; line-height:1.4}
 @media (pointer:coarse) {.command-queue-row>button {min-height:40px; min-width:44px}}
+
+/* Stable targets: inactive conversations never shrink below one icon button.
+   Selection is the lavender outline; runtime observations use a small badge. */
+.topbar .tabs{gap:6px;padding:3px 2px;}
+.topbar .tabs .tabwrap{flex:0 0 42px;width:42px;max-width:42px;height:38px;
+  border:1px solid var(--line-soft);border-radius:8px;}
+.topbar .tabs .tabwrap.on{flex:0 0 260px;width:260px;max-width:260px;
+  border-color:var(--lav);background:var(--lav-wash);box-shadow:inset 0 -2px 0 var(--lav);}
+.topbar .tabs .tab{position:relative;flex:1 1 auto;padding:7px 9px;gap:9px;height:36px;}
+.topbar .tabs .project-mark{width:24px;height:24px;}
+.topbar .tabs .towner{display:none;}
+.topbar .tabs .tabwrap:not(.on) .tname{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+.topbar .tabs .tabwrap:not(.on) .tmenu,.topbar .tabs .tabwrap:not(.on) .tclose{display:none;}
+.topbar .tabs .tabwrap.on .tmenu,.topbar .tabs .tabwrap.on .tclose{display:flex;width:30px;height:32px;margin:0;}
+.topbar .tabs .tabwrap.on .tclose{margin-right:3px;}
+.tab-signal{position:absolute;right:2px;top:1px;display:grid;place-items:center;
+  width:13px;height:13px;border-radius:50%;font:700 11px/1 var(--sans);
+  background:var(--ink-050);color:var(--text-mute);border:1px solid var(--line);}
+.tab-signal.needs{background:var(--wait);color:var(--ink-050);border-color:var(--wait);}
+.tab-signal.offline{color:var(--text-mute);}
+.tab-signal.working{color:var(--good);border-color:var(--good);font-size:19px;}
+.conversation-picker-button{flex:none;display:flex;align-items:center;gap:8px;min-height:36px;
+  border:1px solid var(--line);border-radius:8px;padding:5px 10px;font:12px/1.3 var(--sans);color:var(--text-mute);}
+.conversation-picker-button:hover{background:var(--hover);color:var(--text);}
+#conversationCount{font-variant-numeric:tabular-nums;}
+.conversation-picker{width:min(620px,calc(100vw - 24px));max-height:80dvh;padding:18px;
+  border:1px solid var(--line);border-radius:14px;background:var(--ink-100);color:var(--text);}
+.conversation-picker::backdrop{background:#0008;}
+.conversation-picker[open]{display:flex;flex-direction:column;gap:12px;}
+.conversation-picker .nc-head{flex:none;}
+.conversation-picker h2{font:600 18px/1.4 var(--sans);}
+.conversation-picker .panel-sub{margin:0;font-size:12px;}
+#conversationSearch{flex:none;width:100%;padding:11px;border:1px solid var(--line);
+  border-radius:8px;background:var(--ink-050);color:var(--text);font:16px/1.4 var(--sans);}
+.conversation-choices{overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:6px;}
+.conversation-choice{display:flex;align-items:center;border:1px solid var(--line-soft);border-radius:9px;padding:3px;flex:none;}
+.conversation-choice.selected{border-color:var(--lav);background:var(--lav-wash);}
+.conversation-open{display:flex;align-items:center;gap:12px;min-width:0;flex:1;padding:9px;text-align:left;border-radius:6px;}
+.conversation-open:hover{background:var(--hover);}
+.conversation-copy{display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere;}
+.conversation-copy strong{font:600 14px/1.4 var(--sans);color:var(--text);}
+.conversation-copy span{font:12px/1.4 var(--sans);color:var(--text-mute);}
+.conversation-copy .needs{color:var(--wait);}
+.conversation-copy .working{color:var(--good);}
+.conversation-choice .iconbtn{flex:none;width:36px;height:40px;}
+@media(max-width:1100px){.conversation-picker-label{display:none;}}
+@media(max-width:640px){
+  .conversation-picker-button{min-height:40px;padding:6px 9px;}
+  .conversation-picker{max-height:85dvh;padding:12px;}
+  .conversation-choice .iconbtn{width:40px;height:44px;}
+}

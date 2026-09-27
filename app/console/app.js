@@ -631,27 +631,40 @@ function forgetTab(agent, room) {
 }
 
 /* --------------------------------------------------------------- rendering */
-/* The dot says only what some agent actually reported. A live request from
-   the attention register counts for any agent; the open conversation can also
-   speak for itself. Nothing here infers activity from reachability. */
-function tabDot(tab) {
+/* Controllability is capability, not activity. Only fresh runtime observations
+   or an explicit request get a badge; selection has its own outline. */
+function tabSignal(tab) {
+  if (tab.closing) return {kind: "working", text: "Closing"};
+  if (tab.closeError) return {kind: "needs", text: "Could not close: " + tab.closeError};
+  if (tab.unavailable) return {kind: "offline", text: "Unavailable: " + tab.unavailable};
   const entry = state.attn.agents.get(tab.agent);
-  if (entry && entry.state === "ready") {
-    const row = entry.rows.find((r) => r.room === tab.room);
-    if (row && row.rank >= 4) return "needs";
-  }
+  if (entry && entry.state === "ready" && entry.rows.some(r => r.room === tab.room && r.rank >= 4))
+    return {kind: "needs", text: "Needs you"};
   if (isActiveTab(tab)) {
-    if ((state.approvals || []).some((a) => a.room === tab.room)) return "needs";
-    if (state.detail && state.detail.controllable) return "live";
-    return "";
+    const activity = activityState();
+    if (activity?.kind === "needs") return {kind: "needs", text: activity.text};
+    if (activity?.kind === "working" || activity?.kind === "sending") return {kind: "working", text: "Working"};
+    if (activity?.kind === "offline") return {kind: "offline", text: activity.text};
+    return null;
   }
-  return tab.controllable ? "live" : "";
+  const held = roomStatusCache().get(tabKey(tab.agent, tab.room));
+  if (held?.detail && !held.error && Date.now() - held.at < STATUS_FRESH_MS) {
+    const native = held.detail.native || {};
+    if ((native.active_turn && native.active_turn !== held.detail.native_terminal?.turn_id) || native.active_run === true)
+      return {kind: "working", text: "Working · recently checked"};
+  }
+  return null;
+}
+function tabBadge(signal) {
+  return signal ? el("span", {class: "tab-signal " + signal.kind, title: signal.text,
+    "aria-label": signal.text, text: signal.kind === "needs" ? "!" : signal.kind === "offline" ? "?" : "·"}) : null;
 }
 
 function tabNode(tab, compact) {
   const active = isActiveTab(tab);
   const name = tabLabel(tab);
   const canonical = canonicalLabel(tab);
+  const signal = tabSignal(tab);
   const label = agentLabel(tab.agent);
   const many = new Set(state.tabs.map((other) => other.agent)).size > 1;
   const where = [label, tab.project, canonical, tab.cap].filter(Boolean).join(" · ")
@@ -663,7 +676,7 @@ function tabNode(tab, compact) {
   });
   wrap.appendChild(el("button", {
     class: "tab", type: "button", role: "tab", disabled: Boolean(tab.unavailable),
-    "aria-selected": String(active),
+    "aria-selected": String(active), "aria-label": name + " · " + label + (signal ? " · " + signal.text : ""),
     title: tab.unavailable ? where + " — " + tab.unavailable
       : where + (tab.closeError ? " — " + tab.closeError : ""),
     data: {agent: tab.agent, room: tab.room},
@@ -691,8 +704,8 @@ function tabNode(tab, compact) {
       },
     },
   }, [
-    el("span", {class: "dot " + tabDot(tab), "aria-hidden": "true"}),
     projectMark(tab),
+    tabBadge(signal),
     el("span", {class: "tname", text: name}),
     // Whose work this is, said quietly and only when it could be anyone's.
     many && !compact ? el("span", {class: "towner", text: label}) : null,
@@ -746,7 +759,7 @@ function renderMobileTabs(tabs) {
 }
 
 function renderTabs() {
-  $("#tabs").classList.toggle("crowded", state.tabs.length > 6);
+
   // Rebuilding the strip under a finger would drop the tab being moved.
   if (tabDrag && tabDrag.active) return;
   const drawn = [];
@@ -758,17 +771,72 @@ function renderTabs() {
     drawn.push(tab);
   }
   renderMobileTabs(drawn);
+  $("#conversationCount").textContent = String(drawn.length);
+  $("#btnConversations").setAttribute("aria-label", "All conversations (" + drawn.length + ")");
+  renderConversationPicker();
   for (const [host, compact] of [[$("#tabs"), false], [$("#focusRooms"), true]]) {
+    const signature = JSON.stringify(drawn.map(tab => [tab, tabLabel(tab), agentLabel(tab.agent), isActiveTab(tab), tabSignal(tab), state.desk.raw?.sessionMarks]));
+    if (host.dataset.signature === signature) continue;
+    host.dataset.signature = signature;
+    const focused = host.contains(document.activeElement) ? document.activeElement : null;
+    const focusTab = focused?.closest(".tabwrap")?.dataset;
+    const focusClass = focused?.classList.contains("tmenu") ? "tmenu" : focused?.classList.contains("tclose") ? "tclose" : "tab";
     host.replaceChildren();
     for (const tab of drawn) host.appendChild(tabNode(tab, compact));
+    if (focusTab) [...host.children].find(n => n.dataset.agent === focusTab.agent && n.dataset.room === focusTab.room)?.querySelector("." + focusClass)?.focus({preventScroll: true});
   }
   const selected = $("#tabs").querySelector('[aria-selected="true"]');
-  if (selected && selected.scrollIntoView) {
+  const selectedKey = tabKey(agentId(), state.room);
+  if (selected && $("#tabs").dataset.selected !== selectedKey) {
+    $("#tabs").dataset.selected = selectedKey;
     selected.scrollIntoView({block: "nearest", inline: "nearest"});
   }
   // The register is drawn around this desktop's open tabs, so a change to the
   // strip is a change to the register. It redraws only if the view differs.
   if (state.ui.dock === "attention") renderAttentionPanel();
+}
+
+/* A finder for this desktop's open conversations, including matching aliases,
+   canonical names and owners. Searching never attaches a native worker. */
+function renderConversationPicker() {
+  if (!$("#conversationPicker").open) return;
+  const query = $("#conversationSearch").value.trim().toLocaleLowerCase();
+  const tabs = attentionTabs().filter(tab => [tabLabel(tab), canonicalLabel(tab), tab.project, agentLabel(tab.agent), tab.room]
+    .join(" ").toLocaleLowerCase().includes(query));
+  const host = $("#conversationChoices");
+  const signature = JSON.stringify(tabs.map(tab => [tab, tabLabel(tab), agentLabel(tab.agent), isActiveTab(tab), tabSignal(tab)]));
+  $("#conversationMatches").textContent = tabs.length ? tabs.length + " conversation" + (tabs.length === 1 ? "" : "s") : "No matching open conversations.";
+  if (host.dataset.signature === signature) return;
+  host.dataset.signature = signature;
+  const focusKey = host.contains(document.activeElement) ? document.activeElement.dataset.choice : "";
+  const rows = tabs.map(tab => {
+    const name = tabLabel(tab), owner = agentLabel(tab.agent), signal = tabSignal(tab);
+    const row = el("div", {class: "conversation-choice" + (isActiveTab(tab) ? " selected" : "")});
+    const target = tabKey(tab.agent, tab.room);
+    row.append(el("button", {class: "conversation-open", type: "button", disabled: Boolean(tab.unavailable || tab.closing),
+      data: {choice: target + "open"}, "aria-label": "Open " + name + " on " + owner,
+      "aria-current": isActiveTab(tab) ? "true" : null,
+      on: {click: () => { $("#conversationPicker").close("open"); void openTabForTyping(tab.agent, tab.room); }}},
+      [projectMark(tab), el("span", {class: "conversation-copy"}, [el("strong", {text: name}),
+        el("span", {text: [tab.project, owner].filter(Boolean).join(" · ")}),
+        name !== canonicalLabel(tab) ? el("span", {text: canonicalLabel(tab)}) : null,
+        signal ? el("span", {class: "conversation-status " + signal.kind, text: signal.text}) : null])]),
+      el("button", {class: "iconbtn", type: "button", "aria-label": "Options for " + name + " on " + owner,
+        data: {choice: target + "options"}, on: {click: () => { $("#conversationPicker").close("options"); openTabMenu(tab, $("#btnConversations")); }}}, [el("span", {"aria-hidden": "true", text: "⋯"})]),
+      el("button", {class: "iconbtn", type: "button", disabled: Boolean(tab.closing), "aria-label": "Close " + name + " on " + owner,
+        title: "Close this tab using its existing release action", data: {choice: target + "close"}, on: {click: () => void closeTab(tab)}}, [useIcon("i-close")]));
+    return row;
+  });
+  host.replaceChildren(...rows);
+  if (focusKey) ([...host.querySelectorAll("button")].find(n => n.dataset.choice === focusKey) || $("#conversationSearch")).focus({preventScroll: true});
+}
+function openConversationPicker() {
+  closeTabMenu(false);
+  $("#conversationSearch").value = "";
+  $("#conversationPicker").returnValue = "";
+  $("#conversationPicker").showModal();
+  renderConversationPicker();
+  $("#conversationSearch").focus();
 }
 
 /* ---------------------------------------------------------- opening a place
@@ -10517,6 +10585,22 @@ document.addEventListener("keydown", (event) => {
   if (tabDrag) { endTabDrag(false); return; }
   if (!$("#tabMenu").hidden) { event.stopPropagation(); closeTabMenu(true); }
 }, true);
+$("#btnConversations").addEventListener("click", openConversationPicker);
+$("#conversationPickerClose").addEventListener("click", () => $("#conversationPicker").close());
+$("#conversationSearch").addEventListener("input", renderConversationPicker);
+$("#conversationSearch").addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); $("#conversationPicker").close(); }
+  if (event.key === "ArrowDown") { event.preventDefault(); $("#conversationChoices .conversation-open:not(:disabled)")?.focus(); }
+  if (event.key === "Enter") { event.preventDefault(); $("#conversationChoices .conversation-open:not(:disabled)")?.click(); }
+});
+$("#conversationPicker").addEventListener("close", event => {
+  if (!event.currentTarget.returnValue) $("#btnConversations").focus({preventScroll: true});
+});
+$("#conversationPicker").addEventListener("click", event => {
+  if (event.target !== event.currentTarget) return;
+  const box = event.currentTarget.getBoundingClientRect();
+  if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) event.currentTarget.close();
+});
 $("#btnAttention").addEventListener("click", (event) => {
   if (state.ui.dock === "attention" && $("#app").dataset.dock !== "closed") { closeDock(true); return; }
   openPanel("attention", event.currentTarget);

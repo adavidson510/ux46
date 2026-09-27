@@ -115,3 +115,17 @@ agent/room; late PDF reads cannot replace a newer preview or enter another room.
 Managed PDF bytes use a verified PDF blob in the browser viewer; arbitrary
 HTML and external iframe URLs are not admitted. History shares one search
 surface with Both/Turns/Updates filtering and generation-checked responses.
+
+### Finding open conversations
+
+The top strip keeps inactive conversations as fixed icon targets, with a wider
+selected tab for its name, Options and Close. The searchable All conversations
+picker uses this desktop's existing tab identities and order; it matches aliases,
+canonical titles, projects and agents. Search never starts a native connection.
+Choosing a result uses the existing agent/room opening path, and closing uses
+the existing release behavior. Phone navigation retains its native selector and
+adds the same searchable picker. Polling preserves unchanged controls and search.
+
+Lavender marks selection. A small badge reports a current human request, a fresh
+runtime activity observation or unavailable status; controllability alone does
+not produce a green activity indicator. No additional background reads are made.
