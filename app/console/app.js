@@ -8803,7 +8803,7 @@ async function openTurnPreview(entry, trigger) {
   const controller = new AbortController(); turnPreview.request = controller;
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch(download.href, {credentials: "same-origin", signal: controller.signal});
+    const response = await consoleFetch(download.href, {credentials: "same-origin", signal: controller.signal});
     if (!response.ok || Number(response.headers.get("Content-Length")) > 20 * 1024 * 1024) throw new Error("PDF unavailable");
     const bytes = await response.arrayBuffer();
     if (bytes.byteLength > 20 * 1024 * 1024 || new TextDecoder().decode(bytes.slice(0, 5)) !== "%PDF-") throw new Error("Not a PDF");

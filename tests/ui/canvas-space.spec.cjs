@@ -174,9 +174,10 @@ test('managed PDF opens a browser preview; non-PDF bytes cannot render', async (
   const start = Buffer.byteLength(pdf);
   pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
   await page.route('**/api/atlas/files/sample/download?**', route => route.fulfill({body: pdf, contentType: 'application/pdf'}));
-  const entry = {type: 'pdf', title: 'Example PDF', file_id: 'sample'};
+  const entry = {type: 'pdf', title: 'Example PDF', file_id: 'sample', file_agent: 'other-agent'};
   await page.evaluate(text => { document.querySelector('#thread').append(markdownFragment(text)); }, previewText(entry));
   await page.getByRole('button', {name: 'Open preview', exact: true}).click();
+  await expect(page.locator('#previewDownload')).toHaveAttribute('href', '/api/agents/other-agent/api/atlas/files/sample/download?room=example%2Fresearch');
   await expect(page.locator('#previewBody iframe')).toHaveAttribute('src', /^blob:https:\/\/fixture.test\//);
   await page.getByRole('button', {name: 'Expand panel', exact: true}).click();
   await expect.poll(() => page.frames().some(frame => frame.url().startsWith('chrome-extension://'))).toBe(true);
