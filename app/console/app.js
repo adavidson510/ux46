@@ -1120,6 +1120,16 @@ function layoutRecord(raw) {
 
 function layoutKeys(tabs) { return tabs.map((tab) => tabKey(tab.agent, tab.room)); }
 
+function sharedStartupTarget(layout, agent, room, previousTabs, navigationType) {
+  const present = layout.tabs.some(tab => tab.agent === agent && tab.room === room);
+  const previouslyOpen = previousTabs.some(tab => tab.agent === agent && tab.room === room);
+  // Reloading an old URL or reopening a saved browser view is not a request
+  // to reverse another device's close. A fresh, deliberate deep link can open.
+  const restoring = previouslyOpen || navigationType === "reload" || navigationType === "back_forward";
+  if (room && (present || !restoring)) return {agent, room};
+  return layout.active || (layout.tabs[0] ? {agent:layout.tabs[0].agent,room:layout.tabs[0].room} : {agent,room:""});
+}
+
 /* What this device would publish. Workspace aliases are already shared in
    their own field, so only a name given to this tab itself travels here. */
 function sharedSnapshotTabs() {
@@ -9796,16 +9806,16 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   // outside the first catalogue page still comes back. A caller that named one
   // wins; then a deep link, then what this agent had open, then its first tab.
   let wanted = wantRoom || "";
-  if (!wanted) {
+  if (!wanted && !opts?.sharedStartup) {
     try {
       const params = new URLSearchParams(window.location.search);
       wanted = params.get("room") || "";
     } catch (e) { wanted = ""; }
   }
-  if (!wanted) {
+  if (!wanted && !opts?.sharedStartup) {
     try { wanted = window.localStorage.getItem(agentKey("atlas.room")) || ""; } catch (e) { wanted = ""; }
   }
-  if (!wanted) {
+  if (!wanted && !opts?.sharedStartup) {
     const mine = state.tabs.find((tab) => tab.agent === agentId());
     if (mine) wanted = mine.room;
   }
@@ -9828,7 +9838,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   // Only when there is nowhere to be. The suggestion is read from this agent
   // directly rather than from the drawer's cache, which may be listing
   // somebody else.
-  if (!wanted || (!restored && state.roomGone)) {
+  if ((!wanted || (!restored && state.roomGone)) && !opts?.sharedStartup) {
     try {
       const workspace = await api("/api/workspace");
       if (gen !== state.agentGen) return;
@@ -9849,6 +9859,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
     }
   }
   if (gen !== state.agentGen) return;
+  if (opts?.sharedStartup && !wanted) showEmptyDesktop();
   if (browseAgent() === agentId()) { invalidateRoomPages(); renderRoomList(); }
   await renderBoardCountOnly();
 }
@@ -9909,15 +9920,16 @@ async function boot() {
   await loadDesktopState();
   let wantedRoom = "";
   const layout = deviceOnlyLayout() ? null : layoutRecord(state.desk.raw);
+  let startup = null;
   if (layout && !layout.tooNew) {
+    startup = sharedStartupTarget(layout, wantedAgent || DEFAULT_AGENT, linkRoom, state.tabs,
+      performance.getEntriesByType("navigation")[0]?.type);
     await applySharedLayout(layout, {first: true});
     // A link says where to go; otherwise the workspace's own open conversation
     // does, which is what makes a new device arrive where the others already
     // are. Either way it is opened by the ordinary read, once, below.
-    if (!linkRoom && layout.active) {
-      wantedRoom = layout.active.room;
-      if (!linkAgent) wantedAgent = layout.active.agent;
-    }
+    wantedRoom = startup.room;
+    wantedAgent = startup.agent;
   }
   if (wantedAgent && wantedAgent !== DEFAULT_AGENT
       && (state.agents || []).some((a) => a.id === wantedAgent)) {
@@ -9927,7 +9939,7 @@ async function boot() {
   }
   // The layout named an agent this console could not select, so its room is
   // not this agent's to open.
-  if (wantedRoom && layout && layout.active && layout.active.agent !== agentId()) wantedRoom = "";
+  if (wantedRoom && startup && startup.agent !== agentId()) wantedRoom = "";
   rememberAgent(false);
   state.browse.agent = state.agent;
   loadUploadDrafts();
@@ -9937,7 +9949,8 @@ async function boot() {
   // panel it now has every agent to read rather than only this one.
   if (state.ui.dock === "attention") loadAttention();
 
-  await enterAgent(isRemoteAgent() ? null : bootstrap, wantedRoom);
+  await enterAgent(isRemoteAgent() ? null : bootstrap, wantedRoom,
+    startup ? {toTail:true,connect:true,sharedStartup:true} : undefined);
   void checkDesktopDevice();scheduleLayoutPoll();
   renderCommandQueue();scheduleCommandQueue();
   // Once per page load, across every agent — not again on each switch.

@@ -77,3 +77,22 @@ test('closing the viewed tab elsewhere keeps its draft but remembering the view 
   expect(await page.evaluate(()=>shared.ops.length)).toBe(0);
   await expect(page.locator('#draft')).toHaveValue('Keep this unsent draft');
 });
+
+test('startup ignores a closed restored tab, honors a fresh link, and keeps an empty shared desktop empty', async ({page}) => {
+  const envelope=makeEnvelope();await fixture(page,envelope,390);
+  expect(await page.evaluate(()=>{
+    const layout={tabs:[{agent:'local',room:'project/keep'}],active:{agent:'local',room:'project/keep'}};
+    const before=[{agent:'local',room:'project/closed'}];
+    return ['navigate','reload','back_forward'].map(type=>sharedStartupTarget(layout,'local','project/closed',before,type));
+  })).toEqual(Array(3).fill({agent:'local',room:'project/keep'}));
+  expect(await page.evaluate(()=>sharedStartupTarget({tabs:[],active:null},'local','project/new',[],'navigate'))).toEqual({agent:'local',room:'project/new'});
+  await page.route('**/api/rooms?**',route=>route.fulfill({json:{rooms:[]}}));
+  await page.evaluate(async()=>{
+    state.tabs=[];shared.applied.tabs=[];shared.applied.active=null;
+    // The old URL and last room remain, as on a reopened phone app.
+    history.replaceState(null,'','?room=project/closed');localStorage.setItem('atlas.room','project/closed');
+    await enterAgent({voice:{},seq:0},'',{sharedStartup:true,toTail:true,connect:true});
+  });
+  expect(await page.evaluate(()=>state.room)).toBeNull();
+  expect(await page.evaluate(()=>state.tabs)).toEqual([]);
+});
