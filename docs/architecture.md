@@ -129,3 +129,12 @@ adds the same searchable picker. Polling preserves unchanged controls and search
 Lavender marks selection. A small badge reports a current human request, a fresh
 runtime activity observation or unavailable status; controllability alone does
 not produce a green activity indicator. No additional background reads are made.
+
+Shared desktop membership is reconciled independently of the overall workspace
+record version: a metadata read or another window's write does not prove this
+window applied its tabs. A stale tab operation preserves concurrent additions
+but cannot reintroduce a tab removed since its base. Successful writes reconcile
+the local strip to the stored result. An active reference must remain a member;
+remembering a reading position cannot reopen a remotely closed conversation.
+Remote closes remove tabs without releasing another worker or discarding a draft.
+An explicit subsequent open can add the conversation again.

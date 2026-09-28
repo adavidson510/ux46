@@ -1181,13 +1181,9 @@ async function applySharedLayout(record, opts) {
       shared.lost = lost.length;
       kept = state.tabs.filter((tab) => remoteKeys.has(tabKey(tab.agent, tab.room)));
     } else {
-      const before = new Set(previous ? layoutKeys(previous.tabs) : []);
-      kept = state.tabs.filter((tab) => {
-        const key = tabKey(tab.agent, tab.room);
-        // Closed somewhere else: gone from this strip too, and nothing is
-        // released for it here. Opened here since the last read: kept.
-        return remoteKeys.has(key) || !before.has(key);
-      });
+      // Pending local edits are flushed before a shared read is applied.
+      // Membership comes from that shared record, not a stale local strip.
+      kept = state.tabs.filter(tab => remoteKeys.has(tabKey(tab.agent, tab.room)));
     }
     const ordered = [];
     for (const incoming of record.tabs) {
@@ -1258,7 +1254,7 @@ async function followSharedActive(record, previous) {
   if (!want) return;
   const was = previous && previous.active
     ? tabKey(previous.active.agent, previous.active.room) : "";
-  if (tabKey(want.agent, want.room) === was) return;
+  if (tabKey(want.agent, want.room) === was && state.tabs.some(isActiveTab)) return;
   if (want.agent === agentId() && want.room === state.room) return;
   if (!configuredIds().has(want.agent)) return;
   shared.deferred = want;
@@ -1369,13 +1365,24 @@ function applyLayoutOp(layout, op) {
       if (base.has(key)) continue;
       rest.push(entry);
     }
-    layout.tabs = op.tabs.map((tab) => {
+    layout.tabs = op.tabs.filter(tab => {
+      // A tab that was present in our base but is absent now was closed
+      // elsewhere. A stale reorder/add must not silently reopen it.
+      return !base.has(tabKey(tab.agent, tab.room)) || find(tab.agent, tab.room) >= 0;
+    }).map((tab) => {
       const at = find(tab.agent, tab.room);
       return at >= 0 ? Object.assign({}, layout.tabs[at], tab) : tab;
     }).concat(rest);
+    if (layout.active && find(layout.active.agent, layout.active.room) < 0) {
+      const first = layout.tabs[0];
+      layout.active = first ? {agent:first.agent, room:first.room} : null;
+    }
     return;
   }
-  if (op.kind === "active") { layout.active = {agent: op.agent, room: op.room}; return; }
+  if (op.kind === "active") {
+    if (find(op.agent, op.room) >= 0) layout.active = {agent: op.agent, room: op.room};
+    return;
+  }
   if (op.kind === "custom") {
     layout.customizations = Object.assign({}, layout.customizations, op.customizations);
     return;
@@ -1422,7 +1429,11 @@ async function flushLayoutOps(retrying) {
   } finally { shared.publishing = false; }
   if (result.ok) {
     if (selectedLiveDesktopId() === desktopId) {
-      shared.applied = layoutRecord(state.desk.raw) || shared.applied;
+      const record = layoutRecord(state.desk.raw);
+      if (record && !record.tooNew) {
+        if (shared.ops.length) shared.applied = record;
+        else await applySharedLayout(record);
+      }
     }
     if (shared.ops.length) {
       clearTimeout(shared.timer);
@@ -1469,8 +1480,8 @@ async function refreshSharedLayout() {
   shared.reading = true;
   try {
     const envelope = await api(DESKTOP_PATH, {absolute: true});
-    const version = Number(envelope && envelope.version) || 0;
-    if (version === state.desk.version) { await followDeferredSession(); return; }
+    // A local edit may have begun while the read was in flight.
+    if (shared.publishing || shared.ops.length || state.desk.saving) return;
     adoptDesktopState(envelope);
     void renderRoomList();
     renderDesktopDialog();
@@ -1481,9 +1492,11 @@ async function refreshSharedLayout() {
       }
       renderTabs(); return;
     }
-    if (record.by && record.by === state.device && shared.applied) {
-      shared.applied = record;      // this device's own write, coming back
-      renderTabs();
+    // Metadata reads/saves can advance the envelope before the strip follows.
+    // Another window also shares this device id. Neither proves application.
+    if (JSON.stringify(record) === JSON.stringify(shared.applied)) {
+      if (!record.tabs.length && safeToFollow()) showEmptyDesktop();
+      else await followDeferredSession();
       return;
     }
     await applySharedLayout(record, {first: !shared.applied});
@@ -4764,7 +4777,8 @@ async function selectRoom(roomId, opts) {
     if (stale(seq, roomId)) return false;
     if (state.pending.some((p) => p.room === roomId)) { redrawKeepingPlace(); schedulePendingPoll(); }
     reportDraftState(); rememberRoom(roomId);
-    openTab(agentId(), roomId, detail);
+    if (opts?.connect || deviceOnlyLayout() || !shared.applied || findTab(agentId(), roomId))
+      openTab(agentId(), roomId, detail);
     renderTabs(); refreshPanelForRoom();
     if (opts && opts.connect) await maybeConnect(agent, roomId, seq, gen);
     return true;
@@ -4790,7 +4804,7 @@ async function selectRoom(roomId, opts) {
 
 /* Keep the saved room and the shareable link in step, without a router. */
 function rememberRoom(roomId) {
-  if (roomId) openTab(agentId(), roomId, state.detail);
+  // Remembering a reading position is not an explicit request to reopen a tab.
   publishActive();
   try {
     if (roomId) window.localStorage.setItem(agentKey("atlas.room"), roomId);
