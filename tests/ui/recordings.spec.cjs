@@ -84,3 +84,12 @@ test('filing and a summary request preserve human control',async({page})=>{
  await expect(page.locator('#draft')).toHaveValue(/summarize this recording/);
  expect(f.calls.filter(r=>r.method==='POST').every(r=>r.path==='/api/recordings/action')).toBe(true);
 });
+
+test('recording controls and filing fit a phone width',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await fixture(page);await page.evaluate(()=>applyShell());
+ const entry=page.getByRole('button',{name:'Record audio',exact:true});
+ const box=await entry.boundingBox();expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x+box.width).toBeLessThanOrEqual(390);
+ await entry.click();await expect(page.getByRole('button',{name:'Record microphone'})).toBeVisible();
+ const dialog=await page.locator('#recordingsDialog').boundingBox();expect(dialog.x).toBeGreaterThanOrEqual(0);expect(dialog.x+dialog.width).toBeLessThanOrEqual(390);
+ await page.screenshot({path:test.info().outputPath('recordings-phone.png')});
+});
