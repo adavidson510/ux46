@@ -29,6 +29,7 @@
     });
   }
   const getAll=store=>transact([store],'readonly',(tx,done)=>{const r=tx.objectStore(store).getAll();r.onsuccess=()=>done(r.result);});
+  const chunksFor=(id,from=0)=>transact(['chunks'],'readonly',(tx,done)=>{const r=tx.objectStore('chunks').getAll(IDBKeyRange.bound([id,from],[id,Number.MAX_SAFE_INTEGER]));r.onsuccess=()=>done(r.result);});
   const put=r=>transact(['records'],'readwrite',tx=>tx.objectStore('records').put(r));
   async function removeLocal(id){
     return transact(['records','chunks'],'readwrite',tx=>{
@@ -59,7 +60,7 @@
         // Another live window owns its upload/finalization until it stops.
         if(!rec.stopped && rec.owner!==owner)continue;
         const remote=await action({action:'start',id:rec.id,title:rec.title,mime:rec.mime,metadata:rec.metadata});
-        const chunks=(await getAll('chunks')).filter(p=>p.id===rec.id).sort((a,b)=>a.seq-b.seq);
+        const chunks=await chunksFor(rec.id,remote.next_seq);
         for(const part of chunks){
           if(part.seq<remote.next_seq)continue;
           await action({action:'chunk',id:rec.id,seq:part.seq,data:btoa(String.fromCharCode(...part.data))});
@@ -170,7 +171,7 @@
     if(!list.children.length)list.append(node('p','No recordings here yet.'));
   }
   function download(blob,name){const url=URL.createObjectURL(blob),a=node('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
-  async function downloadLocal(rec){const chunks=(await getAll('chunks')).filter(c=>c.id===rec.id).sort((a,b)=>a.seq-b.seq);download(new Blob(chunks.map(c=>c.data),{type:rec.mime}),rec.title+'.'+(rec.mime.includes('mp4')?'m4a':'webm'));}
+  async function downloadLocal(rec){const chunks=await chunksFor(rec.id);download(new Blob(chunks.map(c=>c.data),{type:rec.mime}),rec.title+'.'+(rec.mime.includes('mp4')?'m4a':'webm'));}
   async function show(id){
     const r=await call('view?id='+encodeURIComponent(id));chosen=id;detail.replaceChildren();
     const name=node('input');name.value=r.title;name.maxLength=160;name.setAttribute('aria-label','Recording name');
