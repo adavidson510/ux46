@@ -138,3 +138,15 @@ the local strip to the stored result. An active reference must remain a member;
 remembering a reading position cannot reopen a remotely closed conversation.
 Remote closes remove tabs without releasing another worker or discarding a draft.
 An explicit subsequent open can add the conversation again.
+
+### Conversation satellites
+
+`?satellite=1&agent=…&room=…` is a second view of the exact existing agent/room,
+not another native conversation. Open it from a tab’s Options or the session
+header. Its layout and navigation stay separate: it neither joins a desktop
+nor writes the main window’s tab list, active room, agent hint or shell settings.
+Closing the satellite flushes its draft without releasing the worker. Shared
+history, ordinary version-checked drafts, input and server queues use the same
+existing endpoints. The main workspace remains available on every device.
+The browser controls whether the requested popup appears as a separate window;
+place that window on an OS virtual desktop using the operating system.

@@ -6,6 +6,28 @@
    transcript is ever parsed or executed. */
 "use strict";
 
+// A satellite is an independent view of one existing conversation. It never
+// joins or publishes a desktop arrangement and never owns the native worker.
+const satelliteParams = new URLSearchParams(window.location.search);
+const SATELLITE = satelliteParams.get("satellite") === "1" && Boolean(satelliteParams.get("room"));
+const satelliteTarget = SATELLITE ? {agent:satelliteParams.get("agent") || "", room:satelliteParams.get("room")} : null;
+if (SATELLITE) document.documentElement.classList.add("satellite");
+
+function openSatellite(tab) {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("agent", tab.agent || DEFAULT_AGENT);
+  url.searchParams.set("room", tab.room);
+  url.searchParams.set("satellite", "1");
+  // A user gesture opens a separate window, without a cross-window controller.
+  window.open(url.toString(), "_blank", "popup,width=850,height=900,noopener");
+}
+function openMainWorkspace() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("satellite");
+  window.open(url.toString(), "_blank", "noopener");
+}
+
 const $ = (sel) => document.querySelector(sel);
 const state = {
   csrf: "",
@@ -534,6 +556,7 @@ function configuredIds() {
    already held. The old keys are never written to and never removed: this
    migration has to be safe to run against a browser that may be rolled back. */
 function readTabs() {
+  if (SATELLITE) return [{agent:satelliteTarget.agent || DEFAULT_AGENT, room:satelliteTarget.room}];
   const configured = configuredIds();
   let stored = null;
   try { stored = JSON.parse(window.localStorage.getItem(TABS_KEY_V2) || "null"); }
@@ -569,6 +592,7 @@ function readTabs() {
 }
 
 function writeTabs() {
+  if (SATELLITE) return;
   try {
     window.localStorage.setItem(TABS_KEY_V2,
       JSON.stringify({version: 2, tabs: state.tabs}));
@@ -855,6 +879,9 @@ async function openTabForTyping(agent, room) {
 }
 
 async function openSession(agent, room, opts) {
+  if (SATELLITE && (room !== satelliteTarget.room || (agent || DEFAULT_AGENT) !== (satelliteTarget.agent || DEFAULT_AGENT))) {
+    flash("This satellite stays with its conversation. Open the main workspace to switch."); return false;
+  }
   const id = agent || DEFAULT_AGENT;
   if (!room) return false;
   // What the caller asked for travels the whole way. An agent switch used to
@@ -1039,7 +1066,7 @@ const shared = {
   selectedDesktopId: "", // this browser window's joined live desktop
 };
 
-function layoutScope() { return readPref(SCOPE_KEY) === "device" ? "device" : "shared"; }
+function layoutScope() { if (SATELLITE) return "device"; return readPref(SCOPE_KEY) === "device" ? "device" : "shared"; }
 function deviceOnlyLayout() { return layoutScope() === "device"; }
 
 /* The selected live desktop is deliberately per browser window. Its members
@@ -1174,6 +1201,7 @@ function mergeSharedTab(held, incoming) {
    "the same everywhere" has to be true the moment you sign in. Afterwards it
    means applying only what actually changed. */
 async function applySharedLayout(record, opts) {
+  if (SATELLITE) return;
   const first = Boolean(opts && opts.first);
   const previous = shared.applied;
   const remoteKeys = new Set(layoutKeys(record.tabs));
@@ -1478,6 +1506,7 @@ async function flushLayoutOps(retrying) {
    front, and on a slow timer while it is in front. A hidden page reads
    nothing, and a device with its own arrangement reads nothing at all. */
 function scheduleLayoutPoll() {
+  if (SATELLITE) return;
   clearTimeout(shared.poll);
   if (document.hidden || state.desk.available === false) return;
   shared.poll = setTimeout(() => void refreshSharedLayout(), LAYOUT_POLL_MS);
@@ -1989,6 +2018,8 @@ function openTabMenu(tab, anchor) {
       : "A display name for your workspace. The session itself is not renamed."}));
 
   const acts = el("div", {class: "tabmenu-acts"});
+  acts.appendChild(el("button", {class:"ghost", type:"button", text:"Open satellite window",
+    on:{click:()=>{closeTabMenu(false);openSatellite(tab);}}}));
   acts.appendChild(el("button", {class: "ghost", type: "button", text: "Next chapter…",
     on: {click: () => { closeTabMenu(false); void openEfficiency("chapter", tab); }}}));
   if (tabIsRenamed(tab)) {
@@ -2219,6 +2250,7 @@ function desktopDeviceIcon(kind = 'computer') {
 }
 
 async function checkDesktopDevice(force = false) {
+  if (SATELLITE) return;
   if (!state.csrf || document.hidden || desktopChooser.checking || (!force && Date.now()-desktopChooser.checkedAt<40000)) return;
   desktopChooser.checking = true;desktopChooser.checkedAt = Date.now();
   try {
@@ -3062,6 +3094,7 @@ function openDesktopDialog() {
 const RELEASE_DONE = new Set(["released", "detached", "not_attached"]);
 
 async function closeTab(tab) {
+  if (SATELLITE) { await flushDraft(); window.close(); return true; }
   if (tab.closing) return false;
   // Nothing to release: a room this agent said it cannot drive was never held.
   if (tab.controllable === false) {
@@ -4709,6 +4742,7 @@ function rememberRoomView() {
    which case it connects on arrival when the session is free; without it the
    room is read and drawn and nothing is touched. */
 async function selectRoom(roomId, opts) {
+  if (SATELLITE && roomId !== satelliteTarget.room) return false;
   closeCommands();
   if (!roomId) return false;
   const agent = agentId();
@@ -4814,6 +4848,7 @@ async function selectRoom(roomId, opts) {
 
 /* Keep the saved room and the shareable link in step, without a router. */
 function rememberRoom(roomId) {
+  if (SATELLITE) return;
   // Remembering a reading position is not an explicit request to reopen a tab.
   publishActive();
   try {
@@ -8538,12 +8573,14 @@ const WIDE = "(min-width:1100px)";
 function isWide() { return window.matchMedia(WIDE).matches; }
 
 function savePref(key, value) {
+  if (SATELLITE) key = "satellite." + key;
   try {
     if (value) window.localStorage.setItem(key, value);
     else window.localStorage.removeItem(key);
   } catch (e) { /* private mode: the shell simply starts at its default */ }
 }
 function readPref(key) {
+  if (SATELLITE) key = "satellite." + key;
   try { return window.localStorage.getItem(key) || ""; } catch (e) { return ""; }
 }
 
@@ -9540,6 +9577,7 @@ async function pollEvents() {
    it was and is still held when you come back. */
 
 function rememberAgent(clearRoom) {
+  if (SATELLITE) return;
   try {
     if (isRemoteAgent()) window.localStorage.setItem("atlas.agent", agentId());
     else window.localStorage.removeItem("atlas.agent");
@@ -9727,6 +9765,7 @@ function resetAgentState() {
 /* Change which agent the console is working in. `wantRoom` is the exact room
    the caller is going to, so nothing else is opened on the way there. */
 async function switchAgent(id, wantRoom, opts) {
+  if (SATELLITE && ((id || DEFAULT_AGENT) !== (satelliteTarget.agent || DEFAULT_AGENT) || (wantRoom && wantRoom !== satelliteTarget.room))) return false;
   if (!id || !configuredIds().has(id)) return false;
   if (id === agentId()) {
     if (wantRoom) return selectRoom(wantRoom, opts || {toTail: true});
@@ -9897,6 +9936,10 @@ async function boot() {
   }
 
   try { await loadAgents(); } catch (error) { state.agents = []; }
+  if (SATELLITE && (!ROOM_ID_SHAPE.test(satelliteTarget.room) || !configuredIds().has(satelliteTarget.agent || DEFAULT_AGENT))) {
+    $("#stream").replaceChildren(el("p", {class:"empty",text:"This satellite’s conversation or agent is unavailable. Open the main workspace to choose it again."}));
+    return;
+  }
 
   // A deep link chooses the agent, then the workspace's own layout, then this
   // device's last choice.
@@ -9918,9 +9961,9 @@ async function boot() {
   // store, so it is read before the strip is drawn — and, more to the point,
   // before anything on this device writes a strip of its own over it.
   await loadDesktopState();
-  let wantedRoom = "";
+  let wantedRoom = SATELLITE ? linkRoom : "";
   const layout = deviceOnlyLayout() ? null : layoutRecord(state.desk.raw);
-  let startup = null;
+  let startup = SATELLITE ? {agent:wantedAgent || DEFAULT_AGENT,room:linkRoom} : null;
   if (layout && !layout.tooNew) {
     startup = sharedStartupTarget(layout, wantedAgent || DEFAULT_AGENT, linkRoom, state.tabs,
       performance.getEntriesByType("navigation")[0]?.type);
@@ -10475,6 +10518,15 @@ $("#navSearch").addEventListener("input", () => {
 $("#btnFold").addEventListener("click", toggleFold);
 $("#btnEarlier").addEventListener("click", loadEarlier);
 $("#btnFocus").addEventListener("click", () => toggleFocus());
+$("#btnSatellite").addEventListener("click", () => {
+  if (SATELLITE) openMainWorkspace();
+  else if (state.room) openSatellite({agent:agentId(),room:state.room});
+});
+if (SATELLITE) {
+  $("#btnSatellite").title = "Open main workspace";
+  $("#btnSatellite").setAttribute("aria-label", "Open main workspace");
+  $("#satelliteLabel").hidden = false;
+}
 $("#btnDetails").addEventListener("click", (event) => openPanel("details", event.currentTarget));
 
 /* left drawer: navigation and projects */

@@ -1761,3 +1761,12 @@ body.nav-dragging .navgrip{cursor:grabbing;}
   .conversation-picker{max-height:85dvh;padding:12px;}
   .conversation-choice .iconbtn{width:40px;height:44px;}
 }
+
+/* Satellites have their own view, never their own conversation or desktop. */
+.satellite .side,.satellite #tabs,.satellite #mobileTabs,.satellite #btnConversations,
+.satellite #btnMenu,.satellite #btnNewConvPhone,.satellite #focusRooms,.satellite #btnFocus{display:none!important;}
+.satellite .app{grid-template-columns:minmax(0,1fr) auto;}
+.satellite .topbar{justify-content:flex-end;min-height:42px;}
+.satellite .subbar{flex-wrap:wrap;padding:10px 14px;}
+.satellite-label{font:11px var(--sans);color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 6px;}
+.satellite .thread{max-width:100%;}
