@@ -24,7 +24,7 @@ def initialize(root):
     # refuse to replace": running setup again must preserve the owner's settings.
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     defaults = {
-        'registry.json': {'schema_version': 1, 'node_id': 'local', 'projects': []},
+        'registry.json': {'schema_version': 1, 'node_id': 'local', 'projects': [], 'recordings_roots': [str(root/'workspace'/'recordings'/'index')]},
         'agents.json': {'schema_version': 1, 'agents': []},
         'config.json': {'schema_version': 1, 'agent_label': 'Codex', 'agent': 'codex', 'port': 8877,
                        'execution_policy': 'workspace-write',
@@ -106,10 +106,10 @@ def run(root, config, port=None, open_browser=False):
                     'message':'Connect an agent with ux46 setup or ux46 connect.'})
             if selected == 'none' and method != 'GET' and path in ('/api/sessions','/api/connection/refresh'):
                 raise console.ApiError(HTTPStatus.CONFLICT,'not_configured','Connect an agent first')
-            if not path.startswith(('/api/constellation/', '/api/email/', '/api/schedule/',
+            if not path.startswith(('/api/recordings/', '/api/constellation/', '/api/email/', '/api/schedule/',
                                     '/api/usage-report/', '/api/desktop-devices/', '/api/work/')):
                 return super()._api(method, path, query, decision)
-            reads = {'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status', 'assistant'}
+            reads = {'audio', 'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status', 'assistant'}
             if method not in ('GET', 'POST') or (method == 'GET' and path.rsplit('/', 1)[-1] not in reads):
                 raise console.ApiError(HTTPStatus.METHOD_NOT_ALLOWED, 'bad_method', 'Use POST for changes')
             # ConsoleHandler checked host, loopback, origin and CSRF before
@@ -118,6 +118,8 @@ def run(root, config, port=None, open_browser=False):
             # must preserve that boundary, even if their buttons are hidden.
             values = {k: v[-1] for k, v in query.items()} if method == 'GET' else self._body()
             try:
+                if path == '/api/recordings/audio':
+                    return workspace.recordings.reply_audio(self, values['id'])
                 return self._json(HTTPStatus.OK, workspace.dispatch(path, values))
             except Conflict:
                 raise console.ApiError(HTTPStatus.CONFLICT, 'conflict', 'Refresh before saving')

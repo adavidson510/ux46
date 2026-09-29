@@ -163,6 +163,7 @@
       </div>
       <input class="side-search" id="roomSearch" type="search" autocomplete="off"
              placeholder="Search every project and session…" aria-label="Search rooms" />
+      <button class="linkbtn" id="btnProjectRecordings" type="button">Recordings · all projects</button>
       <div class="filters">
         <span class="fltlabel">Search:</span>
         <label class="tick"><input type="checkbox" id="fltComplete" checked /> include complete</label>
@@ -193,6 +194,8 @@
         <span class="mobile-tab-chevron" aria-hidden="true">⌄</span>
         <select id="mobileTabSelect" aria-label="Switch open conversation"></select>
       </div>
+      <button class="tool record-button" id="btnRecord" type="button" aria-label="Record audio" title="Record audio, separate from dictation">● Record</button>
+      <button class="iconbtn" id="btnRecordings" type="button" aria-label="Saved recordings" title="Saved recordings"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><path d="M4 3h12v14H4zM7 7h6M7 10h6M7 13h3"/></svg></button>
       <span class="chip-state" id="connState" role="status">connecting…</span>
       <button class="iconbtn bell" id="btnAttention" type="button" aria-expanded="false"
               aria-controls="dock" title="Attention">
@@ -632,7 +635,19 @@
 
 <div class="scrim" id="scrim" hidden></div>
 
+<div id="recordLive" class="record-live" hidden role="status"><span class="record-dot" aria-hidden="true">●</span><strong>Recording <span id="recordLiveTime">0:00</span></strong><span id="recordLiveStatus"></span><button class="ghost" id="recordPause" type="button">Pause</button><button class="ghost" id="recordStop" type="button">■ Stop</button></div>
+<dialog id="recordingsDialog" class="recordings-dialog" aria-labelledby="recordingsTitle">
+  <div class="recording-actions"><h2 id="recordingsTitle">Recordings <small>Alpha</small></h2><button class="ghost" id="recordClose" type="button">Close</button></div>
+  <p>Capture audio now. Decide what to do with it later. Nothing is sent to an agent.</p>
+  <div class="recording-start"><button class="primary" id="recordStart" type="button">● Record microphone</button><label><input id="recordAutoTranscript" type="checkbox" checked> Transcribe after recording</label></div>
+  <p id="recordTranscriptionInfo" class="muted">Checking local transcription…</p>
+  <p class="muted">This alpha records your microphone. Keep this page open and your device awake. It does not capture the other side of a headset call.</p>
+  <p id="recordingNotice" role="status"></p>
+  <div class="recording-actions"><select id="recordingProject" aria-label="Filter recordings by project"><option value="">All projects</option><option value="unfiled">Unfiled</option></select><input id="recordingSearch" type="search" placeholder="Search names and transcripts" aria-label="Search recordings"><button id="recordRefresh" class="ghost" type="button">Refresh</button><label><input id="recordTrash" type="checkbox"> Trash</label></div>
+  <div id="recordingList"></div><section id="recordingDetail" aria-label="Selected recording"></section>
+</dialog>
 <script src="/app.js"></script>
+<script src="/recordings.js"></script>
 <script src="/modules.js"></script>
 <script src="/work.js"></script>
 <script src="/tell.js"></script>

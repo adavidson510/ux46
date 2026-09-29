@@ -7182,6 +7182,8 @@ function renderProjectWorkingSet(project, host) {
         + " hidden from suggestions here. They still appear in history and search, "
         + "where you can restore them."}));
   }
+  host.appendChild(el("button", {class:"linkbtn",type:"button",text:"Recordings",
+    on:{click:()=>{if(window.UX46Recordings)void window.UX46Recordings.openProject(project.id);}}}));
   if (view.mode) renderProjectPage(project, host);
 }
 

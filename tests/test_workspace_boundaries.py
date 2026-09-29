@@ -1,4 +1,5 @@
 """Real HTTP boundaries: scope, revocation, browser origin and gateway login."""
+import base64
 import hashlib
 import json
 import tempfile
@@ -62,6 +63,23 @@ class HumanBoundary(GateCase):
         self.assertEqual(self.ask('POST','/api/email/rule',body=body,headers=headers)[0],200)
         self.assertEqual(self.ask('POST','/api/email/rule',body=body,headers=headers)[0],409)
         self.assertEqual(self.ask(path='/api/email/rule')[0],400)
+
+    def test_recording_audio_requires_login_and_upload_requires_origin_csrf(self):
+        ident='boundary-recording-0001'
+        start=json.dumps({'action':'start','id':ident,'title':'Synthetic','mime':'audio/webm'})
+        self.assertEqual(self.ask(path='/api/recordings/view',password=None)[0],401)
+        self.assertEqual(self.ask('POST','/api/recordings/action',body=start)[0],403)
+        self.assertEqual(self.ask('POST','/api/recordings/action',body=start,headers={'Origin':ORIGIN,'X-Atlas-CSRF':'wrong'})[0],403)
+        headers={'Origin':ORIGIN,'X-Atlas-CSRF':'fixture-csrf'}
+        self.assertEqual(self.ask('POST','/api/recordings/action',body=start,headers=headers)[0],200)
+        data=b'x'*24576
+        chunk=json.dumps({'action':'chunk','id':ident,'seq':0,'data':base64.b64encode(data).decode()})
+        self.assertEqual(self.ask('POST','/api/recordings/action',body=chunk,headers=headers)[0],200)
+        audio='/api/recordings/audio?id='+ident
+        self.assertEqual(self.ask(path=audio,password=None)[0],401)
+        self.assertEqual(self.ask(path=audio)[2],data)
+        result=self.ask(path=audio,headers={'Range':'bytes=10-19'})
+        self.assertEqual(result[0],206);self.assertEqual(result[2],b'x'*10)
 
     def test_agent_refresh_requires_identity_origin_and_csrf_before_routing(self):
         body=json.dumps({'agent':'agent2','client_id':'boundary-request'})

@@ -713,6 +713,24 @@ def records(projects: list[Project]) -> tuple[list[Record], list[str]]:
     return result, errors
 
 
+def recording_records(registry: dict, projects: list[Project]) -> list[Record]:
+    result = []
+    known = {p.id:p for p in projects}
+    for root_text in registry.get("recordings_roots", []):
+        root = Path(root_text).expanduser().resolve()
+        if not root.is_dir(): continue
+        unfiled = Project("unfiled-recordings", "Unfiled recordings", root, ())
+        for path in sorted(root.glob("*.md")):
+            if path.is_symlink() or path.stat().st_size > 65536: continue
+            try:
+                record = parse_record(unfiled, path)
+                if record.metadata.get("kind") != "recording": continue
+                project = known.get(record.metadata.get("project"), unfiled)
+                result.append(Record(project, path, record.metadata, record.body))
+            except (OSError, UnicodeError): continue
+    return result
+
+
 def tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", text.casefold())
 
@@ -889,6 +907,7 @@ def command_search(
         payload = [
             {
                 "identity": record.identity,
+                "kind": record.metadata.get("kind", "session"),
                 "project": record.project.id,
                 "project_name": record.project.name,
                 "session": record.session,
@@ -2428,6 +2447,11 @@ def main() -> int:
         if record_load_errors and args.command != "doctor":
             for error in record_load_errors:
                 print(f"Warning: {error}", file=sys.stderr)
+        if args.command in ("search", "show", "path"):
+            extra = recording_records(registry, projects)
+            all_records += extra
+            if extra and not any(p.id == "unfiled-recordings" for p in projects):
+                projects.append(Project("unfiled-recordings", "Unfiled recordings", registry_path.parent, ()))
         if args.command == "search":
             return command_search(args, projects, all_records)
         if args.command == "show":

@@ -657,6 +657,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         files={'/':('index.html','text/html; charset=utf-8'),
                '/index.html':('index.html','text/html; charset=utf-8'),
                '/app.js':('app.js','text/javascript; charset=utf-8'),
+               "/recordings.js":("recordings.js","application/javascript; charset=utf-8"),
                '/modules.js':('modules.js','text/javascript; charset=utf-8'),
                '/styles.css':('styles.css','text/css; charset=utf-8'),
                '/workspace.js':('workspace.js','text/javascript; charset=utf-8'),

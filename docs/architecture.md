@@ -16,6 +16,7 @@ session ownership and input/output; they do not replace provider authentication.
 | Claude adapter | [atlas_claude.py](../tools/atlas_claude.py) |
 | Project registry and portable sessions | [session_vault.py](../tools/session_vault.py), [atlas.py](../tools/atlas.py) |
 | Learning, retrieval and feedback | [constellation_store.py](../tools/constellation_store.py), [constellation_learning.py](../tools/constellation_learning.py) |
+| Recording and local transcription | [Recording guide](recordings.md), [ux46_recordings.py](../tools/ux46_recordings.py) |
 | Human workspace projections | [ux46_workspace_api.py](../tools/ux46_workspace_api.py) |
 | Optional remote agents | [atlas_remote.py](../tools/atlas_remote.py) |
 | Optional private access gateway | [ux46_access_gateway.py](../tools/ux46_access_gateway.py) |
