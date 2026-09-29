@@ -6,8 +6,8 @@
 # Release values are set by the maintainer after packaging the tested source.
 set -eu
 main() {
-  release='v0.2.0-alpha.20'
-  archive_sha='3f66f04bd04f4154cda0904a4f426709b457c16fd7717f25a50e5ba91b0bd213'
+  release='v0.2.0-alpha.21'
+  archive_sha='63f667800d21409b03bba5c1c5008e85eae8e9f203240d3374fbfbb0a789fa27'
   agent=''; start=auto; bootstrap_python=1; interactive=0
   if [ -t 1 ]; then interactive=1; fi
   printf '%s\n' 'UX46: install here, or give this same curl command to your AI.' \
