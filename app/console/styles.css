@@ -262,7 +262,10 @@ dialog::backdrop{backdrop-filter:blur(6px);}
 .project-mark.mark-3{background:#dca8c524;color:#dca8c5;}
 .project-mark.mark-4{background:#d8bb8a24;color:#d8bb8a;}
 .project-mark.mark-5{background:#9baede24;color:#9baede;}
+.project-mark.exploration-mark{background:#d8bb8a24;color:#d8bb8a;}
+.project-mark.exploration-mark .ic{width:19px;height:19px;stroke-width:1.4;}
 [data-theme="light"] .project-mark{color:#263447;}
+[data-theme="light"] .project-mark.exploration-mark{background:#b17b1a18;color:#765521;}
 .tabs.crowded .tabwrap{flex:0 1 170px;min-width:78px;}
 .tabs.crowded .tabwrap.on{min-width:148px;}
 .tabs.crowded .towner{display:none;}

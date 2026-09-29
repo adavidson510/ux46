@@ -435,6 +435,7 @@ function sessionMark(tab) {
 
 function projectMarkFallback(tab) {
   const project = String(tab.room || "").split("/")[0];
+  const exploration = project === "ux46-explorations";
   const owner = tab.agent || DEFAULT_AGENT;
   const key = owner + "\0" + project;
   const words = String(tab.project || project).replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -443,8 +444,13 @@ function projectMarkFallback(tab) {
     : (words[0] || "?").slice(0, 2);
   let hash = 0;
   for (const ch of project) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  const mark = el("span", {class: "project-mark mark-" + hash % 6,
-    "aria-hidden": "true", text: initials.toUpperCase()});
+  const mark = el("span", {class: "project-mark " + (exploration ? "exploration-mark" : "mark-" + hash % 6),
+    "aria-hidden": "true"});
+  // A built-in fallback needs no saved preference, upload, or migration. Keep
+  // the canonical project identity independent of a room's changing name.
+  const showDefault = () => mark.replaceChildren(exploration
+    ? useIcon("i-compass") : document.createTextNode(initials.toUpperCase()));
+  showDefault();
   if (!projectMarks.has(key)) {
     const promise = api(agentPath(owner, "/api/projects/" + encodeURIComponent(project) + "/pref"), {absolute: true})
       .then(data => data.pref && data.pref.icon_file_id).catch(() => null);
@@ -453,7 +459,7 @@ function projectMarkFallback(tab) {
   projectMarks.get(key).then(id => {
     if (!id || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return;
     const image = el("img", {alt: "", src: agentPath(owner, "/api/atlas/files/" + id + "/preview")});
-    image.addEventListener("error", () => { mark.textContent = initials.toUpperCase(); }, {once: true});
+    image.addEventListener("error", showDefault, {once: true});
     mark.replaceChildren(image);
   });
   return mark;
