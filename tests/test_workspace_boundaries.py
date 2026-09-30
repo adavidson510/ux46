@@ -64,6 +64,19 @@ class HumanBoundary(GateCase):
         self.assertEqual(self.ask('POST','/api/email/rule',body=body,headers=headers)[0],409)
         self.assertEqual(self.ask(path='/api/email/rule')[0],400)
 
+    def test_content_scope_login_revision_and_large_unicode_document(self):
+        scope={'agent':'keel','room':'example/content','id':'content-boundary-01'}
+        body=json.dumps({**scope,'action':'create','kind':'markdown','title':'Draft','payload':{'text':'✦'*15000}})
+        self.assertEqual(self.ask(path='/api/content/view?agent=keel&room=example/content',password=None)[0],401)
+        self.assertEqual(self.ask('POST','/api/content/action',body=body)[0],403)
+        headers={'Origin':ORIGIN,'X-Atlas-CSRF':'fixture-csrf'}
+        status,_,raw=self.ask('POST','/api/content/action',body=body,headers=headers)
+        self.assertEqual(status,200);self.assertEqual(json.loads(raw)['payload']['text'],'✦'*15000)
+        self.assertEqual(self.ask(path='/api/content/view?agent=keel&room=wrong/room&id=content-boundary-01')[0],404)
+        body=json.dumps({**scope,'action':'save','base_revision':1,'title':'Draft','payload':{'text':'human'}})
+        self.assertEqual(self.ask('POST','/api/content/action',body=body,headers=headers)[0],200)
+        self.assertEqual(self.ask('POST','/api/content/action',body=body,headers=headers)[0],409)
+
     def test_recording_audio_requires_login_and_upload_requires_origin_csrf(self):
         ident='boundary-recording-0001'
         start=json.dumps({'action':'start','id':ident,'title':'Synthetic','mime':'audio/webm'})

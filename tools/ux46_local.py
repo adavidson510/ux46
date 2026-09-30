@@ -106,7 +106,7 @@ def run(root, config, port=None, open_browser=False):
                     'message':'Connect an agent with ux46 setup or ux46 connect.'})
             if selected == 'none' and method != 'GET' and path in ('/api/sessions','/api/connection/refresh'):
                 raise console.ApiError(HTTPStatus.CONFLICT,'not_configured','Connect an agent first')
-            if not path.startswith(('/api/recordings/', '/api/constellation/', '/api/email/', '/api/schedule/',
+            if not path.startswith(('/api/content/', '/api/recordings/', '/api/constellation/', '/api/email/', '/api/schedule/',
                                     '/api/usage-report/', '/api/desktop-devices/', '/api/work/')):
                 return super()._api(method, path, query, decision)
             reads = {'audio', 'catalog', 'review', 'lookup', 'get', 'health', 'changes', 'view', 'status', 'assistant'}

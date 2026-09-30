@@ -9,6 +9,8 @@
 // A satellite is an independent view of one existing conversation. It never
 // joins or publishes a desktop arrangement and never owns the native worker.
 const satelliteParams = new URLSearchParams(window.location.search);
+const CONTENT_POPOUT = satelliteParams.has("content");
+if (CONTENT_POPOUT) document.documentElement.classList.add("content-popout");
 const SATELLITE = satelliteParams.get("satellite") === "1" && Boolean(satelliteParams.get("room"));
 const satelliteTarget = SATELLITE ? {agent:satelliteParams.get("agent") || "", room:satelliteParams.get("room")} : null;
 if (SATELLITE) document.documentElement.classList.add("satellite");
@@ -3906,7 +3908,11 @@ function mdBlocks(lines, host, depth) {
         j += 1;
       }
       const preview = closed && fence[2].trim() === "ux46-preview" ? parseTurnPreview(body.join("\n")) : null;
-      host.appendChild(preview ? turnPreviewCard(preview) : mdCodeBlock(body.join("\n"), fence[2], closed));
+      let content = null;
+      if (closed && fence[2].trim() === "ux46-content" && window.UX46Content) {
+        try { content = window.UX46Content.card(JSON.parse(body.join("\n"))); } catch (e) {}
+      }
+      host.appendChild(content || (preview ? turnPreviewCard(preview) : mdCodeBlock(body.join("\n"), fence[2], closed)));
       i = closed ? j + 1 : j;
       continue;
     }
@@ -9913,6 +9919,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
 
 /* --------------------------------------------------------------------- boot */
 async function boot() {
+  if (CONTENT_POPOUT) return; // A document window does not attach a native room.
   state.device = deviceId();      // one device identity, shared by every agent
   state.ui.left = readPref("atlas.left") === "rail" ? "rail" : "wide";
   const dockPref = readPref("atlas.dock");

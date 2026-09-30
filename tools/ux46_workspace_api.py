@@ -32,6 +32,8 @@ class WorkspaceAPI(BoardAPI):
         from ux46_work import WorkStore
         from ux46_recordings import RecordingStore
         self.recordings=RecordingStore(directory)
+        from ux46_content import ContentStore
+        self.content=ContentStore(directory)
         self.work_refresh=0
         self.work=WorkStore(Path(directory)/'work.sqlite3')
         self.schedule=ScheduleStore(directory)
@@ -49,6 +51,8 @@ class WorkspaceAPI(BoardAPI):
             self.constellation_client=Client(json.loads(Path(constellation_config).read_text()))
 
     def dispatch(self,path,args):
+        if path=="/api/content/view":return self.content.read(args)
+        if path=="/api/content/action":return self.content.action(args)
         if path=="/api/recordings/view":return self.recordings.view(args)
         if path=="/api/recordings/action":return self.recordings.action(args)
         if path=='/api/desktop-devices/view':return self.devices.view(args['browser'])
@@ -104,9 +108,9 @@ class WorkspaceAPI(BoardAPI):
 
     def handle(self,handler):
         path=urlsplit(handler.path).path
-        if not path.startswith(('/api/recordings/','/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/','/api/work/')):return False
+        if not path.startswith(('/api/content/','/api/recordings/','/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/','/api/work/')):return False
         try:
-            allowed_get={'/api/recordings/view','/api/recordings/audio','/api/work/view','/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
+            allowed_get={'/api/content/view','/api/recordings/view','/api/recordings/audio','/api/work/view','/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
                          '/api/constellation/changes','/api/email/view','/api/email/status','/api/email/assistant'}
             if handler.command in ('GET','HEAD'):
                 if path not in allowed_get:raise ValueError('Use POST for this operation')
@@ -126,7 +130,7 @@ class WorkspaceAPI(BoardAPI):
                 if not isinstance(wanted,str) or not wanted or not secrets.compare_digest(wanted,handler.headers.get('X-Atlas-CSRF','')):
                     raise PermissionError('Refresh the workspace before saving')
                 length=int(handler.headers.get('Content-Length','0'))
-                limit=65536 if path.startswith('/api/recordings/') else 16000
+                limit=400000 if path.startswith('/api/content/') else 65536 if path.startswith('/api/recordings/') else 16000
                 if not 0<length<=limit:raise ValueError('Request exceeds the allowed size')
                 args=json.loads(handler.rfile.read(length))
                 if not isinstance(args,dict):raise ValueError('Expected an object')

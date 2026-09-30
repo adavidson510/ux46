@@ -1,5 +1,9 @@
 # Give each room a useful view
 
+For a draft you want to edit and save, use [Canvas scratchpads and content
+popouts](content.md). They sit alongside the compact overview and keep their own
+revision history; Notes and the overview remain separate.
+
 Canvas should help someone understand the work without reading the conversation
 again. Start with **what matters now**, then enough recent history to explain
 it, then the next concrete step. Those are questions to answer, not mandatory

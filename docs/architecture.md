@@ -18,6 +18,7 @@ session ownership and input/output; they do not replace provider authentication.
 | Learning, retrieval and feedback | [constellation_store.py](../tools/constellation_store.py), [constellation_learning.py](../tools/constellation_learning.py) |
 | Recording and local transcription | [Recording guide](recordings.md), [ux46_recordings.py](../tools/ux46_recordings.py) |
 | Human workspace projections | [ux46_workspace_api.py](../tools/ux46_workspace_api.py) |
+| Saved drafts, revision checks and content popouts | [Content guide](content.md), [ux46_content.py](../tools/ux46_content.py), [content.js](../app/console/content.js) |
 | Optional remote agents | [atlas_remote.py](../tools/atlas_remote.py) |
 | Optional private access gateway | [ux46_access_gateway.py](../tools/ux46_access_gateway.py) |
 | Doctor and independent recovery | [ux46_doctor.py](../tools/ux46_doctor.py), [ux46_recovery.py](../tools/ux46_recovery.py), [recovery guide](recovery.md) |

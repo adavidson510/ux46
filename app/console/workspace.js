@@ -1,6 +1,7 @@
 /* Workspace views use deterministic projections. Opening them never starts an agent. */
 "use strict";
 (() => {
+  if (typeof CONTENT_POPOUT !== 'undefined' && CONTENT_POPOUT) return;
   const mail = {account:"",category:"",project:"",lane:"needs",selected:null,data:null,gen:0,rules:false};
   const knowledge = {query:"",gen:0,project:"",kind:"",origin:"",subject:"",mode:"themes",lane:"all",selected:null,tab:"overview",cache:new Map(),snapshot:null,detailGen:0};
   const $w = id => document.getElementById(id);
@@ -440,6 +441,7 @@
 
 /* Email preparation belongs to Email, independently of Signals and learning. */
 (() => {
+  if (typeof CONTENT_POPOUT !== 'undefined' && CONTENT_POPOUT) return;
   const h=(tag,attrs={},children=[])=>el(tag,attrs,children);
   const btn=(label,action)=>h('button',{type:'button',class:'ws-button',text:label,on:{click:action}});
   let data=null,loading=false,editor=null;

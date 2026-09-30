@@ -62,6 +62,7 @@ STATIC_FILES = {
     "/index.html": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+               "/content.js": ("content.js", "application/javascript; charset=utf-8"),
                "/recordings.js":("recordings.js","application/javascript; charset=utf-8"),
     "/workspace.js": ("workspace.js", "application/javascript; charset=utf-8"),
         "/work.js": ("work.js", "application/javascript; charset=utf-8"),
@@ -1321,7 +1322,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         upload_match = re.fullmatch(
             r"(?:/api/agents/[a-z][a-z0-9-]{0,31})?/api/room/[^/]+/[^/]+/files",
             urlparse(self.path).path)
-        limit = (self.service.files.max_upload_bytes + MAX_UPLOAD_OVERHEAD) if upload_match else MAX_BODY
+        limit = (self.service.files.max_upload_bytes + MAX_UPLOAD_OVERHEAD) if upload_match else (400000 if urlparse(self.path).path.startswith("/api/content/") else MAX_BODY)
         if length > limit:
             self.close_connection = True
             raise ApiError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "too_large",

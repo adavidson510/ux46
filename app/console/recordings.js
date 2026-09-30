@@ -2,6 +2,7 @@
    Each piece is committed to IndexedDB before upload. Navigation within UX46
    leaves the capture alone; reloading ends it and recovers the saved pieces. */
 (() => {
+  if (typeof CONTENT_POPOUT !== 'undefined' && CONTENT_POPOUT) return;
   'use strict';
   const q = s => document.querySelector(s);
   const node = (tag, text, cls) => { const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n; };
