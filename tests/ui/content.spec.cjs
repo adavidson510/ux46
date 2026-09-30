@@ -85,3 +85,11 @@ test('saved content descriptors open the owned item and reject a foreign room',a
  await page.locator('#fixtureCard').getByRole('button',{name:'Open in Canvas'}).click();await expect(page.getByLabel('Markdown source',{exact:true})).toHaveValue(/Original/);
  expect(await page.evaluate(()=>UX46Content.card({id:'article-test-01',room:'other/room'}))).toBeNull();
 });
+
+test('narrow Canvas keeps editor controls reachable beside the overview',async({context,page})=>{
+ const f=await fixture(context);await page.setViewportSize({width:390,height:844});await f.main(page);
+ await page.getByLabel('Markdown source',{exact:true}).fill('Unsaved mobile text');
+ await page.locator('.content-body').getByRole('button',{name:'Save',exact:true}).click();
+ await expect(page.locator('.content-status')).toHaveText('Saved · revision 2');
+ await page.screenshot({path:test.info().outputPath('canvas-editor-phone.png')});
+});
