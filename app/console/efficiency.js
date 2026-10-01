@@ -122,10 +122,57 @@
         return;
       }
       const day = new Date().toISOString().slice(0, 10);
-      const data = await ctx.api("/api/room/" + ctx.room + "/usage?day=" + day);
+      // Read each source independently: unavailable receipts must not hide a
+      // useful account status, and a failed account read is never healthy quota.
+      const [receipt, account, roomRead] = await Promise.allSettled([
+        ctx.api("/api/room/" + ctx.room + "/usage?day=" + day),
+        ctx.api("/api/account-usage"),
+        ctx.api("/api/room/" + ctx.room),
+      ]);
       if (gen !== generation) return;
-      const totals = data.usage || data.totals || {};
-      body.replaceChildren(make("h3", "", "This conversation · " + day + " UTC"));
+      const limits = account.status === "fulfilled" ? account.value : null;
+      const room = roomRead.status === "fulfilled" ? roomRead.value : null;
+      body.replaceChildren(make("h3", "", "Account allowance"));
+      const fresh = Number.isFinite(limits?.checked_at) && Date.now()/1000 - limits.checked_at < 90;
+      if (fresh && limits.state === "reported") {
+        for (const bucket of limits.buckets || []) {
+          body.append(make("h4", "", bucket.id === "codex" ? "Codex" : bucket.id));
+          for (const window of bucket.windows || []) {
+            const mins = window.minutes;
+            const label = mins === 10080 ? "Weekly allowance" : mins === 300 ? "5-hour allowance"
+              : mins ? (mins % 60 === 0 ? mins/60 + "-hour allowance" : mins + "-minute allowance")
+              : "Reported allowance";
+            const percent = Number.isFinite(window.used_percent) ? window.used_percent : null;
+            const row = make("section", "efficiency-metric");
+            row.append(make("span", "", label), make("strong", "", percent === null ? "Not reported" : (100-percent) + "% remaining"));
+            if (percent !== null) {
+              const bar = make("meter", ""); bar.min=0;bar.max=100;bar.value=100-percent;
+              bar.setAttribute("aria-label",label+" remaining");row.append(bar);
+            }
+            if (Number.isFinite(window.reset_at)) row.append(make("small", "", "Resets " + new Date(window.reset_at*1000).toLocaleString()));
+            body.append(row);
+          }
+          if (bucket.credits_available === true) body.append(note("Credits available. Reaching the included allowance does not by itself mean every request will stop. This view cannot tell whether a particular reply used credits."));
+          else if (bucket.credits_available === false) body.append(note("No additional credits reported."));
+          if (bucket.spend_control_reached) body.append(note("The provider reports a spending limit reached."));
+        }
+        if (Number.isInteger(limits.available_resets)) body.append(note(limits.available_resets + " unused allowance resets reported. Checking usage does not redeem them."));
+        body.append(note("Checked " + new Date(limits.checked_at*1000).toLocaleString()));
+        if (limits.source === "saved_login") body.append(note("Read from this agent’s currently saved login. A conversation still using an earlier login can differ."));
+      } else body.append(note("Live allowance details are unavailable from this connector. Unknown does not mean exhausted."));
+      if (room?.native_terminal) body.append(note("Earlier attempt: " + (room.native_terminal.kind === "usage_limit"
+        ? "hit a usage limit." : room.native_terminal.kind === "auth" ? "had a sign-in error." : "ended with an error.") + " This is separate from the current allowance above."));
+      body.append(note("Account allowance is shared across conversations using that login. The token counts below describe only this conversation."));
+      body.append(make("h3", "", "This conversation · " + day + " UTC"));
+      if (receipt.status === "rejected") {
+        const error = receipt.reason;
+        body.append(note(error.status === 404 || error.code === "forbidden_path"
+          ? "This connector does not provide conversation usage yet. No request was sent to the model."
+          : "Could not read conversation usage: " + (error.message || "try again")),
+          button("Refresh usage", () => void show("usage")));
+        return;
+      }
+      const data = receipt.value, totals = data.usage || data.totals || {};
       if (data.pending || data.incremental?.pending) body.append(note("Indexing native receipts. Values below cover the part read so far. Refresh this view in a moment; no model is running for this."));
       const grid = make("div", "efficiency-metrics");
       grid.append(metric("Input", totals.input_tokens, "Includes cached input"),
@@ -137,7 +184,7 @@
       if (data.coverage) body.append(details("Coverage & measurement", typeof data.coverage === "string" ? data.coverage : JSON.stringify(data.coverage, null, 2)));
       if (data.annotations?.length) body.append(details("Compaction & counter changes", data.annotations.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join("\n")));
       const usageActions = make("div", "efficiency-actions");
-      usageActions.append(button("Refresh receipts", () => void show("usage")),
+      usageActions.append(button("Refresh usage", () => void show("usage")),
         button("Project & background usage", async (event) => {
           const control = event.currentTarget; control.disabled = true;
           try {

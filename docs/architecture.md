@@ -43,6 +43,9 @@ history still reachable. Someone reading older text keeps their place and a
 Read latest action. A missing attachment closes each owned file handle once;
 it must not close a handle another request has just opened.
 
+The read-only [`/usage` command](usage.md) opens current account allowance and
+conversation token receipts without native dispatch or waiting for a turn.
+
 Commands that need an idle session (`/model`, `/effort`, `/compact`, `/new`,
 `/refresh`, `/goal resume` and `/goal clear`) can wait in the browser's saved
 command queue. It binds each action to its original agent, room and native

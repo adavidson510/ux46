@@ -640,6 +640,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._service_control(path, decision)
             return
 
+        if getattr(server, "account_usage_api", None) and server.account_usage_api.handle(self):
+            return
         if getattr(server, "voice_api", None) and server.voice_api.handle(self):
             return
         if getattr(server, "visualizations", None) and server.visualizations.handle(self):
@@ -661,6 +663,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                '/app.js':('app.js','text/javascript; charset=utf-8'),
                "/content.js": ("content.js", "application/javascript; charset=utf-8"),
                "/listen-feed.js": ("listen-feed.js", "application/javascript; charset=utf-8"),
+               "/efficiency.js": ("efficiency.js", "application/javascript; charset=utf-8"),
                "/recordings.js":("recordings.js","application/javascript; charset=utf-8"),
                '/modules.js':('modules.js','text/javascript; charset=utf-8'),
                '/styles.css':('styles.css','text/css; charset=utf-8'),
@@ -1037,6 +1040,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visualization-root", action="append", default=[], help="Explicit directory of local HTML visualization fragments")
     parser.add_argument("--visualization-kit", default="", help="Installed visualization assets directory")
     parser.add_argument("--workspace-ui-dir", default="", help="Opt-in fixed UI assets; independent of native workers")
+    parser.add_argument("--account-usage-config", default="", help="Optional operator-owned fixed per-agent read-only usage probe commands")
     parser.add_argument("--voice-model-dir", default="", help="Optional existing local voice model; no download or native restart")
     parser.add_argument("--voice-cache-dir", default="", help="Private cache for gateway speech")
     parser.add_argument("--modules-config", default="", help="Optional private JSON of enabled email, tell and constellation modules")
@@ -1131,6 +1135,9 @@ def serve(args) -> int:
     if args.workspace_ui_dir:
         if not args.workspace_store:parser.error('--workspace-ui-dir requires --workspace-store')
         server.workspace_ui = Path(args.workspace_ui_dir).expanduser().resolve()
+    if args.account_usage_config:
+        from ux46_account_gateway import AccountUsageAPI
+        server.account_usage_api = AccountUsageAPI(args.account_usage_config)
     if args.voice_model_dir:
         if not args.voice_cache_dir: raise ValueError("--voice-model-dir requires --voice-cache-dir")
         from ux46_voice_gateway import VoiceAPI

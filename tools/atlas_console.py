@@ -1635,6 +1635,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     path=(query.get("file") or ["SKILL.md"])[0]))
             except ValueError as exc:
                 raise ApiError(HTTPStatus.NOT_FOUND, "skill_unknown", str(exc))
+        if method == "GET" and path == "/api/account-usage":
+            from ux46_account_usage import project_usage
+            try:
+                result = project_usage(service.workers.reader().server.request("account/rateLimits/read", {}, timeout=8))
+                result["source"] = "native_reader"
+            except Exception:
+                result = {"state": "unavailable", "checked_at": time.time(), "buckets": []}
+            return self._json(HTTPStatus.OK, result)
+
         usage_match = re.fullmatch(r"/api/room/([A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,96})/usage", path)
         if method == "GET" and (usage_match or path == "/api/usage"):
             day = (query.get("day") or [None])[0]

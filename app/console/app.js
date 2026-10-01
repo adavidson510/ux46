@@ -3243,14 +3243,13 @@ function accountState(detail) { return detail?.account_status?.state || "unknown
 function accountSummary(detail) {
   const status = accountState(detail);
   if (status === "available") return "Account available";
-  if (status === "limited") return "Usage limit reached";
+  if (status === "limited") return "Account limit reported · check /usage";
   if (status === "sign_in_required") return "Sign-in required";
   return "Account availability unknown";
 }
 function terminalSummary(detail) {
   const terminal = detail?.native_terminal;
   if (!terminal || accountState(detail) === "available") return "";
-  if (accountState(detail) === "limited") return "Usage limit reached";
   if (accountState(detail) === "sign_in_required") return "Sign-in required";
   return terminal.kind === "usage_limit" ? "Last attempt hit usage limit"
     : terminal.kind === "auth" ? "Last attempt had a sign-in error" : "Last attempt stopped before an answer";
@@ -3314,7 +3313,7 @@ function renderDetails() {
       technical.appendChild(el("p", {class: "command-note", text:
         "Account & connection · " + agentLabel() + ". To change accounts, run codex logout, then codex login on this agent’s host, using its normal OS account. Then choose Refresh all sessions from this agent’s menu, or refresh only this session."}));
       technical.appendChild(el("p", {class: "command-note", text:
-        "At a usage limit? Open /usage in the Codex CLI to review the account’s available options. Refreshing does not reset usage or resend a prompt. On the UX46 gateway host, run ux46 doctor --agent " + agentId() + " --room " + detail.id + "."}));
+        "At a usage limit? Use /usage here to see recorded usage and the account status reported by this connector. Refreshing does not reset usage or resend a prompt. On the UX46 gateway host, run ux46 doctor --agent " + agentId() + " --room " + detail.id + "."}));
     }
   }
   if (detail.controllable) {
@@ -4122,7 +4121,7 @@ function activityState() {
   }
 
   const terminal = detail.native_terminal;
-  if (["limited", "sign_in_required"].includes(accountState(detail))) {
+  if (accountState(detail) === "sign_in_required") {
     return {kind: "failed", live: false, text: accountSummary(detail)};
   }
   if (detail.connection_recovery?.state === "refreshed") {
@@ -4394,11 +4393,9 @@ function renderStream() {
   if (detail.native_terminal && terminalSummary(detail)) {
     const terminal = detail.native_terminal;
     const refreshed = detail.connection_recovery?.state === "refreshed";
-    stream.appendChild(el("div", {class: "notice" + (["limited", "sign_in_required"].includes(accountState(detail)) ? " stop" : "")}, [
+    stream.appendChild(el("div", {class: "notice" + (accountState(detail) === "sign_in_required" ? " stop" : "")}, [
       el("div", {text: terminalSummary(detail)}),
-      el("div", {text: accountState(detail) === "unknown"
-        ? "This describes a previous attempt. Current account availability has not been confirmed."
-        : (terminal.message || "The native runtime reported a terminal failure.")}),
+      el("div", {text: "This describes a previous attempt. Use /usage to check current allowance and credit status."}),
       refreshed ? el("div", {text: connectionSummary(detail)}) : null,
       el("div", {text: "UX46 did not resend the accepted message."}),
     ]));
@@ -8269,7 +8266,7 @@ function tabStatusRow(tab) {
     if (ownership.state === "held_elsewhere") from = "open in another terminal";
   } else if (detail && detail.native_terminal && terminalSummary(detail)) {
     const terminal = detail.native_terminal;
-    const currentBlock = ["limited", "sign_in_required"].includes(accountState(detail));
+    const currentBlock = accountState(detail) === "sign_in_required";
     kind = currentBlock ? "blocked" : "unknown"; rank = currentBlock ? 3.5 : 0;
     condition = currentBlock ? "Blocked" : "Previous attempt";
     step = terminalSummary(detail);
@@ -10043,6 +10040,7 @@ const COMMANDS = [
   ["/new", "Next chapter on updated Codex connectors; new conversation on other runtimes"],
   ["/goal", "Inspect, pause or resume this session’s saved goal"],
   ["/status", "Show current native session settings"],
+  ["/usage", "Show this conversation’s usage and account availability"],
   ["/compact", "Ask Codex to compact this session"],
   ["/refresh", "Reload UX46’s connection after an account switch"],
   ["/help", "Show supported commands"],
@@ -10052,6 +10050,8 @@ function commandName(text) {
   return ({"/streer":"/steer", "/reasononing":"/effort", "/reasoning":"/effort"})[name] || name;
 }
 function commandSupported(name) {
+  // Workspace reads work even when an older connector does not advertise them.
+  if (name === "/usage") return true;
   const advertised = state.detail?.commands;
   return !Array.isArray(advertised) || advertised.some(entry => commandName(entry.name || entry.usage || "") === name);
 }
@@ -10370,6 +10370,24 @@ async function sendCommand(command, fromDraft) {
     return {ok: false, message: "This conversation is still sending, reconnecting, or loading. Try again when it finishes."};
   }
   const name = commandName(command);
+  if (name === "/usage") {
+    if (/\s+\S/.test(command.trim())) {
+      const message = "Use /usage on its own to view this conversation’s usage.";
+      setReceipt(message, "warn"); return {ok: false, message};
+    }
+    if (!window.UX46Efficiency) {
+      const message = "Refresh UX46 to load the usage view. Your command is kept.";
+      setReceipt(message, "warn"); return {ok: false, message};
+    }
+    const room = state.room, seq = state.roomSeq, snapshot = $("#draft").value;
+    closeCommands();
+    // Capture the selected agent/room before the first await. This is a local
+    // view, never a native command, model request, or queued mutation.
+    void openEfficiency("usage");
+    if (fromDraft) await settleDraftAfterSend(room, seq, snapshot.trim(), snapshot, true);
+    clearReceipt(); renderTarget();
+    return {ok: true};
+  }
   if (name === "/new" && ((!fromDraft && $("#draft").value.trim()) || currentUploads().length)) {
     setReceipt("Your current draft is kept. Send or clear it before starting another chapter.", "warn");
     return {ok: false, message: "Your current draft is kept. Send or clear it before starting another chapter."};

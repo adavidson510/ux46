@@ -82,6 +82,7 @@ PROXY_ALLOWLIST: tuple[tuple[frozenset[str], re.Pattern[str]], ...] = tuple(
         ("GET", r"/api/projects"),
         ("GET", r"/api/session-options"),
         ("GET", r"/api/usage"),
+        ("GET", r"/api/account-usage"),
         ("GET", rf"/api/room/{_ROOM}/(?:usage|chapter-preview)"),
         ("POST", r"/api/sessions"),
         ("GET PATCH", r"/api/projects/[A-Za-z0-9._-]{1,64}/pref"),
