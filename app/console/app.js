@@ -1198,9 +1198,8 @@ function mergeSharedTab(held, incoming) {
   // A layout only carries a name where it really differs from the workspace
   // alias; copying an identical one in would shadow the alias forever.
   const alias = state.desk.aliases.get(aliasKey(held.agent, held.room));
-  if (incoming.customLabel && incoming.customLabel !== alias) {
-    held.customLabel = incoming.customLabel;
-  }
+  if (incoming.customLabel && !alias) held.customLabel = incoming.customLabel;
+  else delete held.customLabel;
   return held;
 }
 
@@ -1816,13 +1815,13 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("focus", () => { void refreshSharedLayout(); });
 
 /* ------------------------------------------------------------- tab labels */
-/* What a tab is called. A name the person gave it wins, then the workspace's
-   own alias for that session, then whatever the runtime called it. A canonical
-   session is never renamed by any of this. */
+/* The shared name is authoritative. Old saved layouts may carry an earlier
+   customLabel; they must not hide a later rename from any device. Native
+   session identity and title are unchanged. */
 function tabLabel(tab) {
-  if (tab.customLabel) return tab.customLabel;
   const alias = state.desk.aliases.get(aliasKey(tab.agent, tab.room));
   if (alias) return alias;
+  if (tab.customLabel) return tab.customLabel;
   return tab.title || tab.room.split("/")[1] || tab.room;
 }
 
@@ -1838,36 +1837,37 @@ function tabIsRenamed(tab) {
    name puts the canonical one back and removes the alias. */
 async function renameTab(tab, wanted) {
   const label = String(wanted || "").trim().slice(0, 60);
-  const key = aliasKey(tab.agent, tab.room);
-  // Applied here first, so the strip is right whether or not the store answers.
-  if (label) {
-    tab.customLabel = label;
-    state.desk.aliases.set(key, label);
-  } else {
-    delete tab.customLabel;
-    state.desk.aliases.delete(key);
-  }
-  writeTabs();
-  renderTabs();
+  const agent = tab.agent, room = tab.room;
+  const matches = entry => entry && entry.agent === agent && entry.room === room;
   if (state.desk.available === false) {
-    flash(label ? "Renamed on this device — there is no workspace store yet."
-                : "Name reset on this device — there is no workspace store yet.");
-    return;
+    if (label) tab.customLabel = label;
+    else delete tab.customLabel;
+    state.desk.aliases.delete(aliasKey(agent, room));
+    writeTabs(); renderTabs();
+    flash("Name saved on this device only — the shared workspace is unavailable.");
+    return {ok: true};
   }
-  const agent = tab.agent;
-  const room = tab.room;
   const result = await saveDesktopState((next) => {
-    const at = next.aliases.findIndex((a) => a && a.agent === agent && a.room === room);
-    if (!label) { if (at >= 0) next.aliases.splice(at, 1); return; }
-    if (at >= 0) next.aliases[at] = Object.assign({}, next.aliases[at], {label});
+    const at = next.aliases.findIndex(matches);
+    if (!label) { if (at >= 0) next.aliases.splice(at, 1); }
+    else if (at >= 0) next.aliases[at] = Object.assign({}, next.aliases[at], {label});
     else next.aliases.push({agent, room, label});
+    // Clear copied names in live and saved layouts, including the legacy view.
+    // Reset name must also survive reopening a desktop or another device.
+    const layouts = [next.sharedLayout, ...(next.desktops || []),
+      ...(next.liveDesktops || []).map(desktop => desktop.layout)];
+    for (const layout of layouts) for (const entry of layout?.tabs || []) {
+      if (matches(entry)) delete entry.customLabel;
+    }
   }, label ? "The new name" : "The name reset");
   if (result.ok) {
-    // The workspace holds it now, so the device copy is redundant.
+    for (const current of state.tabs) if (matches(current)) delete current.customLabel;
     delete tab.customLabel;
-    writeTabs();
-    renderTabs();
-  } else if (result.message) flash(result.message);
+    writeTabs(); renderTabs();
+    void renderRoomList();
+    flash(label ? "Name saved across your workspace." : "Original name restored.");
+  }
+  return result;
 }
 
 /* -------------------------------------------------------------- reordering */
@@ -2007,19 +2007,27 @@ function openTabMenu(tab, anchor) {
   const name = tabLabel(tab);
   host.appendChild(el("p", {class: "tabmenu-head", text: name}));
 
-  const form = el("form", {class: "tabmenu-rename", on: {submit: (event) => {
+  const form = el("form", {class: "tabmenu-rename", on: {submit: async (event) => {
     event.preventDefault();
-    const value = form.querySelector("input").value;
-    closeTabMenu(true);
-    void renameTab(tab, value);
+    if (input.disabled) return;
+    input.disabled = save.disabled = true; save.textContent = "Saving…";
+    feedback.textContent = "";
+    const result = await renameTab(tab, input.value);
+    if (!host.contains(form)) return;
+    if (result.ok) { closeTabMenu(true); return; }
+    input.disabled = save.disabled = false; save.textContent = "Rename";
+    feedback.textContent = result.message || "The name was not saved. Try again.";
+    input.focus();
   }}});
   const input = el("input", {type: "text", maxlength: "60", autocomplete: "off",
                              "aria-label": "Display name for this session",
                              placeholder: canonicalLabel(tab)});
   input.value = tabIsRenamed(tab) ? name : "";
   form.appendChild(input);
-  form.appendChild(el("button", {class: "linkbtn", type: "submit", text: "Rename"}));
-  host.appendChild(form);
+  const save = el("button", {class: "primary", type: "submit", text: "Rename"});
+  const feedback = el("p", {class: "tabmenu-error", role: "alert"});
+  form.appendChild(save);
+  host.append(form, feedback);
   host.appendChild(el("p", {class: "tabmenu-note",
     text: state.desk.available === false
       ? "Kept on this device until the workspace store exists."
@@ -2032,7 +2040,7 @@ function openTabMenu(tab, anchor) {
     on: {click: () => { closeTabMenu(false); void openEfficiency("chapter", tab); }}}));
   if (tabIsRenamed(tab)) {
     acts.appendChild(el("button", {class: "ghost", type: "button", text: "Reset name",
-      on: {click: () => { closeTabMenu(true); void renameTab(tab, ""); }}}));
+      on: {click: () => { input.value = ""; form.requestSubmit(); }}}));
   }
   const at = state.tabs.indexOf(tab);
   acts.appendChild(el("button", {class: "ghost", type: "button", text: "Move left",

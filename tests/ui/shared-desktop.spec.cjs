@@ -96,3 +96,52 @@ test('startup ignores a closed restored tab, honors a fresh link, and keeps an e
   expect(await page.evaluate(()=>state.room)).toBeNull();
   expect(await page.evaluate(()=>state.tabs)).toEqual([]);
 });
+
+test('shared names beat stale tab copies and renaming persists across phone, reload and saved layouts', async ({browser}) => {
+  const envelope=makeEnvelope();
+  envelope.state.aliases=[{agent:'local',room:'project/keep',label:'Already saved'}];
+  envelope.state.liveDesktops[0].layout.tabs[0].customLabel='Old tab name';
+  envelope.state.desktops=[{id:'snapshot',name:'Saved desktop',tabs:[{...tab('keep'),customLabel:'Even older name'}]}];
+  const desktopContext=await browser.newContext(),phoneContext=await browser.newContext();
+  const desktop=await desktopContext.newPage(),phone=await phoneContext.newPage();
+  await fixture(desktop,envelope);await fixture(phone,envelope,390);
+  await expect(desktop.locator('#tabs .on .tname')).toHaveText('Already saved');
+  await desktop.getByRole('button',{name:'Options for Already saved',exact:true}).click();
+  const input=desktop.getByRole('textbox',{name:'Display name for this session'});
+  await input.fill('New room name');
+  await expect(desktop.locator('.tabmenu-rename .primary')).toBeVisible();
+  await desktop.screenshot({path:test.info().outputPath('rename-highlight.png')});
+  await desktop.getByRole('button',{name:'Rename',exact:true}).click();
+  await expect(desktop.locator('#tabMenu')).toBeHidden();
+  expect(envelope.state.aliases[0].label).toBe('New room name');
+  expect(envelope.state.desktops[0].tabs[0].customLabel).toBeUndefined();
+  await phone.evaluate(()=>refreshSharedLayout());
+  await expect(phone.locator('#mobileTabName')).toHaveText('New room name');
+  // A stale tab carrying its old name cannot override the persisted alias.
+  await phone.evaluate(()=>{state.tabs[0].customLabel='Stale phone name';openTab('local','project/new',{title:'Another'});clearTimeout(shared.timer);return flushLayoutOps();});
+  const reopened=await desktopContext.newPage();await fixture(reopened,envelope);
+  await expect(reopened.locator('#tabs .on .tname')).toHaveText('New room name');
+  await reopened.getByRole('button',{name:'Options for New room name',exact:true}).click();
+  await reopened.getByRole('button',{name:'Reset name',exact:true}).click();
+  await expect(reopened.locator('#tabMenu')).toBeHidden();
+  await phone.evaluate(()=>refreshSharedLayout());await expect(phone.locator('#mobileTabName')).toHaveText('keep');
+  await expect(desktop.locator('#draft')).toHaveValue('Keep this unsent draft');
+  await desktopContext.close();await phoneContext.close();
+});
+
+test('a failed rename keeps the typed name visible for retry and does not pretend it saved', async ({page}) => {
+  const envelope=makeEnvelope();await fixture(page,envelope);
+  let fail=true;
+  await page.route('**/api/desktop-state',route=>{
+    if(route.request().method()==='PUT'&&fail)return route.fulfill({status:503,json:{message:'Workspace unavailable'}});
+    return route.fallback();
+  });
+  await page.getByRole('button',{name:'Options for keep',exact:true}).click();
+  const input=page.getByRole('textbox',{name:'Display name for this session'});await input.fill('My room');
+  await page.getByRole('button',{name:'Rename',exact:true}).click();
+  await expect(input).toHaveValue('My room');await expect(input).toBeEnabled();
+  await expect(page.locator('.tabmenu-error')).toContainText('Workspace unavailable');
+  await expect(page.locator('#tabs .on .tname')).toHaveText('keep');
+  fail=false;await page.getByRole('button',{name:'Rename',exact:true}).click();
+  await expect(page.locator('#tabMenu')).toBeHidden();await expect(page.locator('#tabs .on .tname')).toHaveText('My room');
+});
