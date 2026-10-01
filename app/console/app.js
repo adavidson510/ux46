@@ -10096,6 +10096,14 @@ function renderGoalResumeControl() {
   button.disabled = Boolean(alreadyWorking);
   button.textContent = alreadyWorking ? "Goal already continuing" : target?.agent === agentId() && target?.room === state.room && commandTurnRunning(state.detail) ? "Resume after this reply" : "Resume goal";
 }
+async function resumeGoalFromMenu() {
+  const owner = agentId(), room = state.room, generation = state.agentGen, seq = state.roomSeq;
+  const result = await sendCommand("/goal resume", false);
+  if (result?.ok === false && owner === agentId() && generation === state.agentGen && !stale(seq, room)) {
+    state.goalPanelStatus = {...state.goalPanelStatus, message: result.message};
+    showCommands("goal", false);
+  }
+}
 function positionGoalMenu() {
   const popup = $("#commandPopover");
   if (popup.hidden || state.commandMode !== "goal") return;
@@ -10142,7 +10150,7 @@ function renderCommands() {
       host.appendChild(el("p",{class:"command-note",text:goalContinuation(status)}));
       if (current) host.appendChild(el("p",{class:"command-note",text:goalTurnDescription(state.detail)}));
       if (current && status.state === "known") host.appendChild(el("div",{class:"command-tabs"},[
-        el("button",{id:"btnGoalResume",type:"button",class:"linkbtn",text:"Resume goal",on:{click:()=>sendCommand("/goal resume",false)}}),
+        el("button",{id:"btnGoalResume",type:"button",class:"linkbtn",text:"Resume goal",on:{click:()=>resumeGoalFromMenu()}}),
         el("button",{type:"button",class:"ghost",text:"Pause goal",on:{click:()=>sendCommand("/goal pause",false)}}),
       ]));
       renderGoalResumeControl();
@@ -10410,7 +10418,8 @@ async function sendCommand(command, fromDraft) {
       state.goalPanel = outcome.goal || (outcome.native || {}).goal || null;
       state.goalPanelTarget = {agent: agentId(), room: roomId};
       state.goalPanelStatus = {state: Object.hasOwn(outcome, "goal") || Object.hasOwn(outcome.native || {}, "goal") ? "known" : "unknown", goal: state.goalPanel};
-      showCommands("goal",false);
+      // Resume is an action: update the saved goal without reopening its menu.
+      if (command.trim() !== "/goal resume") showCommands("goal",false);
     }
     if (sameRoom && name === "/help") {if (Array.isArray(outcome.help)) state.detail.commands=outcome.help.filter(entry=>!Array.isArray(outcome.supported)||outcome.supported.includes(entry.name)); showCommands("commands",false);}
     if (sameRoom && name === "/refresh") state.connectionRefreshState = ["refreshed","partial"].includes(outcome.state) ? outcome.state : "";
@@ -10440,7 +10449,7 @@ async function sendCommand(command, fromDraft) {
           state.goalPanel = goal;
           state.goalPanelTarget = {agent: commandAgent, room: roomId};
           state.goalPanelStatus = {state: "known", goal};
-          showCommands("goal", false);
+          closeCommands();
           text = "Goal is active; this session is already working.";
           tone = "saved";
         }
@@ -10451,7 +10460,7 @@ async function sendCommand(command, fromDraft) {
       try {return await saveWaiting();} catch(queueError) {text=queueError.message;}
     }
     if (stillCurrent()) setReceipt(text,tone); else flash(text);
-    return {ok: false, message: text};
+    return {ok: tone === "saved", message: text};
   } finally {
     state.sending = false;
     if (stillCurrent()) {await refreshRoomState(); await refreshTail();}

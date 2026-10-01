@@ -702,3 +702,35 @@ test('waiting commands use compact rows with optional details on desktop and pho
   const box=await page.locator('#commandQueue').boundingBox();
   expect(box.width).toBeGreaterThan(300);expect(box.height).toBeLessThan(130);expect(box.x+box.width).toBeLessThanOrEqual(390);
 });
+
+for (const outcome of ['resumed', 'queued', 'failed', 'already active']) {
+  test(`Resume goal menu closes after ${outcome} or retains an actionable error`, async ({page}) => {
+    await commandQueueFixture(page);
+    await page.route('**/api/room/fixture/alpha/command', route => {
+      const command = route.request().postDataJSON().command;
+      if (outcome === 'failed') return route.fulfill({json:{command:{state:'failed',message:'Sign in to resume this goal.'}}});
+      if (outcome === 'already active' && command === '/goal resume') return route.fulfill({status:409,json:{error:'connection_busy',message:'Session is working'}});
+      const goal={status:'active',objective:'Finish the fixture'};
+      return route.fulfill({json:{command:{state:command==='/goal'?'ready':'updated',goal},room:detail('fixture/alpha',{native:{thread_id:'native-alpha',active_turn:'resumed-turn'}})}});
+    });
+    await page.evaluate(outcome => {
+      if (outcome !== 'queued') state.detail.native.active_turn = null;
+      state.goalPanelTarget={agent:agentId(),room:state.room};
+      state.goalPanel={status:'blocked',objective:'Finish the fixture'};
+      state.goalPanelStatus={state:'known',goal:state.goalPanel};
+      showCommands('goal',false);
+    },outcome);
+    await expect(page.locator('#commandPopover')).toBeVisible();
+    await page.locator('#btnGoalResume').click();
+    await expect.poll(()=>page.evaluate(()=>state.sending)).toBe(false);
+    if (outcome === 'failed') {
+      await expect(page.locator('#commandPopover')).toBeVisible();
+      await expect(page.locator('#commandOptions')).toContainText('Sign in to resume this goal.');
+    } else {
+      await expect(page.locator('#commandPopover')).toBeHidden();
+      if (outcome === 'queued') await expect(page.locator('#commandQueue')).toContainText('/goal resume · queued');
+      else expect(await page.evaluate(()=>state.goalPanel.status)).toBe('active');
+    }
+    await expect(page.locator('#draft')).toHaveValue('unsent words');
+  });
+}
