@@ -1809,3 +1809,6 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 @media(max-width:600px){.content-popout .content-workspace{padding:12px;}.content-body textarea{font-size:16px;min-height:50dvh;}}
 /* Keep Save reachable when a document is taller than the narrow cabinet. */
 #panelBoard>.content-workspace{min-height:0;max-height:75%;flex:0 1 auto;overflow:auto;}
+
+#btnListenFeed{display:flex;align-items:center;gap:5px;white-space:nowrap;padding:6px 9px;border:1px solid var(--line);border-radius:8px;}#btnListenFeed[aria-pressed="true"]{color:var(--lav);border-color:var(--lav);}
+.listen-feed{position:fixed;bottom:74px;left:12px;z-index:80;max-width:min(520px,calc(100vw - 24px));display:flex;align-items:center;flex-wrap:wrap;gap:8px;background:var(--ink-100);border:1px solid var(--lav);border-radius:12px;padding:12px;box-shadow:0 3px 20px #0006;font:13px var(--sans);}.listen-feed[hidden]{display:none;}.listen-feed strong{flex:1 0 100%;overflow-wrap:anywhere;}.listen-feed button{padding:6px 8px;border:1px solid var(--line);border-radius:7px;}.listen-feed input{width:90px;}.listen-feed-status,.listen-feed details{flex:1 0 100%;}.listen-feed-status{font-size:12px;color:var(--text-mute);}.listen-feed-text{white-space:pre-wrap;max-height:180px;overflow:auto;line-height:1.5;margin-top:8px;}.listen-feed summary{cursor:pointer;}

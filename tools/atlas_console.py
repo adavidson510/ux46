@@ -63,6 +63,7 @@ STATIC_FILES = {
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
                "/content.js": ("content.js", "application/javascript; charset=utf-8"),
+               "/listen-feed.js": ("listen-feed.js", "application/javascript; charset=utf-8"),
                "/recordings.js":("recordings.js","application/javascript; charset=utf-8"),
     "/workspace.js": ("workspace.js", "application/javascript; charset=utf-8"),
         "/work.js": ("work.js", "application/javascript; charset=utf-8"),

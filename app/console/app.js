@@ -4589,6 +4589,7 @@ function audioPlayer(entry, speech, owner) {
     play.replaceChildren(replyIcon(audio.paused ? "play" : "pause"));
   };
   const start = async () => {
+    window.UX46ListenFeed?.pause();
     for (const other of state.audio.values()) if (other !== entry && other.audio) other.audio.pause();
     try { await audio.play(); }
     catch (_) { status.textContent = "Ready · press Play to listen"; sync(); }
@@ -4621,6 +4622,7 @@ function audioPlayer(entry, speech, owner) {
 }
 
 async function speakItem(itemId, entry) {
+  window.UX46ListenFeed?.pause();
   if (!state.detail || entry.phase === "preparing") return;
   state.audio.set(itemId, entry);
   const roomId = state.detail.id, owner = agentId(), gen = state.agentGen;
