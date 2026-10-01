@@ -430,8 +430,6 @@ class RemoteConsole:
             query = {"limit": 200, "direction": "desc"}
             if cursor:
                 query["cursor"] = cursor
-            elif "codex" == getattr(self, "runtime", ""):
-                query["around"] = item_id
             path = f"/api/room/{room}/history"
             encoded = urlencode(query)
             check_allowed("GET", path, encoded)

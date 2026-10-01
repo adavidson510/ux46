@@ -1264,6 +1264,19 @@ class NativeSessions:
         page["source"] = "items_list"
         return page
 
+    def message_for_speech(self, thread_id: str, item_id: str) -> dict:
+        # thread/read can expose a different item set from thread/items/list.
+        # Use the source that produced the ID visible in the conversation.
+        from ux46_speech_lookup import find_message, SpeechLookupError
+        def read(cursor):
+            page = self.list_items(thread_id, limit=200, cursor=cursor, direction="desc")
+            return {"items": [entry.get("item") or {} for entry in page.get("data", [])],
+                    "next_cursor": page.get("nextCursor")}
+        try:
+            return find_message(read, item_id)
+        except SpeechLookupError as exc:
+            raise NativeError(str(exc), code=exc.code) from exc
+
     # -- supported fallback: thread/read with turns ------------------------
     def full_history(self, thread_id: str, refresh: bool = False) -> tuple[list[dict], str]:
         """Every native item this runtime will give us, in wire order.

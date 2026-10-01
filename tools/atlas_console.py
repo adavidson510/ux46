@@ -2106,15 +2106,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if not item_id:
             raise ApiError(HTTPStatus.BAD_REQUEST, "no_item", "name the message to read")
         service.require_controllable(room)
-        entries, _source = service.sessions_for(room.thread_id).full_history(room.thread_id)
-        found = next(
-            (e for e in entries if str((e.get("item") or {}).get("id") or "") == item_id),
-            None,
-        )
-        if not found:
-            raise ApiError(HTTPStatus.NOT_FOUND, "item_unknown",
-                           "that message is not in this session's native history")
-        item = found.get("item") or {}
+        try:
+            item = service.sessions_for(room.thread_id).message_for_speech(room.thread_id, item_id)
+        except native.NativeError as exc:
+            raise ApiError(HTTPStatus.NOT_FOUND if exc.code == "item_unknown"
+                           else HTTPStatus.SERVICE_UNAVAILABLE, exc.code, str(exc)) from exc
         text = native._item_text(item)
         if not text.strip():
             raise ApiError(HTTPStatus.CONFLICT, "nothing_to_read",

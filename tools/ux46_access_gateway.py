@@ -640,6 +640,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._service_control(path, decision)
             return
 
+        if getattr(server, "voice_api", None) and server.voice_api.handle(self):
+            return
         if getattr(server, "visualizations", None) and server.visualizations.handle(self):
             return
         if getattr(server, "workspace_api", None) and server.workspace_api.handle(self):
@@ -1035,6 +1037,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--visualization-root", action="append", default=[], help="Explicit directory of local HTML visualization fragments")
     parser.add_argument("--visualization-kit", default="", help="Installed visualization assets directory")
     parser.add_argument("--workspace-ui-dir", default="", help="Opt-in fixed UI assets; independent of native workers")
+    parser.add_argument("--voice-model-dir", default="", help="Optional existing local voice model; no download or native restart")
+    parser.add_argument("--voice-cache-dir", default="", help="Private cache for gateway speech")
     parser.add_argument("--modules-config", default="", help="Optional private JSON of enabled email, tell and constellation modules")
     parser.add_argument("--recovery-root", default="", help="Explicit private UX46 installation whose recovery stays reachable without the console")
     parser.add_argument("--boards-store", default=str(Path.home() / ".local/state/ux46/boards.sqlite3"),
@@ -1127,6 +1131,10 @@ def serve(args) -> int:
     if args.workspace_ui_dir:
         if not args.workspace_store:parser.error('--workspace-ui-dir requires --workspace-store')
         server.workspace_ui = Path(args.workspace_ui_dir).expanduser().resolve()
+    if args.voice_model_dir:
+        if not args.voice_cache_dir: raise ValueError("--voice-model-dir requires --voice-cache-dir")
+        from ux46_voice_gateway import VoiceAPI
+        server.voice_api = VoiceAPI(args.voice_model_dir, args.voice_cache_dir)
     if args.additional_agents_config:
         from ux46_live_agents import LiveAgents
         server.live_agents = LiveAgents(args.additional_agents_config)

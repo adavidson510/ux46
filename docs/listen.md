@@ -38,3 +38,15 @@ Failures retain the response for retry or skipping. The feed holds up to 100
 waiting replies and checks at most 400 recent native items per catch-up. If it
 falls further behind, it explains the gap and asks you to stop and restart from
 now rather than silently claim it read everything.
+
+## Voice lookup
+
+Speech resolves the response ID through the same paged native history as the
+conversation. It does not rely on a separate full-history view, which some
+runtimes project differently.
+
+Operators using the private access gateway can set `--voice-model-dir` to their
+existing local voice model and `--voice-cache-dir` to a private cache directory.
+This serves speech independently of running native workers, with the existing
+identity, login, origin and CSRF checks. It downloads no model. The browser
+sends only the message ID and chosen voice; the server retrieves the text.
