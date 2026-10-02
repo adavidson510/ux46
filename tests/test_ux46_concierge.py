@@ -48,6 +48,20 @@ class ConciergeTest(unittest.TestCase):
   self.s.change({'action':'pause','base_revision':2});self.c.rows=[message('later')];self.s.tick();self.assertEqual(len(self.c.sent),1)
  def test_first_failed_read_does_not_turn_history_into_new_updates(self):
   self.c.unavailable=True;self.s.tick();self.c.unavailable=False;self.c.rows=[message('old')];self.s.tick();self.assertFalse(self.c.sent)
+ def test_quiet_mode_skips_commentary_and_spaces_summaries(self):
+  self.s.tick();self.c.rows=[message('comment','Progress',phase='commentary')];self.s.tick();self.assertFalse(self.c.sent)
+  self.c.rows.insert(0,message('final','Done'));self.s.tick();self.assertEqual(len(self.c.sent),1)
+  self.s.save_attempt({'id':'clock','at':time.time()-120,'state':'accepted'})
+  with self.s.db() as c:c.execute('DELETE FROM attempts WHERE id!=?',('clock',))
+  self.c.rows.insert(0,message('next','Next finished'));self.s.tick();self.assertEqual(len(self.c.sent),1)
+  self.s.change({'action':'focus','base_revision':1,'update_mode':'live'});self.s.tick();self.assertEqual(len(self.c.sent),2)
+ def test_requested_reply_returns_once_with_priority_and_provenance(self):
+  self.s.tick();cfg=self.s.settings()
+  self.s.save_attempt({'id':'earlier','at':time.time()-120,'state':'accepted'})
+  self.s.handoffs.save({'id':'ask-one','at':time.time()-200,'state':'answered','source':cfg['target'],'destination':cfg['sources'][0], 'request':'Check layout','reply':'Layout passed','reply_id':'r'})
+  self.c.rows=[message('r','Layout passed')];self.s.tick();self.assertEqual(len(self.c.sent),1)
+  self.assertIn('Reply to your request: Check layout',self.c.sent[0]['body']);self.assertEqual(self.c.sent[0]['body'].count('Layout passed'),1)
+  self.assertTrue(self.s.handoffs.view()[0]['returned_at']);self.s.tick();self.assertEqual(len(self.c.sent),1)
  def test_same_native_source_alias_rejected(self):
   self.c.target_thread='src'
   with self.assertRaises(ValueError):self.s.change({'action':'configure','base_revision':1,'target':{'agent':'local','room':'p/desk'},'sources':[{'agent':'local','room':'p/work'}]},lambda _:self.c)

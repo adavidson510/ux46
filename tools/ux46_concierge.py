@@ -27,6 +27,8 @@ class Concierge:
     def __init__(self,directory):
         self.path=Path(directory)/'concierge.sqlite3';self.path.parent.mkdir(parents=True,exist_ok=True)
         self.lock=threading.RLock();self.tick_lock=threading.Lock();self.clients={};self.thread=None
+        from ux46_assistant_handoffs import Handoffs
+        self.handoffs=Handoffs(directory)
         with self.db() as c:
             c.execute('CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY, body TEXT)')
             c.execute('CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, body TEXT)')
@@ -51,7 +53,8 @@ class Concierge:
             attempts=[json.loads(r[0]) for r in c.execute('SELECT body FROM attempts ORDER BY at DESC LIMIT 8')]
         allowed={key(s) for s in cfg['sources']}
         return {'settings':cfg,'running':bool(self.thread and self.thread.is_alive() and cfg['enabled']),
-                'sources':[r for r in rows if r.get('key') in allowed], 'attempts':attempts}
+                'sources':[r for r in rows if r.get('key') in allowed], 'attempts':attempts,
+                'handoffs':[{k:r.get(k) for k in ('id','at','destination','state','mode','returned_at')} for r in self.handoffs.view()[:8]]}
     def change(self,args,factory=None):
         with self.lock,self.db() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -85,6 +88,9 @@ class Concierge:
             if 'name' in args:
                 if not isinstance(args['name'],str) or not 1<=len(args['name'].strip())<=40 or any(ord(c)<32 for c in args['name']):raise ValueError('Choose a short assistant name')
                 cfg['name']=args['name'].strip()
+            if 'update_mode' in args:
+                if args['update_mode'] not in ('quiet','live'):raise ValueError('Choose quiet or live updates')
+                cfg['update_mode']=args['update_mode']
             if 'focus' in args:
                 if not isinstance(args['focus'],str) or not 1<=len(args['focus'].strip())<=1200:raise ValueError('Add a short focus')
                 cfg['focus']=args['focus'].strip()
@@ -141,6 +147,9 @@ class Concierge:
     def _tick(self):
         cfg=self.settings()
         if not cfg['enabled']:return
+        self.handoffs.track(self.clients)
+        replies=[r for r in self.handoffs.view() if r['state']=='answered' and not r.get('return_attempt') and r['source']['thread']==cfg['target']['thread'] and r['source']['agent']==cfg['target']['agent']][:8]
+        reply_ids={r['reply_id'] for r in replies}
         for t in cfg['sources']:
             try:self.collect(t)
             except Exception:
@@ -148,12 +157,19 @@ class Concierge:
         now=time.time();batch=[]
         for t in cfg['sources']:
             v=self.source(key(t))
+            if cfg.get('update_mode','quiet')=='quiet':
+                v['pending']=[x for x in v.get('pending',[]) if x.get('phase')=='final_answer'];self.save_source(key(t),v)
+            v['pending']=[x for x in v.get('pending',[]) if x['id'] not in reply_ids]
             if v.get('pending'):
                 batch.append({'source':t,'updates':v['pending'],'gap':v.get('error','')})
+        for r in replies:
+            batch.append({'source':r['destination'],'updates':[{'id':r['reply_id'],'phase':'final_answer','text':'Reply to your request: '+r['request']+'\n'+r['reply']}],'gap':''})
         if not batch:return
-        # At most one digest/minute and 30/hour. No model call for unchanged reads.
+        # Quiet: final replies at most every five minutes. Live: commentary too.
+        # Requested replies are prompt, but still respect the one/minute ceiling.
         with self.db() as c:recent=c.execute('SELECT at FROM attempts WHERE at>? ORDER BY at DESC',(now-3600,)).fetchall()
-        if recent and (now-recent[0][0]<60 or len(recent)>=30):return
+        interval=60 if replies or cfg.get('update_mode','quiet')=='live' else 300
+        if recent and (now-recent[0][0]<interval or len(recent)>=30):return
         d=self.read(cfg['target'],'?inspect=1')
         if d.get('native',{}).get('thread_id')!=cfg['target']['thread']:raise ValueError('Concierge conversation changed')
         if busy(d):return
@@ -172,6 +188,7 @@ class Concierge:
             ident='concierge-'+uuid.uuid4().hex
             attempt={'id':ident,'at':now,'state':'sending','sources':[b['source']['title'] for b in batch]}
             self.save_attempt(attempt)
+            for r in replies:r['return_attempt']=ident;self.handoffs.save(r)
             # Remove only this captured batch before dispatch. An unknown send is never replayed.
             for b in batch:
                 v=self.source(key(b['source']));ids={x['id'] for x in b['updates']};v['pending']=[x for x in v.get('pending',[]) if x['id'] not in ids];self.save_source(key(b['source']),v)
@@ -181,6 +198,8 @@ class Concierge:
                 attempt['state']='accepted' if code==200 and r.get('submission',{}).get('status')=='accepted' else 'unknown' if code>=500 or r.get('uncertain') else 'failed'
             except Exception:attempt['state']='unknown'
             self.save_attempt(attempt)
+            if attempt['state']=='accepted':
+                for r in replies:r['returned_at']=now;self.handoffs.save(r)
             if attempt['state']!='accepted':
                 cfg=self.settings();cfg['enabled']=False;cfg['revision']+=1;cfg['notice']='Update delivery needs review. Watching paused; the update was not resent.';self.save(cfg)
     def save_attempt(self,v):

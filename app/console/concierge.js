@@ -45,7 +45,9 @@
   const rename=make('input');rename.value=cfg.name||'Assistant';rename.maxLength=40;rename.setAttribute('aria-label','Assistant name');
   const saveName=btn('Save name',async()=>{try{await action({action:'identity',name:rename.value});heading.textContent=data.settings.name;note.textContent='Name saved.';}catch(e){note.textContent=e.message;}});
   const focus=make('textarea');focus.value=cfg.focus;focus.maxLength=1200;focus.setAttribute('aria-label','Your focus');
-  const explanation=make('p','Choose what deserves detail. New replies are combined into short updates, at most once a minute. No model runs when nothing changes.');
+  const explanation=make('p','Everyday conversation stays here. Ask explicitly when you want another room to do work. Checking for updates uses no model; speaking a summary does.');
+  const pace=make('select');pace.setAttribute('aria-label','Update pace');
+  for(const [value,title] of [['quiet','Quiet · finished replies, at most every 5 minutes'],['live','Live · progress too, at most every minute']]){const option=make('option',title);option.value=value;pace.append(option);}pace.value=cfg.update_mode||'quiet';
   const choices=make('div',undefined,'concierge-sources');const boxes=[];
   const dst=cfg.target||{agent:agentId(),room:state.room};
   const tabs=[...(cfg.sources||[]),...state.tabs];const seen=new Set();
@@ -56,8 +58,9 @@
   const note=make('p','','muted');note.setAttribute('role','status');
   const save=btn('Save rooms & focus',async()=>{try{await action({action:'configure',target:dst,sources:boxes.filter(x=>x.check.checked).map(x=>({agent:x.t.agent,room:x.t.room})),focus:focus.value});note.textContent='Saved. Start watching when ready.';}catch(e){note.textContent=e.message;}});
   const start=btn(cfg.enabled&&data.running?'Pause updates':'Start watching',async()=>{try{await action({action:data.running?'pause':'start'});dialog.close();}catch(e){note.textContent=e.message;}});
-  const saveFocus=btn('Save focus',async()=>{try{await action({action:'focus',focus:focus.value});note.textContent='Focus saved.';}catch(e){note.textContent=e.message;}});
-  dialog.append(heading,close,rename,saveName,make('p',cfg.target?'Assistant conversation: '+cfg.target.title:'Use a dedicated, empty conversation for your assistant. The current conversation will receive its updates.'),explanation,focus,saveFocus,make('h3','Conversations to watch'),choices,save,start,note);
+  const saveFocus=btn('Save focus',async()=>{try{await action({action:'focus',focus:focus.value,update_mode:pace.value});note.textContent='Focus saved.';}catch(e){note.textContent=e.message;}});
+  dialog.append(heading,close,rename,saveName,make('p',cfg.target?'Assistant conversation: '+cfg.target.title:'Use a dedicated, empty conversation for your assistant. The current conversation will receive its updates.'),explanation,pace,focus,saveFocus,make('h3','Conversations to watch'),choices,save,start,note);
+  if(data.handoffs?.length){dialog.append(make('h3','Requests to rooms'));for(const r of data.handoffs)dialog.append(make('p',r.destination.title+' · '+({sent:'Sent · waiting for a reply',answered:'Room replied',unknown:'Delivery needs checking',failed:'Not sent',checking:'Checking',sending:'Sending'}[r.state]||r.state)));}
   for(const source of data.sources||[])if(source.error)dialog.append(make('p',source.title+': '+source.error,'muted'));
   if(cfg.notice)dialog.append(make('p',cfg.notice));
   const limit=make('p','Desktop alpha · Up to 30 automatic project updates/hour. Ask your assistant to check connected email or calendars separately. Background email/calendar alerts need their own setup. Talk sends one utterance; ordinary Dictate lets you edit before sending.','muted');dialog.append(limit);
