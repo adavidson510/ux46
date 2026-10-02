@@ -10,7 +10,12 @@ async function fixture(context){
   if(u.pathname.startsWith('/api/')){
    calls.push({path:u.pathname,method:req.method(),body:req.method()==='POST'?req.postDataJSON():null});
    if(u.pathname.endsWith('/speak')){if(fail)return route.fulfill({status:503,json:{message:'Voice unavailable'}});return route.fulfill({json:{audio_url:'/api/audio/test.wav',complete:true}});}
-   if(u.pathname==='/api/audio/test.wav')return route.fulfill({body:wav,contentType:'audio/wav'});
+   if(u.pathname==='/api/audio/test.wav'){
+    const range=req.headers()['range'];const match=range&&/^bytes=(\d+)-(\d*)$/.exec(range);
+    if(match){const start=Number(match[1]),end=match[2]?Math.min(Number(match[2]),wav.length-1):wav.length-1;
+      return route.fulfill({status:206,body:wav.subarray(start,end+1),contentType:'audio/wav',headers:{'Accept-Ranges':'bytes','Content-Range':`bytes ${start}-${end}/${wav.length}`}});}
+    return route.fulfill({body:wav,contentType:'audio/wav',headers:{'Accept-Ranges':'bytes'}});
+   }
    if(u.pathname.endsWith('/history'))return route.fulfill({json:{items:items.slice().reverse(),complete:true}});
    if(u.pathname==='/api/room/example/at')return route.fulfill({json:{id:'example/at',controllable:true,native:{thread_id:'thread-1',active_turn:active}}});
    return route.fulfill({json:{}});
@@ -57,4 +62,49 @@ test('browser autoplay refusal offers a direct play button without skipping the 
  await page.evaluate(()=>{window.originalPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=()=>Promise.reject(Error('autoplay blocked'));});
  f.set([message('old','Earlier'),message('new','Read this')]);await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.getByRole('button',{name:'Play / retry',exact:true})).toBeVisible();expect(f.writes()).toHaveLength(1);
  await page.evaluate(()=>{HTMLMediaElement.prototype.play=window.originalPlay;});await page.getByRole('button',{name:'Play / retry',exact:true}).click();await expect(page.locator('.listen-feed-status')).toHaveText('Reading');expect(f.writes()).toHaveLength(1);await page.getByRole('button',{name:'Stop listening'}).click();
+});
+test('desktop player hands its reply, queue and position to a real window and docks back',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ f.set([message('old','Earlier'),message('a','First complete reply'),message('b','Second complete reply')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>f.writes().length).toBe(1);
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ await page.locator('audio').evaluate(a=>{a.pause();a.currentTime=7;});
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
+ const popupWait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await popupWait;
+ await expect(pop.locator('.listen-feed')).toBeVisible();await expect(page.locator('audio')).toHaveCount(0);
+ await expect(pop.locator('.listen-feed-text')).toContainText('First complete reply');
+ await expect.poll(()=>pop.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
+ expect(f.writes()).toHaveLength(1);
+ await pop.getByRole('button',{name:'Mute',exact:true}).click();
+ await pop.screenshot({path:test.info().outputPath('listen-window.png')});
+ await pop.getByRole('button',{name:'Dock back',exact:true}).click();
+ await expect(page.locator('audio')).toHaveCount(1);await expect(page.getByRole('button',{name:'Unmute',exact:true})).toBeVisible();
+ await expect(page.locator('.listen-feed-status')).toContainText('1 waiting');
+ await page.getByRole('button',{name:'Unmute',exact:true}).click();
+ await page.locator('audio').evaluate(a=>{a.pause();a.dispatchEvent(new Event('ended'));});
+ await expect.poll(()=>f.writes().length).toBe(2);expect(f.writes()[1].body.item_id).toBe('b');
+ const dock=await page.locator('.listen-dock').boundingBox(),bar=await page.locator('.listen-feed').boundingBox();
+ expect(Math.abs(dock.y-bar.y)).toBeLessThan(15);
+ await page.screenshot({path:test.info().outputPath('listen-docked.png')});
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+test('satellite keeps reading after main workspace closes, without attaching or sending',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ const wait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await wait;
+ await expect(pop.locator('.listen-feed')).toBeVisible();await page.close();
+ f.set([message('old','Earlier'),message('new','Independent reply')]);
+ await pop.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>f.writes().length).toBe(1);
+ await expect(pop.locator('.listen-feed-text')).toHaveText('Independent reply');
+ expect(f.writes().every(c=>c.path.endsWith('/speak'))).toBe(true);
+ await pop.getByRole('button',{name:'Stop listening'}).click();await pop.close();
+});
+test('blocked popup keeps playback here and closing a satellite returns its feed',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ await page.evaluate(()=>{window.realOpen=window.open;window.open=()=>null;});
+ await page.getByRole('button',{name:'Pop out listening'}).click();await expect(page.locator('audio')).toHaveCount(1);
+ await page.evaluate(()=>{window.open=window.realOpen;});
+ const wait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await wait;
+ await expect(pop.locator('.listen-feed')).toBeVisible();await expect(page.locator('audio')).toHaveCount(0);
+ await pop.close();await expect(page.locator('audio')).toHaveCount(1);
+ await page.getByRole('button',{name:'Stop listening'}).click();
 });

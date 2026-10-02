@@ -1818,3 +1818,22 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .tabmenu-rename .primary:focus-visible{outline:2px solid var(--text);outline-offset:2px;}
 .tabmenu-error{font:12px/1.5 var(--sans);color:var(--text);margin:8px 3px 0;}
 .tabmenu-error:empty{display:none;}
+
+/* Listen docks at its own button on desktop; the independent player uses the
+   same controls and reader state without the rest of the workspace. */
+.listen-dock{display:inline-flex;align-items:center;gap:4px;position:relative;}
+.listen-dock[hidden]{display:none;}
+@media(min-width:900px){
+ .listen-dock>.listen-feed{position:static;max-width:none;flex-wrap:nowrap;gap:4px;border-radius:8px;padding:3px;box-shadow:none;background:transparent;}
+ .listen-dock>.listen-feed>strong,.listen-dock>.listen-feed>.listen-feed-status{display:none;}
+ .listen-dock>.listen-feed input{width:60px;}
+ .listen-dock>.listen-feed button{font-size:12px;padding:5px 7px;white-space:nowrap;}
+ .listen-dock>.listen-feed details:not([open]){display:none;}
+ .listen-dock>.listen-feed details[open]{position:absolute;top:calc(100% + 8px);right:0;width:min(420px,80vw);background:var(--ink-100);border:1px solid var(--lav);border-radius:12px;padding:14px;box-shadow:0 3px 20px #0006;z-index:85;}
+ .listen-dock .listen-feed-text{max-height:45vh;}
+}
+.listen-window body{display:block;height:100dvh;overflow:auto;margin:0;padding:12px;box-sizing:border-box;}
+.listen-window .listen-feed{position:static;max-width:none;width:100%;box-sizing:border-box;box-shadow:none;}
+.listen-window .listen-feed-text{max-height:none;overflow:visible;}
+#listenWindowNotice{font:13px/1.5 var(--sans);color:var(--text-mute);margin:0 0 10px;}
+#listenWindowNotice:empty{display:none;}

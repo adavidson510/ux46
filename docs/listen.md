@@ -3,8 +3,9 @@
 Open a conversation and choose **Listen** beside its model control. New progress
 messages and final answers play aloud in order on this device. Tool activity,
 reasoning and your own messages are skipped. Existing history is not replayed.
-Text stays in the conversation; expand **Response being read** in the player to
-see the current reply while visiting another room.
+Text stays in the conversation. On desktop, the controls dock beside **Listen**;
+click **Listening** to reveal the current response. On a phone, expand
+**Response being read** in the player.
 
 Listening stays with the conversation you chose. You can move around UX46
 without changing that feed. Choose Listen in another conversation to switch.
@@ -15,10 +16,28 @@ without changing that feed. Choose Listen in another conversation to switch.
 - The speaker button on each response still plays it once. Doing that pauses
   the live feed so the two voices do not overlap.
 
-This choice is local to the browser window, never saved to your shared desktop.
-Only one UX46 window in the same browser profile can listen at a time, including
-satellites. Reloading or closing the page turns it off. A phone or another
-computer makes its own listening choice.
+## A separate listening window
+
+Choose **Pop out listening** (↗) beside the volume control. This opens a real
+browser window with the full response and player controls. Move or resize it
+using your operating system, including on another monitor or virtual desktop.
+The browser decides whether popup requests appear as windows or tabs.
+
+The reader moves into that window with its current position, volume, mute state
+and waiting replies. It keeps listening if you close the main workspace.
+**Dock back** returns it to the original Listen button. Closing the satellite
+also returns it when that original workspace is still open. **Stop listening**
+ends the feed and closes the satellite. If the original workspace is gone, the
+satellite remains usable; Dock back is unavailable.
+
+If a popup is blocked, playback stays where it was. If the browser blocks audio
+after a handoff, choose **Play / retry**. Reloading ends that window’s reader;
+reopen it from Listen in the main workspace.
+
+Listening is local to this browser profile, never saved to your shared desktop.
+Only one window in that profile owns live playback at a time. A phone or another
+computer makes its own listening choice. No conversation is created, attached,
+closed or prompted when you move the player.
 
 ## What the alpha checks
 
