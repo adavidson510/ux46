@@ -81,7 +81,10 @@ class Concierge:
                     if not factory:raise ValueError('Open Concierge to start watching')
                     self.clients={v['agent']:factory(v['agent']) for v in [cfg['target'],*cfg['sources']]}
                 cfg['enabled']=op=='start'
-            elif op!='focus':raise ValueError('Unknown action')
+            elif op not in ('focus','identity'):raise ValueError('Unknown action')
+            if 'name' in args:
+                if not isinstance(args['name'],str) or not 1<=len(args['name'].strip())<=40 or any(ord(c)<32 for c in args['name']):raise ValueError('Choose a short assistant name')
+                cfg['name']=args['name'].strip()
             if 'focus' in args:
                 if not isinstance(args['focus'],str) or not 1<=len(args['focus'].strip())<=1200:raise ValueError('Add a short focus')
                 cfg['focus']=args['focus'].strip()

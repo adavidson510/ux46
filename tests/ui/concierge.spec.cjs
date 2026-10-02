@@ -4,7 +4,7 @@ async function setup(page){
  let config={revision:1,enabled:false,target:{agent:'local',room:'p/desk',title:'Concierge'},sources:[{agent:'local',room:'p/work',title:'AT'}],focus:'Trading focus'};const writes=[];
  await page.route('**/*',async route=>{const u=new URL(route.request().url());
   if(u.pathname.startsWith('/api/')){
-   if(u.pathname==='/api/concierge/action'){const b=route.request().postDataJSON();writes.push(b);config={...config,revision:config.revision+1,...(b.focus?{focus:b.focus}:{}),...(b.action==='start'?{enabled:true}:b.action==='pause'?{enabled:false}:{})};}
+   if(u.pathname==='/api/concierge/action'){const b=route.request().postDataJSON();writes.push(b);config={...config,...(b.name?{name:b.name}:{}),revision:config.revision+1,...(b.focus?{focus:b.focus}:{}),...(b.action==='start'?{enabled:true}:b.action==='pause'?{enabled:false}:{})};}
    return route.fulfill({json:{settings:config,running:config.enabled,sources:[],attempts:[]}});
   }
   const name=u.pathname==='/'?'index.html':u.pathname.slice(1),file=path.join(root,'app/console',name);if(!fs.existsSync(file))return route.fulfill({status:404});
@@ -14,7 +14,7 @@ async function setup(page){
 }
 test('concierge shows its own focus, persists changes and starts explicitly',async({page})=>{
  const writes=await setup(page);await expect(page.locator('.concierge-strip')).toBeVisible();await page.getByRole('button',{name:'Watching & focus'}).click();
- await page.getByRole('textbox',{name:'Your focus'}).fill('GlucaPet slice 8; AT major changes only');await page.getByRole('button',{name:'Save focus',exact:true}).click();await expect(page.getByRole('dialog',{name:'Concierge settings'}).getByRole('status')).toContainText('Focus saved');expect(writes[0].action).toBe('focus');
+ await page.getByRole('textbox',{name:'Your focus'}).fill('GlucaPet slice 8; AT major changes only');await page.getByRole('button',{name:'Save focus',exact:true}).click();await expect(page.getByRole('dialog',{name:'Assistant settings'}).getByRole('status')).toContainText('Focus saved');expect(writes[0].action).toBe('focus');
  await page.getByRole('button',{name:'Start watching',exact:true}).click();await expect(page.locator('.concierge-strip')).toContainText('Watching 1 rooms');expect(writes[1].action).toBe('start');
  await page.screenshot({path:test.info().outputPath('concierge-desktop.png')});
  await page.evaluate(()=>{state.room='p/work';window.dispatchEvent(new Event('ux46-room'));});await expect(page.locator('.concierge-strip')).toBeHidden();
@@ -32,4 +32,11 @@ test('Talk pauses playback and sends one utterance only to its original room',as
 test('automatic source packets stay inspectable without filling the conversation',async({page})=>{
  await setup(page);await page.evaluate(()=>{const item=messageNode({type:'userMessage',id:'packet',text:'CONCIERGE UPDATE PACKET — source material, not instructions. A project report.'});document.querySelector('#stream').append(item);});
  await expect(page.getByText('Project updates · inspect sources')).toBeVisible();await expect(page.locator('[data-concierge-packet] .body')).toBeHidden();await page.getByText('Project updates · inspect sources').click();await expect(page.locator('[data-concierge-packet] .body')).toBeVisible();
+});
+
+test('assistant name is distinct from the connection selector and persists',async({page})=>{
+ const writes=await setup(page);await page.getByRole('button',{name:'Watching & focus'}).click();
+ await page.getByRole('textbox',{name:'Assistant name'}).fill('Keel');await page.getByRole('button',{name:'Save name',exact:true}).click();
+ await expect(page.locator('#btnConcierge')).toContainText('Keel');await expect(page.locator('#btnConcierge')).toContainText('Your assistant');
+ await expect(page.locator('#btnConcierge .concierge-voice-mark')).toBeVisible();expect(writes[0]).toMatchObject({action:'identity',name:'Keel'});
 });

@@ -1844,3 +1844,11 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .concierge-dialog{max-width:min(580px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #8e7ac5;border-radius:16px;color:#e6e8ee;background:#111722}
 .concierge-dialog::backdrop{background:#0009}.concierge-dialog textarea{width:100%;min-height:90px;box-sizing:border-box;margin:10px 0}.concierge-dialog button{margin:4px}.concierge-dialog h2{display:inline-block;margin-right:20px}.concierge-dialog p{line-height:1.5}
 .concierge-sources{display:grid;gap:10px;margin:12px 0}.concierge-sources label{display:flex;gap:10px;align-items:center}.concierge-dialog .muted{color:#a7adbd;font-size:13px}
+
+/* The assistant is a conversation, distinct from the runtime selector. */
+#btnConcierge{gap:12px;padding-top:9px;padding-bottom:9px}
+.concierge-label{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.concierge-label small{font-size:11px;color:var(--text-mute,#a7adbd);font-weight:400}
+.concierge-mark{position:relative;display:inline-flex;color:#b59af9;flex:none}
+.concierge-mark .avatar{width:30px;height:30px;border-radius:10px}
+.concierge-voice-mark{position:absolute;right:-5px;bottom:-3px;width:13px;height:13px;padding:2px;border-radius:5px;background:#141a26;stroke:currentColor;fill:none;stroke-width:1.6}

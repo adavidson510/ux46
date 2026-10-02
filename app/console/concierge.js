@@ -5,18 +5,24 @@
  const make=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
  const btn=(text,fn)=>{const n=make('button',text,'ghost');n.type='button';n.onclick=fn;return n;};
  let data=null,loading=false,recognition=null;
- const entry=btn('Concierge',()=>void open());entry.id='btnConcierge';entry.className='navbtn';entry.prepend(useIcon('i-mic'));entry.title='Your assistant across conversations';
+ const entry=btn('',()=>void open());entry.id='btnConcierge';entry.className='navbtn';entry.title='Your assistant across conversations';
+ const mark=make('span',undefined,'concierge-mark'),label=make('span',undefined,'concierge-label'),name=make('span','Assistant');
+ label.append(name,make('small','Your assistant'));entry.append(mark,label);
  document.querySelector('#btnConsole').before(entry);
  const strip=make('div',undefined,'concierge-strip');strip.hidden=true;
  const status=make('span'),settings=btn('Watching & focus',()=>void configure()),talk=btn('Talk',()=>void speak());
  strip.append(status,settings,talk);document.querySelector('#composer').before(strip);
- const dialog=make('dialog',undefined,'concierge-dialog');dialog.setAttribute('aria-label','Concierge settings');document.body.append(dialog);
+ const dialog=make('dialog',undefined,'concierge-dialog');dialog.setAttribute('aria-label','Assistant settings');document.body.append(dialog);
  async function refresh(){
   if(loading)return;loading=true;
   try{data=await api('/api/concierge/view',{absolute:true});paint();}catch(e){/* Optional gateway capability; never change the current conversation. */}finally{loading=false;}
  }
  function here(){const t=data?.settings?.target;return t&&t.agent===agentId()&&t.room===state.room;}
  function paint(){
+  name.textContent=data?.settings?.name||'Assistant';
+  const owner=data?.settings?.target?.agent||DEFAULT_AGENT;
+  if(mark.dataset.owner!==owner){mark.dataset.owner=owner;mark.replaceChildren(agentAvatar({id:owner,name:name.textContent}),useIcon('i-mic','concierge-voice-mark'));}
+  entry.classList.toggle('active',!!here());
   strip.hidden=!here();if(!here()&&recognition){recognition.abort();recognition=null;}
   if(here())status.textContent=data.running?'Watching '+data.settings.sources.length+' rooms':'Updates paused';
   foldPackets();
@@ -26,16 +32,18 @@
   for(const row of document.querySelectorAll('#stream .msg.human:not([data-concierge-packet])')){
    const body=row.querySelector('.body');if(!body?.textContent.startsWith('CONCIERGE UPDATE PACKET'))continue;
    row.dataset.conciergePacket='true';const details=make('details'),summary=make('summary','Project updates · inspect sources');details.append(summary);body.before(details);details.append(body);
-   const who=row.querySelector('.who');if(who)who.textContent='Concierge feed';
+   const who=row.querySelector('.who');if(who)who.textContent='Project updates';
   }
  }
  new MutationObserver(foldPackets).observe(document.querySelector('#stream'),{childList:true,subtree:true});
  async function open(){await refresh();const t=data?.settings?.target;if(!t)return configure();await switchAgent(t.agent,t.room);paint();}
  async function action(body){data=await api('/api/concierge/action',{absolute:true,method:'POST',body:{...body,base_revision:data.settings.revision}});paint();return data;}
  async function configure(){
-  await refresh();if(!data?.settings){flash('Concierge needs the updated workspace service.');return;}
+  await refresh();if(!data?.settings){flash('Your assistant needs the updated workspace service.');return;}
   const cfg=data.settings;dialog.replaceChildren();
-  const heading=make('h2','Concierge'),close=btn('Close',()=>dialog.close());
+  const heading=make('h2',cfg.name||'Your assistant'),close=btn('Close',()=>dialog.close());
+  const rename=make('input');rename.value=cfg.name||'Assistant';rename.maxLength=40;rename.setAttribute('aria-label','Assistant name');
+  const saveName=btn('Save name',async()=>{try{await action({action:'identity',name:rename.value});heading.textContent=data.settings.name;note.textContent='Name saved.';}catch(e){note.textContent=e.message;}});
   const focus=make('textarea');focus.value=cfg.focus;focus.maxLength=1200;focus.setAttribute('aria-label','Your focus');
   const explanation=make('p','Choose what deserves detail. New replies are combined into short updates, at most once a minute. No model runs when nothing changes.');
   const choices=make('div',undefined,'concierge-sources');const boxes=[];
@@ -49,10 +57,10 @@
   const save=btn('Save rooms & focus',async()=>{try{await action({action:'configure',target:dst,sources:boxes.filter(x=>x.check.checked).map(x=>({agent:x.t.agent,room:x.t.room})),focus:focus.value});note.textContent='Saved. Start watching when ready.';}catch(e){note.textContent=e.message;}});
   const start=btn(cfg.enabled&&data.running?'Pause updates':'Start watching',async()=>{try{await action({action:data.running?'pause':'start'});dialog.close();}catch(e){note.textContent=e.message;}});
   const saveFocus=btn('Save focus',async()=>{try{await action({action:'focus',focus:focus.value});note.textContent='Focus saved.';}catch(e){note.textContent=e.message;}});
-  dialog.append(heading,close,make('p',cfg.target?'Concierge: '+cfg.target.title:'Use a dedicated, empty conversation for Concierge. The current conversation will receive its updates.'),explanation,focus,saveFocus,make('h3','Conversations to watch'),choices,save,start,note);
+  dialog.append(heading,close,rename,saveName,make('p',cfg.target?'Assistant conversation: '+cfg.target.title:'Use a dedicated, empty conversation for your assistant. The current conversation will receive its updates.'),explanation,focus,saveFocus,make('h3','Conversations to watch'),choices,save,start,note);
   for(const source of data.sources||[])if(source.error)dialog.append(make('p',source.title+': '+source.error,'muted'));
   if(cfg.notice)dialog.append(make('p',cfg.notice));
-  const limit=make('p','Desktop alpha · Up to 30 automatic updates/hour. Email, calendar and direct application events are not connected yet. Talk sends one utterance; ordinary Dictate lets you edit before sending.','muted');dialog.append(limit);
+  const limit=make('p','Desktop alpha · Up to 30 automatic project updates/hour. Ask your assistant to check connected email or calendars separately. Background email/calendar alerts need their own setup. Talk sends one utterance; ordinary Dictate lets you edit before sending.','muted');dialog.append(limit);
   if(!dialog.open)dialog.showModal();
  }
  async function speak(){
