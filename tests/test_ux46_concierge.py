@@ -62,6 +62,10 @@ class ConciergeTest(unittest.TestCase):
   self.c.rows=[message('r','Layout passed')];self.s.tick();self.assertEqual(len(self.c.sent),1)
   self.assertIn('Reply to your request: Check layout',self.c.sent[0]['body']);self.assertEqual(self.c.sent[0]['body'].count('Layout passed'),1)
   self.assertTrue(self.s.handoffs.view()[0]['returned_at']);self.s.tick();self.assertEqual(len(self.c.sent),1)
+ def test_requested_readback_preserves_the_full_draft_without_watching_the_room(self):
+  self.s.tick();cfg=self.s.settings();draft='Draft paragraph. '*600
+  self.s.handoffs.save({'id':'readback','at':time.time(),'state':'answered','source':cfg['target'],'destination':{'agent':'local','room':'p/unwatched','title':'Writing','thread':'writing'},'request':'Read my draft','reply':draft,'reply_id':'draft','readback':True,'reply_complete':True})
+  self.s.tick();self.assertIn(draft,self.c.sent[0]['body']);self.assertEqual(len(self.s.settings()['sources']),1)
  def test_same_native_source_alias_rejected(self):
   self.c.target_thread='src'
   with self.assertRaises(ValueError):self.s.change({'action':'configure','base_revision':1,'target':{'agent':'local','room':'p/desk'},'sources':[{'agent':'local','room':'p/work'}]},lambda _:self.c)

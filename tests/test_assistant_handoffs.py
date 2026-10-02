@@ -1,7 +1,7 @@
 import sys,json,tempfile,unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from ux46_assistant_handoffs import Handoffs
+from ux46_assistant_handoffs import Handoffs, rooms
 
 class Client:
  def __init__(self):self.posts=[];self.history=[];self.human='Ask Work to check the mobile layout';self.thread='work-thread';self.fail=False;self.active=''
@@ -10,6 +10,7 @@ class Client:
    self.posts.append(body)
    if self.fail:raise TimeoutError('sensitive transport details')
    return 200,{'submission':{'status':'accepted','native_turn_id':'turn-1','mode':'steer'}}
+  if path.startswith('/api/rooms'):return 200,{'rooms':[{'id':'p/unwatched','title':'External Aaron','runtime':'codex'}]}
   if '/submissions/' in path:return 200,{'submission':{'status':'accepted','native_turn_id':'turn-1'}}
   if '/desk/history' in path:return 200,{'items':[{'type':'userMessage','id':'human-1','text':self.human}]}
   if '/history' in path:return 200,{'items':self.history,'complete':True}
@@ -36,7 +37,22 @@ class HandoffTests(unittest.TestCase):
   self.c.fail=True;self.assertEqual(self.ask()['state'],'unknown');self.ask();self.store.track(self.clients)
   self.assertEqual(len(self.c.posts),1);self.assertEqual(self.store.view()[0]['state'],'sent')
  def test_target_change_never_sends(self):
-  self.c.thread='different';self.assertEqual(self.ask()['state'],'failed');self.assertFalse(self.c.posts)
+  self.c.thread='different'
+  with self.assertRaises(ValueError):self.ask()
+  self.assertFalse(self.c.posts)
+ def test_unwatched_room_is_discoverable_and_contactable_without_monitoring_it(self):
+  found=rooms(self.clients,'external');self.assertEqual(found['rooms'][0]['key'],'local/p/unwatched')
+  result=self.store.ask(self.cfg,'local/p/unwatched',self.c.human,'Return the current draft',self.clients,True)
+  self.assertEqual(result['state'],'sent');self.assertTrue(result['readback'])
+  self.assertEqual(len(self.cfg['sources']),1);self.assertNotIn('unwatched',self.cfg['sources'][0]['room'])
+ def test_extra_adapter_keeps_query_separate(self):
+  from ux46_agent_actions import AgentClient
+  from types import SimpleNamespace
+  from unittest.mock import Mock
+  registry=Mock();registry.proxy.return_value=SimpleNamespace(status=200,body=b'{}')
+  client=object.__new__(AgentClient);client.extra=(registry,SimpleNamespace(id='cp'))
+  client.request('GET','/api/rooms?query=external&limit=20')
+  self.assertEqual(registry.proxy.call_args.args[2:4],('/api/rooms','query=external&limit=20'))
  def test_changed_retry_wording_is_not_a_second_request(self):
   self.ask()
   with self.assertRaises(ValueError):self.store.ask(self.cfg,'Work',self.c.human,'Different instruction',self.clients)

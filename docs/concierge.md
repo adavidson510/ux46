@@ -40,13 +40,15 @@ Calendar behavior follows Google’s [events list](https://developers.google.com
 Everyday questions stay in the assistant. Read existing updates for status; only an explicit human request should invoke a specialist room. Configure the local owner's `assistant-host.json` with the existing loopback `console`, public `origin`, owner `user`, and optional `additional_agents` registry path. This is the same trusted local adapter boundary as the workspace service, not a public unauthenticated endpoint. Keep this file owner-only and private.
 
 ```sh
-python3 tools/ux46_assistant_handoffs.py --directory OWNER_DIRECTORY rooms
+python3 tools/ux46_assistant_handoffs.py --directory OWNER_DIRECTORY rooms --query writing
 python3 tools/ux46_assistant_handoffs.py --directory OWNER_DIRECTORY ask --room EXACT_ROOM --request 'Exact current human message' --text 'The addressed request'
 python3 tools/ux46_assistant_handoffs.py --directory OWNER_DIRECTORY status
 ```
 
-The destination must be one of the configured watched rooms, with its exact native identity. Ambiguous names are refused. The helper verifies the latest native input is the stated human message; an automatic update packet cannot initiate a request. It delivers through normal native submit: idle rooms start a turn, active rooms receive guidance without cancellation. Disconnected rooms may need reconnection before a request can be sent.
+Monitoring and contact are separate. Search with `rooms --query NAME` across every configured agent, then use the returned `agent/project/session` key. Any available native room can be contacted, whether watched or not. Ambiguous names are refused rather than guessed. A handoff binds the exact native identity at dispatch; replies from that room return without subscribing to its unrelated updates. The helper verifies the latest native input is the stated human message; an automatic update packet cannot initiate a request. It delivers through normal native submit: idle rooms start a turn, active rooms receive guidance without cancellation. Disconnected rooms may need reconnection before a request can be sent.
 
 A durable request ID prevents duplicates, including unknown outcomes. Read status to reconcile uncertainty; never invent a fresh ID to retry. Replies are matched to the accepted native turn, not whichever final message happens to be newest. While watching is running, requested replies return through the assistant feed with priority over the quiet interval, while retaining the one-minute delivery ceiling. Pausing updates pauses automatic reply delivery too; `status` remains available. A room reply reports what it says; it does not establish that the requested work passed verification.
 
 The assistant should not wake specialists for conversational thoughts, status checks, email/calendar lookups, or each automatic packet. Handoffs consume the destination model's usage. Quiet mode reduces summary frequency; net token/cost savings have not been measured.
+
+Use `ask --readback` when the human requests the full current draft or document. The return feed preserves up to 40,000 characters and instructs the assistant to reproduce the draft rather than summarize it. Larger replies carry an explicit incomplete flag. This can cost more assistant tokens than a short summary, because the full document was requested. Hands-free mode is the device-independent name for planned hands-free voice; it is not specific to a headset.

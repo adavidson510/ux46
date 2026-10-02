@@ -45,7 +45,7 @@
   const rename=make('input');rename.value=cfg.name||'Assistant';rename.maxLength=40;rename.setAttribute('aria-label','Assistant name');
   const saveName=btn('Save name',async()=>{try{await action({action:'identity',name:rename.value});heading.textContent=data.settings.name;note.textContent='Name saved.';}catch(e){note.textContent=e.message;}});
   const focus=make('textarea');focus.value=cfg.focus;focus.maxLength=1200;focus.setAttribute('aria-label','Your focus');
-  const explanation=make('p','Everyday conversation stays here. Ask explicitly when you want another room to do work. Checking for updates uses no model; speaking a summary does.');
+  const explanation=make('p','Everyday conversation stays here. Your assistant can contact any available room when you ask. The selection below controls background updates only. Checking for updates uses no model; speaking a summary does.');
   const pace=make('select');pace.setAttribute('aria-label','Update pace');
   for(const [value,title] of [['quiet','Quiet · finished replies, at most every 5 minutes'],['live','Live · progress too, at most every minute']]){const option=make('option',title);option.value=value;pace.append(option);}pace.value=cfg.update_mode||'quiet';
   const choices=make('div',undefined,'concierge-sources');const boxes=[];

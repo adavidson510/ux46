@@ -6,6 +6,7 @@ import threading
 import time
 from http.client import HTTPConnection
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOM = re.compile(r'[A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,96}')
 AGENT = re.compile(r'[a-z][a-z0-9-]{0,31}')
@@ -49,7 +50,8 @@ class AgentClient:
     def request(self, method, path, body=None):
         if self.extra:
             registry,agent=self.extra
-            r=registry.proxy(agent,method,path,'',headers={'Content-Type':'application/json'},body=json.dumps(body).encode() if body is not None else None)
+            route=urlsplit(path)
+            r=registry.proxy(agent,method,route.path,route.query,headers={'Content-Type':'application/json'},body=json.dumps(body).encode() if body is not None else None)
             return r.status,json.loads(r.body)
         return self._main(method,self.prefix+path,body)
 

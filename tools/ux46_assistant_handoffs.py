@@ -10,9 +10,47 @@ import json
 from pathlib import Path
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from urllib.parse import urlsplit, quote
 from ux46_agent_actions import AgentClient
+
+
+def rooms(clients, query='', limit=20):
+    """Search available adapters, independently of the monitoring selection."""
+    ids=getattr(clients,'agent_ids',list(clients))
+    def one(agent):
+        try:
+            code,result=clients[agent].request('GET','/api/rooms?complete=1&limit='+str(limit)+'&query='+quote(query,safe=''))
+            if code!=200:raise OSError()
+            rows=[{'agent':agent,'room':r['id'],'title':r.get('title',r['id']),
+                'project':r.get('project_name',''),'runtime':r.get('runtime',''),
+                'key':agent+'/'+r['id']} for r in result.get('rooms',[]) if r.get('runtime')]
+            return rows,[],bool(result.get('truncated'))
+        except Exception:return [],[agent],False
+    with ThreadPoolExecutor(max_workers=4) as pool: results=list(pool.map(one,ids))
+    found=[r for rows,_,_ in results for r in rows]
+    return {'rooms':found[:limit],'unavailable_agents':[a for _,errors,_ in results for a in errors],
+            'truncated':len(found)>limit or any(t for _,_,t in results)}
+
+
+def resolve(cfg, room, clients):
+    if room.count('/')==2:
+        agent,project,session=room.split('/');dst={'agent':agent,'room':project+'/'+session}
+    else:
+        matches=[r for r in cfg['sources'] if room==r['room'] or room.casefold()==r['title'].casefold()]
+        if not matches:
+            found=rooms(clients,room.split('/')[0] if '/' in room else room,100)
+            matches=[r for r in found['rooms'] if room==r['room'] or room.casefold()==r['title'].casefold()]
+        if len(matches)!=1:raise ValueError('Search rooms and choose its returned key; this name is ambiguous or unavailable')
+        dst=dict(matches[0])
+    code,detail=clients[dst['agent']].request('GET','/api/room/'+dst['room']+'?inspect=1')
+    tid=detail.get('native',{}).get('thread_id')
+    if code!=200 or not tid:raise ValueError('This room has no available native conversation')
+    if dst.get('thread') and dst['thread']!=tid:raise ValueError('Destination changed; search rooms again')
+    dst.update(thread=tid,title=detail.get('title') or dst.get('title') or dst['room'])
+    if dst['agent']==cfg['target']['agent'] and tid==cfg['target']['thread']:raise ValueError('Answer in this assistant conversation directly')
+    return dst
 
 
 class Handoffs:
@@ -29,10 +67,8 @@ class Handoffs:
     def save(self, item):
         with self.db() as c: c.execute('INSERT OR REPLACE INTO requests VALUES (?,?)', (item['id'], json.dumps(item)))
 
-    def ask(self, cfg, room, request, body, clients):
-        matches = [r for r in cfg['sources'] if room in (r['room'], r['agent']+'/'+r['room']) or room.casefold()==r['title'].casefold()]
-        if len(matches)!=1: raise ValueError('Choose one exact room from rooms; ambiguous names are not sent')
-        dst = matches[0]; src = cfg['target']
+    def ask(self, cfg, room, request, body, clients, readback=False):
+        dst = resolve(cfg,room,clients); src = cfg['target']
         if not request.strip() or not body.strip() or len(body)>6000: raise ValueError('A short human request is required')
         sender = clients[src['agent']]; receiver = clients[dst['agent']]
         code, detail = sender.request('GET','/api/room/'+src['room']+'?inspect=1')
@@ -52,7 +88,7 @@ class Handoffs:
                 old=json.loads(old[0])
                 if old['request']!=body: raise ValueError('This request was already sent with different wording; inspect its receipt')
                 return old
-            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'state':'checking'}
+            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'state':'checking','readback':bool(readback)}
             c.execute('INSERT INTO requests VALUES (?,?)',(ident,json.dumps(item)))
         dispatched=False
         try:
@@ -78,8 +114,9 @@ class Handoffs:
         """Read receipts and exact native turn replies; no destination writes."""
         for item in self.view():
             if item['state'] not in ('sent','sending','unknown'): continue
-            dst=item['destination'];client=clients.get(dst['agent'])
-            if not client: continue
+            dst=item['destination']
+            try:client=clients[dst['agent']]
+            except (KeyError,ValueError,OSError):continue
             try:
                 if not item.get('turn'):
                     code,r=client.request('GET','/api/submissions/'+item['id'])
@@ -101,7 +138,8 @@ class Handoffs:
                     cursor=page.get('next_cursor')
                     if not cursor:break
                 if reply and d.get('native',{}).get('active_turn')!=item['turn']:
-                    item.update(state='answered',reply=reply.get('text','')[:8000],reply_id=reply['id'],answered_at=time.time())
+                    text=reply.get('text','');limit=40000 if item.get('readback') else 8000
+                    item.update(state='answered',reply=text[:limit],reply_complete=len(text)<=limit,reply_id=reply['id'],answered_at=time.time())
                     self.save(item)
             except Exception:continue
 
@@ -118,19 +156,31 @@ def local_clients(directory, cfg):
         from ux46_live_agents import LiveAgents
         server.live_agents=LiveAgents(config['additional_agents'])
     handler=SimpleNamespace(server=server,headers={'Host':host,server.auth.identity_header:config['user']})
-    return {a:AgentClient(handler,a) for a in {t['agent'] for t in [cfg['target'],*cfg['sources']]}}
+    class Clients(dict):
+        def __missing__(self,agent):
+            self[agent]=AgentClient(handler,agent);return self[agent]
+    clients=Clients();first=clients[cfg['target']['agent']]
+    code,listing=first._main('GET','/api/agents')
+    if code!=200:raise ValueError('Agent inventory unavailable')
+    ids={a['id'] for a in listing.get('agents',[])}
+    if getattr(server,'live_agents',None):
+        registry=server.live_agents.read()
+        if registry:ids.update(a.id for a in registry.agents.values() if not a.is_local)
+    clients.agent_ids=sorted(ids)
+    return clients
 
 
 def main():
     from ux46_concierge import Concierge
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',required=True)
     p.add_argument('action',choices=['rooms','ask','status']);p.add_argument('--room');p.add_argument('--request');p.add_argument('--text')
+    p.add_argument('--query',default='');p.add_argument('--readback',action='store_true')
     a=p.parse_args();store=Handoffs(a.directory);cfg=Concierge(a.directory).settings()
     try:
-        if a.action=='rooms':result={'rooms':cfg['sources']}
+        if a.action=='rooms':result=rooms(local_clients(a.directory,cfg),a.query)
         elif a.action=='ask':
             if not a.room or not a.request or not a.text:raise ValueError('Use --room, --request (exact human wording), and --text')
-            result=store.ask(cfg,a.room,a.request,a.text,local_clients(a.directory,cfg))
+            result=store.ask(cfg,a.room,a.request,a.text,local_clients(a.directory,cfg),a.readback)
         else:
             store.track(local_clients(a.directory,cfg));result={'requests':store.view()[:10]}
         print(json.dumps(result,ensure_ascii=False))
