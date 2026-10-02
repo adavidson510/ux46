@@ -1837,3 +1837,10 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .listen-window .listen-feed-text{max-height:none;overflow:visible;}
 #listenWindowNotice{font:13px/1.5 var(--sans);color:var(--text-mute);margin:0 0 10px;}
 #listenWindowNotice:empty{display:none;}
+
+/* Concierge stays with its own conversation; the other rooms keep their UI. */
+.concierge-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 16px;margin:0 16px 8px;border:1px solid var(--line,#303b4c);border-radius:12px;background:var(--panel,#111722);font-size:13px}
+.concierge-strip[hidden]{display:none}.concierge-strip>span{flex:1}.concierge-strip button{font-size:13px;padding:7px 12px;border:1px solid #394559;background:#1b2330;color:#edeef5}
+.concierge-dialog{max-width:min(580px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #8e7ac5;border-radius:16px;color:#e6e8ee;background:#111722}
+.concierge-dialog::backdrop{background:#0009}.concierge-dialog textarea{width:100%;min-height:90px;box-sizing:border-box;margin:10px 0}.concierge-dialog button{margin:4px}.concierge-dialog h2{display:inline-block;margin-right:20px}.concierge-dialog p{line-height:1.5}
+.concierge-sources{display:grid;gap:10px;margin:12px 0}.concierge-sources label{display:flex;gap:10px;align-items:center}.concierge-dialog .muted{color:#a7adbd;font-size:13px}

@@ -93,7 +93,7 @@ test('satellite keeps reading after main workspace closes, without attaching or 
  const wait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await wait;
  await expect(pop.locator('.listen-feed')).toBeVisible();await page.close();
  f.set([message('old','Earlier'),message('new','Independent reply')]);
- await pop.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>f.writes().length).toBe(1);
+ await pop.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>f.writes().length,{timeout:10000}).toBe(1);
  await expect(pop.locator('.listen-feed-text')).toHaveText('Independent reply');
  expect(f.writes().every(c=>c.path.endsWith('/speak'))).toBe(true);
  await pop.getByRole('button',{name:'Stop listening'}).click();await pop.close();

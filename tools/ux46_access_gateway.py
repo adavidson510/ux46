@@ -663,6 +663,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
                '/app.js':('app.js','text/javascript; charset=utf-8'),
                "/content.js": ("content.js", "application/javascript; charset=utf-8"),
                "/listen-feed.js": ("listen-feed.js", "application/javascript; charset=utf-8"),
+               "/concierge.js": ("concierge.js", "application/javascript; charset=utf-8"),
                "/listen-window.js": ("listen-window.js", "application/javascript; charset=utf-8"),
                "/listen.html": ("listen.html", "text/html; charset=utf-8"),
                "/efficiency.js": ("efficiency.js", "application/javascript; charset=utf-8"),

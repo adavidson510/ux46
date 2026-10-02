@@ -34,6 +34,8 @@ class WorkspaceAPI(BoardAPI):
         self.recordings=RecordingStore(directory)
         from ux46_content import ContentStore
         self.content=ContentStore(directory)
+        from ux46_concierge import Concierge
+        self.concierge=Concierge(directory)
         self.work_refresh=0
         self.work=WorkStore(Path(directory)/'work.sqlite3')
         self.schedule=ScheduleStore(directory)
@@ -108,9 +110,9 @@ class WorkspaceAPI(BoardAPI):
 
     def handle(self,handler):
         path=urlsplit(handler.path).path
-        if not path.startswith(('/api/content/','/api/recordings/','/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/','/api/work/')):return False
+        if not path.startswith(('/api/concierge/','/api/content/','/api/recordings/','/api/agent-actions/','/api/desktop-devices/','/api/constellation/','/api/email/','/api/schedule/','/api/usage-report/','/api/work/')):return False
         try:
-            allowed_get={'/api/content/view','/api/recordings/view','/api/recordings/audio','/api/work/view','/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
+            allowed_get={'/api/concierge/view','/api/content/view','/api/recordings/view','/api/recordings/audio','/api/work/view','/api/agent-actions/view','/api/desktop-devices/view','/api/constellation/catalog','/api/constellation/review','/api/usage-report/view','/api/schedule/view','/api/constellation/lookup','/api/constellation/get','/api/constellation/health',
                          '/api/constellation/changes','/api/email/view','/api/email/status','/api/email/assistant'}
             if handler.command in ('GET','HEAD'):
                 if path not in allowed_get:raise ValueError('Use POST for this operation')
@@ -137,7 +139,11 @@ class WorkspaceAPI(BoardAPI):
             else:raise ValueError('Unsupported method')
             if path=='/api/recordings/audio':
                 self.recordings.reply_audio(handler,args['id']);return True
-            if path=='/api/agent-actions/view':result=self.agent_jobs.view(args['agent'])
+            if path=='/api/concierge/view':result=self.concierge.view()
+            elif path=='/api/concierge/action':
+                from ux46_agent_actions import AgentClient
+                result=self.concierge.change(args,lambda agent:AgentClient(handler,agent))
+            elif path=='/api/agent-actions/view':result=self.agent_jobs.view(args['agent'])
             elif path=='/api/agent-actions/refresh':
                 from ux46_agent_actions import AgentClient
                 result=self.agent_jobs.start(args['agent'],args['client_id'],AgentClient(handler,args['agent']))

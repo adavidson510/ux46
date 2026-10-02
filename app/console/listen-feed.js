@@ -56,8 +56,8 @@
       } else if(message.type==='ux46-listen-return'&&message.saved){
         detached=false;popup=null;void start(message.saved);
       } else if(message.type==='ux46-listen-stopped'){detached=false;popup=null;paint();}
-    } else if(satellite&&event.source===parent&&message.channel===channel&&message.type==='ux46-listen-pause'){
-      window.UX46ListenFeed.pause();
+    } else if(satellite&&event.source===parent&&message.channel===channel&&['ux46-listen-pause','ux46-listen-resume'].includes(message.type)){
+      if(message.type==='ux46-listen-resume')window.UX46ListenFeed.resume();else window.UX46ListenFeed.pause();
     } else if(satellite&&event.source===parent&&message.channel===channel&&message.type==='ux46-listen-transfer'){
       DEFAULT_AGENT=message.saved.localAgent||'local';
       document.querySelector('#listenWindowNotice').textContent='';
@@ -167,7 +167,7 @@
     finally{f.polling=false;}
   }
   // Manual one-off playback pauses the feed so two voices never compete.
-  window.UX46ListenFeed={poll,stop,pause(){if(feed){feed.muted=true;feed.audio.pause();paint();}else if(detached&&popup&&!popup.closed)popup.postMessage({type:'ux46-listen-pause',channel:handoff},location.origin);}};
+  window.UX46ListenFeed={poll,stop,start, ensure(){if(feed&&feed.agent===agentId()&&feed.room===state.room||detached){this.resume();return;}return start();}, resume(){if(feed){feed.muted=false;feed.error='';void pump(feed);paint();}else if(detached&&popup&&!popup.closed)popup.postMessage({type:'ux46-listen-resume',channel:handoff},location.origin);}, pause(){if(feed){feed.muted=true;feed.audio.pause();paint();}else if(detached&&popup&&!popup.closed)popup.postMessage({type:'ux46-listen-pause',channel:handoff},location.origin);}};
   window.addEventListener('ux46-room',paint);
   window.addEventListener('pagehide',()=>{
     if(satellite&&!returning&&feed&&parent&&!parent.closed){
