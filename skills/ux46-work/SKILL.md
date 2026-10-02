@@ -59,3 +59,13 @@ UI shows this explanation only while the source digest matches. Original notes
 and sources remain expandable. Readability edits are not assessments or outcomes.
 Do the assessment and record-keeping for the person; ask them to choose the
 useful work, not maintain a second ledger.
+
+## Chosen work, not a second inbox
+
+Room citations do not assign work. Automatic citation-based routing is disabled.
+Use only deliberately chosen suggestions in the current scope. Assess relevance
+and record results as part of normal work; Aaron should not fill out assessment
+or experiment forms. Covered and not-applicable suggestions belong in Reviewed.
+Do not invent an experiment, wake a model, or revive a withdrawn task to process
+an old suggestion. Use Constellation feedback for an applied lesson; keep its
+source revision and evidence rather than duplicating the lesson into this store.

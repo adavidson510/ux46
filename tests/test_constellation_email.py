@@ -96,6 +96,12 @@ class KnowledgeTests(unittest.TestCase):
             p['key']='retire';p['base_revision']=1;p['record']['state']='retired'
             self.store.capture(self.owner,p)
             self.assertFalse(self.store.lookup(self.peer,'attention')['items'])
+            self.store.capture(self.owner,lesson('next'))
+            self.assertEqual(self.store.get(self.owner,'method',1)['state'],'supported')
+            p['key']='reactivate';p['base_revision']=2;p['record']['state']='supported'
+            with self.assertRaises(Conflict):self.store.capture(self.owner,p)
+            self.assertEqual(self.store.health(self.owner)['active_records'],1)
+            self.assertEqual(self.store.health(self.owner)['archived_records'],1)
 
     def test_backup_can_be_reopened_with_history_and_receipts(self):
         p=lesson();self.store.capture(self.owner,p)

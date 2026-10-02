@@ -25,13 +25,13 @@ class Learning(unittest.TestCase):
         self.assertEqual(result['items'][0]['learning']['check'],'Restore and read')
         self.assertFalse(result['items'][0]['match']['project_match'])
         self.assertNotIn('excerpt',json.dumps(result['items'][0]['sources']))
-    def test_one_hop_surfaces_connection_without_scope_leak(self):
+    def test_brief_does_not_pad_with_speculative_graph_neighbors(self):
         self.capture('target','Public exchange',terms=['shelf'])
         self.capture('seed','Adaptive interface',terms=['reshape'],links=[{'target':'target','type':'informs','state':'proposed','reason':'A place to share the pattern'}])
         self.capture('private','Adaptive interface secret',projects=['secret'],terms=['reshape'])
         r=self.brief('reshape',principal=self.peer)
-        self.assertEqual({x['id'] for x in r['items']},{'seed','target'})
-        self.assertEqual(r['items'][1]['match']['via']['type'],'informs')
+        self.assertEqual({x['id'] for x in r['items']},{'seed'})
+        self.assertEqual(self.store.get(self.peer,'seed')['links'][0]['target'],'target')
         self.assertNotIn('Adaptive interface secret',json.dumps(r))
     def test_failed_reuse_qualifies_future_advice_without_erasing_it(self):
         self.capture('method','Migration method',terms=['migration'])
@@ -125,5 +125,12 @@ class Learning(unittest.TestCase):
         ref={'id':'method','revision':1,'source_id':source_id}
         with self.assertRaises(Conflict):self.store.source(self.peer,[ref])
         self.assertEqual(self.store.source(self.peer,[dict(ref,historical=True)])['sources'][0]['excerpt'],old_excerpt)
+
+    def test_long_question_abstains_from_incidental_word_matches(self):
+        self.capture('late','Late evidence must preserve a decision cutoff',terms=['late','evidence'],rationale='Do not change the date',applies='Timestamped decisions')
+        self.assertEqual(self.brief('Which alpine wildflowers bloom beside hiking trails in late summer?')['items'],[])
+        self.assertEqual(self.brief('late evidence')['items'][0]['id'],'late')
+        self.capture('database','Temporary database read permissions',terms=['temporary','read'],rationale='Check database permissions',applies='Database reads')
+        self.assertEqual(self.brief('Persistent human canvas and temporary agent preview; preserve edits and avoid changing the view while the person reads.')['items'],[])
 
 if __name__=='__main__':unittest.main()

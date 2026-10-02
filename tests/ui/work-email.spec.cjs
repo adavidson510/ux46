@@ -69,7 +69,7 @@ test('Signals starts with three readable ideas and keeps history and action boun
  });
  await page.addScriptTag({url:'/work.js'});await page.addScriptTag({url:'/tell.js'});
  await page.evaluate(()=>__atlas.showView('tell'));
- await expect(page.getByRole('tab',{name:'Ideas to try',exact:true})).toHaveAttribute('aria-selected','true');
+ await expect(page.getByRole('tab',{name:'Suggestions',exact:true})).toHaveAttribute('aria-selected','true');
  await expect(page.locator('.tell-post:visible')).toHaveCount(3);
  await expect(page.locator('.tell-post h3').first()).toHaveText('Try the simple check first');
  await page.locator('.tell-post').first().getByRole('button',{name:'Explore this',exact:true}).click();
@@ -149,4 +149,45 @@ test('switching rooms during an outstanding review read loads the new room witho
  release();
  await expect(page.locator('#roomWork')).toContainText('New room idea');
  await expect(page.locator('#roomWork')).not.toContainText('Old room idea');
+});
+
+
+test('resolved suggestions stay in history and discussion preserves an unfinished draft',async({page})=>{
+ const data={...empty,routes:[{id:'done',title:'Already handled',reason:'Old finding',assessment:'covered',needs_review:false,status:'Already covered'},
+ {id:'new',title:'A chosen suggestion',reason:'Check the narrow layout',needs_review:true,status:'Waiting for room review'}]};
+ const writes=await fixture(page,data);await page.addScriptTag({url:'/work.js'});
+ await page.evaluate(()=>{__atlas.applyShell();__atlas.openPanel('board');});
+ await page.getByText('Suggestions for this room · 1',{exact:true}).click();
+ await expect(page.getByText('Already handled',{exact:true})).toBeHidden();
+ await expect(page.getByRole('button',{name:'Choose a test',exact:true})).toHaveCount(0);
+ await page.evaluate(()=>document.getElementById('draft').value='My unfinished question');
+ await page.getByRole('button',{name:'Discuss',exact:true}).click();
+ await expect(page.locator('#draft')).toHaveValue('My unfinished question');
+ await page.getByText('Reviewed · 1',{exact:true}).click();
+ await expect(page.getByText('Already handled',{exact:true})).toBeVisible();
+ expect(writes).toEqual([]);
+});
+
+test('reading a cited Signal never routes or starts work',async({page})=>{
+ const writes=await fixture(page);
+ await page.route('**/api/work/action',async r=>{const a=r.request().postDataJSON();writes.push(a);await r.fulfill({json:{...a.source,version:1,disposition:'active'}});});
+ await page.addScriptTag({url:'/work.js'});
+ await page.evaluate(()=>{const a=document.createElement('article');document.body.append(a);return __work.signal({id:'cited',board:'working-better',title:'A cited idea',sources:[{room:'demo/room'}]},a);});
+ expect(writes.map(x=>x.action)).toEqual(['observe']);
+});
+
+test('Suggestions merges deliberate categories and folds automatic roundups without unread badges',async({page})=>{
+ await fixture(page);const ids=['working-better','bigger-picture','invention-watch'];
+ await page.route('**/api/tell/**',async route=>{
+  const p=new URL(route.request().url()).pathname;
+  if(p.endsWith('/summary'))return route.fulfill({json:{enabled:true,unread_count:99,boards:[...ids,'daily-review'].map(id=>({id,unread_count:20}))}});
+  const id=p.split('/').pop();
+  return route.fulfill({json:{board:{id},posts:[{id,board:id,title:'Chosen '+id,author:'Owner',human_body:'A specific suggestion',sources:[],created_at:'2026-10-02T09:00:00Z'}, {id:'automatic-'+id,board:id,title:'Automatic '+id,author:'Keel · daily review',human_body:'Old report',sources:[],created_at:'2026-10-01T09:00:00Z'}]}});
+ });
+ await page.addScriptTag({url:'/tell.js'});await page.evaluate(()=>__atlas.showView('tell'));
+ await expect(page.getByRole('tab',{name:'Suggestions',exact:true})).toHaveAttribute('aria-selected','true');
+ await expect(page.locator('.tell-post:visible')).toHaveCount(3);
+ for(const id of ids)await expect(page.getByRole('heading',{name:'Chosen '+id,exact:true})).toBeVisible();
+ await expect(page.locator('.tell-tab-count')).toHaveCount(0);await expect(page.locator('#tellCount')).toBeHidden();
+ await page.getByText('Earlier notes · 3',{exact:true}).click();await expect(page.locator('.tell-post:visible')).toHaveCount(6);
 });

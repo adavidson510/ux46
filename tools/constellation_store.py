@@ -228,8 +228,11 @@ class Store:
                 raise PermissionError('Only the record owner may revise it; propose a separate correction')
             if type(payload.get('base_revision')) is not int or payload['base_revision'] != (old['revision'] if old else 0):
                 raise Conflict('Stale revision; reread before changing')
-            if not old and db.execute('SELECT COUNT(*) FROM records').fetchone()[0] >= MAX_RECORDS:
-                raise Conflict('Pilot record cap reached; evaluate before expanding')
+            activates = state not in ('retired','superseded') and (not old or old['state'] in ('retired','superseded'))
+            if activates:
+                active_count=sum(json.loads(r[0])['state'] not in ('retired','superseded') for r in db.execute('SELECT body FROM records'))
+                if active_count >= MAX_RECORDS:
+                    raise Conflict('Active lesson limit reached; review and archive an obsolete lesson before adding another. History is preserved.')
             for link in clean_links:
                 target = self._get(db, principal, link['target'])
                 if not set(target['projects']).issubset(projects):
@@ -384,13 +387,14 @@ class Store:
                     'briefs_in_window':sum(m.get('operation')=='brief' for m in observations),
                     'empty_briefs_in_window':sum(m.get('operation')=='brief' and not m['results'] for m in observations),
                     'reported_applications':len({f['use_id'] for f in feedback if f['principal']==person and f['verdict'] in ('used','helped','failed')})})
-            return {'ok':True,'adoption':adoption,'adoption_window':'bounded latest 500 retrieval observations; installation is separate', 'records':len(records),'feedback':len(feedback),
+            active_count=sum(r['state'] not in ('retired','superseded') for r in records)
+            return {'ok':True,'adoption':adoption,'adoption_window':'bounded latest 500 retrieval observations; installation is separate', 'records':len(records),'active_records':active_count,'archived_records':len(records)-active_count,'available_slots':max(0,MAX_RECORDS-active_count),'feedback':len(feedback),
                     'applied_outcomes':sum(f['verdict'] in ('helped','failed') for f in feedback),
                     'applied_uses':len({(f['principal'],f['use_id']) for f in feedback if f['verdict'] in ('helped','failed')}),
                     'feedback_items':feedback[-20:], 'retrievals':len(metrics),
                     'retrieval_bytes':sum(m['returned_bytes'] for m in metrics),
                     'model_calls':0,'token_savings':None,'pilot_cap':MAX_RECORDS,
-                    'review_due':time.time()-started>=14*86400 or len(records)>=MAX_RECORDS or len(feedback)>=10,
+                    'review_due':time.time()-started>=14*86400 or active_count>=MAX_RECORDS or len(feedback)>=10,
                     'last_backup':json.loads(backup[0]) if backup and '*' in principal.projects else None}
 
     def export(self, path):

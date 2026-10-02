@@ -55,7 +55,8 @@ class WorkTests(unittest.TestCase):
         with self.assertRaises(Conflict):
             self.s.action({'action':'explain','id':'idea1','base_version':changed['version'],'source_digest':digest})
     def test_chosen_room_takes_precedence_over_automatic_source_room(self):
-        self.s.action({'action':'route','source':'idea1','agent':'local','room':'app/old','reason':'Cited source','automatic':True})
+        with self.assertRaises(ValueError):
+            self.s.action({'action':'route','source':'idea1','agent':'local','room':'app/old','reason':'Cited source','automatic':True})
         chosen=self.route()
         self.assertEqual(self.s.view()['routes'][0]['id'],chosen['id'])
         latest=self.s.action({'action':'route','source':'idea1','agent':'local','room':'app/old','reason':'Discuss here now'})

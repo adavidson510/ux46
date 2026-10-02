@@ -137,14 +137,15 @@ class WorkStore(Store):
                 return old
             return self.mutate('work_sources',identifier(args['id']),args['base_version'],change)
         if action=='route':
+            if args.get('automatic'):
+                raise ValueError('Choose a relevant room explicitly; citing a room does not assign it work')
             agent,room=target(args['agent'],args['room']);source=self.get('work_sources',args['source'])
             if not source:raise ValueError('Missing source')
             ident=hashlib.sha256(encoded([source['id'],agent,room])).hexdigest()[:32]
             existing=self.get('work_routes',ident)
-            if existing and args.get('automatic'):return existing
             if existing:return self.mutate('work_routes',ident,existing['version'],lambda old:{**old,'inactive':False,'reason':text(args['reason'],1000,'Reason'),'chosen_at':time.time()})
             return self.mutate('work_routes',ident,0,lambda _:dict(source=source['id'],agent=agent,room=room,
-                reason=text(args['reason'],1000,'Reason'),assessment='',assessed_digest='',assessed_context='',chosen_at=0 if args.get('automatic') else time.time()))
+                reason=text(args['reason'],1000,'Reason'),assessment='',assessed_digest='',assessed_context='',chosen_at=time.time()))
         if action=='unroute':
             return self.mutate('work_routes',args['id'],args['base_version'],lambda old:{**old,'inactive':True})
         if action=='context':

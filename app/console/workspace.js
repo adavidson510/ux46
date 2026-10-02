@@ -176,7 +176,7 @@
     const host=$w('constellationBody'),s=knowledge.snapshot;if(!s)return;
     host.classList.add('stellar-surface');host.replaceChildren();
     const shell=n('div',{class:'constellation-shell'+(knowledge.selected?' with-detail':'')}),main=n('main',{class:'stellar-main'});
-    const head=header('Constellation','Where useful connections across your work become visible.');
+    const head=header('Constellation','Find a useful lesson for the work in front of you.');
     head.append(button('Refresh',()=>void loadKnowledge()));main.append(head);
     const search=input('Ask about patterns, lessons or opportunities across your work',knowledge.query);search.placeholder='Ask about patterns, lessons, blockers, or opportunities across your work…';
     const submit=n('button',{type:'submit',class:'ws-primary',text:'Find connections →'});
@@ -192,11 +192,13 @@
     filters.append(button('Clear filters',()=>{Object.assign(knowledge,{project:'',kind:'',origin:'',subject:'',lane:'all'});renderKnowledge();},'stellar-text-button'));main.append(filters);
     const subjects=new Set(s.catalog.items.flatMap(r=>r.subjects||[]));
     const metrics=n('div',{class:'stellar-metrics'});
-    for(const [icon,value,label,lane] of [['i-spark',s.health.records,'Captured lessons','all'],['i-refresh',s.health.applied_outcomes,'Applied outcomes','outcomes'],['i-bell',s.review.items.length+(s.review.more?'+':''),'Needs review','review'],['i-projects',projectNames.length+(s.catalog.more?'+':''),'Indexed projects','all']]){
+    for(const [icon,value,label,lane] of [['i-spark',s.health.active_records ?? s.health.records,'Active lessons','all'],['i-refresh',s.health.applied_outcomes,'Reported outcomes','outcomes'],['i-bell',s.review.items.length+(s.review.more?'+':''),'Needs review','review'],['i-projects',projectNames.length+(s.catalog.more?'+':''),'Indexed projects','all']]){
       const tile=button('',()=>{knowledge.lane=lane;knowledge.project='';knowledge.kind='';knowledge.origin='';knowledge.subject='';renderKnowledge();$w('stellarResults')?.scrollIntoView({block:'nearest'});},'stellar-metric');
       tile.append(wsIcon(icon),n('div',{},[n('strong',{text:String(value)}),n('span',{text:label})]));metrics.append(tile);
     }
-    main.append(metrics,knowledgeMap(s.catalog.items));
+    main.append(metrics);
+    if(Number.isFinite(s.health.active_records))main.append(n('p',{class:'ws-sub',text:s.health.active_records+' / '+s.health.pilot_cap+' active lessons · '+s.health.archived_records+' archived with history preserved'}));
+    const map=n('details',{},[n('summary',{text:'Browse connections'}),knowledgeMap(s.catalog.items)]);main.append(map);
     const tabs=n('div',{class:'stellar-result-tools'}),choices=n('div',{class:'ws-tabs','aria-label':'Insight views'});
     for(const [value,label] of [['all','All insights'],['review','Needs review'],['outcomes','Applied outcomes']]){
       const btn=button(label,()=>{knowledge.lane=value;renderKnowledge();});btn.setAttribute('aria-pressed',String(knowledge.lane===value));choices.append(btn);

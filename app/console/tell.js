@@ -40,7 +40,7 @@
     return date.toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
   }
   function boardLabel(id) {
-    const labels = {"working-better":"Ideas to try", "bigger-picture":"Across projects", "invention-watch":"Possibilities", "daily-review":"Project roundup", "activity":"Activity"};
+    const labels = {"working-better":"Suggestions", "bigger-picture":"Across projects", "invention-watch":"Possibilities", "daily-review":"Roundup archive", "activity":"Activity"};
     if (labels[id]) return labels[id];
     const found = (tell.summary && tell.summary.boards || []).find((board) => board.id === id);
     return (found && found.label) || id.replace(/-/g, " ");
@@ -89,15 +89,10 @@
     try { return window.localStorage.getItem(cursorKey) || ""; } catch (_) { return ""; }
   }
   function updateNav() {
-    const unread = Number((tell.summary || {}).unread_count || 0);
-    const badge = $("#tellCount");
-    badge.textContent = String(unread);
-    badge.hidden = unread === 0;
-    const button = $("#btnTell");
-    button.classList.toggle("has-activity", tell.activityNotice);
-    button.classList.toggle("pulse", tell.activityPulse);
-    button.setAttribute("aria-label", unread ? "Signals · " + unread + " unread reviews or findings" : "Signals");
-    button.title = unread ? "Signals · " + unread + " unread" : "Signals";
+    // An unread archive is not a request for attention.
+    $("#tellCount").hidden=true;
+    const button=$("#btnTell");button.classList.remove("has-activity","pulse");
+    button.setAttribute("aria-label","Signals");button.title="Signals";
   }
   function enabled() { return Boolean(tell.summary && tell.summary.enabled); }
   function announceActivity() {
@@ -116,7 +111,7 @@
   function boardTabs() {
     const nav = node("div", {class: "tell-tabs", role: "tablist", "aria-label": "Signals"});
     const order = ["working-better", "bigger-picture", "invention-watch", "daily-review", "activity"];
-    for (const board of [...(tell.summary.boards || [])].sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id))) {
+    for (const board of [...(tell.summary.boards || [])].filter(b=>!["bigger-picture","invention-watch"].includes(b.id)).sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id))) {
       nav.appendChild(node("button", {class: "tell-tab" + (board.id === tell.board ? " on" : ""),
         type: "button", role: "tab", "aria-selected": String(board.id === tell.board),
         id: "tell-tab-" + board.id, "aria-controls": "tell-board-panel",
@@ -130,7 +125,6 @@
           if (next < 0) return;
           event.preventDefault(); tabs[next].focus(); tabs[next].click();
         }}}, [
-        Number(board.unread_count || 0) ? node("span", {class: "tell-tab-count", text: String(board.unread_count)}) : null,
       ]));
     }
     return nav;
@@ -369,7 +363,7 @@
     const discovery = discoveryCard();
     host.appendChild(node("div", {class:"tell-workflow"}, [
       node("p", {text:"Read the idea → choose a room → let the agent assess it."}),
-      node("p", {class:"tell-muted",text:"Dismiss what is not useful, or remind yourself tomorrow. Adding an idea to a room does not start work. The room proposes a small test; afterward, record whether it helped."})
+      node("p", {class:"tell-muted",text:"Dismiss what is not useful, or remind yourself tomorrow. Adding an idea to a room does not start work. The room handles the assessment and records what changed. You choose the work worth doing."})
     ]));
     host.appendChild(boardTabs());
     if (tell.board === "daily-review") { const schedule = node("details", {class:"tell-review-history",data:{tellDetail:"schedule"}}, [node("summary",{text:"Roundup schedule"}),scheduleCard(tell.summary.schedule)]); host.appendChild(schedule); }
@@ -384,7 +378,10 @@
     }
     const explanations = {"daily-review": "Recent project notes. These summaries are background, not a to-do list.", "working-better": "Small changes that could save you time or effort.", "bigger-picture": "How your projects might help each other.", "invention-watch": "Ideas that might be worth exploring—not claims of novelty or patentability."};
     const failures = (payload.posts || []).filter(isReviewFailure);
-    const posts = (payload.posts || []).filter(post => !isReviewFailure(post));
+    const available = (payload.posts || []).filter(post => !isReviewFailure(post));
+    const automatic=post=>post.author === "Keel · daily review";
+    const posts = tell.board === "working-better" ? available.filter(p=>!automatic(p)) : available;
+    const archived = tell.board === "working-better" ? available.filter(automatic) : [];
     const section = node("section", {class: "tell-posts", id: "tell-board-panel", role: "tabpanel",
       "aria-labelledby": "tell-tab-" + tell.board}, [
       node("div", {class: "tell-section-head"}, [node("div", {}, [
@@ -392,17 +389,17 @@
         node("p", {text: explanations[tell.board] || ""})]),
         node("span", {class: "tell-item-count", text: posts.length ? posts.length + (posts.length === 1 ? " note" : " notes") : "No findings yet"})]),
     ]);
-    if (!posts.length) section.appendChild(node("p", {class: "tell-empty", text: failures.length ? "No completed review is available here yet." : "Nothing has been filed here yet."}));
+    if (!posts.length) section.appendChild(node("p", {class: "tell-empty", text: failures.length ? "No completed review is available here yet." : "No new suggestions. Previous automatic findings are in Earlier notes."}));
     const generation = tell.boardGeneration;
     const cards = node("div", {class: "tell-cards"});
     const limit = tell.board === "daily-review" ? 1 : 3;
     for (const post of posts.slice(0,limit)) cards.appendChild(postNode(post, tell.board, generation));
     section.appendChild(cards);
-    if (posts.length > limit) {
-      const earlier = node("details", {class:"tell-earlier",data:{tellDetail:"earlier-"+tell.board}}, [node("summary",{text:"Earlier notes · "+(posts.length-limit)})]);
+    if (posts.length > limit || archived.length) {
+      const earlier = node("details", {class:"tell-earlier",data:{tellDetail:"earlier-"+tell.board}}, [node("summary",{text:"Earlier notes · "+(Math.max(0,posts.length-limit)+archived.length)})]);
       const olderCards = node("div",{class:"tell-cards"}); earlier.appendChild(olderCards);
       earlier.addEventListener("toggle",()=>{if(earlier.open && !olderCards.children.length){
-        for(const post of posts.slice(limit))olderCards.appendChild(postNode(post,tell.board,generation));
+        for(const post of [...posts.slice(limit),...archived])olderCards.appendChild(postNode(post,tell.board,generation));
       }});
       section.appendChild(earlier);
     }
@@ -479,7 +476,12 @@
     const generation = tell.boardGeneration;
     try {
       const path = boardId === "activity" ? "/api/tell/activity" : "/api/tell/boards/" + encodeURIComponent(boardId);
-      const payload = await api(path, {absolute: true});
+      let payload;
+      if(boardId === "working-better") {
+        const ids=["working-better","bigger-picture","invention-watch"].filter(id=>(tell.summary.boards||[]).some(b=>b.id===id));
+        const pages=await Promise.all(ids.map(id=>api("/api/tell/boards/"+id,{absolute:true})));
+        payload={posts:[...new Map(pages.flatMap(p=>p.posts||[]).map(p=>[p.id,p])).values()].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)))};
+      } else payload=await api(path, {absolute: true});
       if (boardId !== tell.board || generation !== tell.boardGeneration) return;
       const signature = JSON.stringify(payload);
       if (force || JSON.stringify(tell.boardPayload) !== signature) {
@@ -493,7 +495,7 @@
     }
   }
   async function refresh() {
-    if (tell.loading || !pageVisible()) return;
+    if (tell.loading || !pageVisible() || !viewOpen()) return;
     tell.loading = true;
     try {
       const summary = await api("/api/tell/summary", {absolute: true});

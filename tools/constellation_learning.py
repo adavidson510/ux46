@@ -7,6 +7,7 @@ from collections import Counter
 from constellation_store import encoded, text, identifier
 
 STOP = set('a an the is are was were be been being it its this that these those i me my you your we our they their to from for of on in at with and or as by can could would should do does did have has had how what when where why please need want use using work working something about into'.split())
+STOP.update('which while after before then than just still also only any each another same new current existing make without through inside out but not cannot person human agent keep preserve changing changes'.split())
 
 
 def words(value):
@@ -62,10 +63,17 @@ def rank(records, feedback, query, project='', include_flagged=False):
     fields={r['id']:[words(' '.join(r.get('terms',[])+r['projects']+r.get('subjects',[]))),
                        words(r['claim']),words(r['rationale']+' '+r['applies']+' '+r['limits']+' '+' '.join(r.get('learning',{}).values()))] for r in active}
     frequency=Counter(t for values in fields.values() for t in set().union(*values))
+    specificity=lambda t: 1+math.log((1+len(active))/(1+frequency[t]))
+    query_weight=sum(specificity(t) for t in tokens)
     ranked=[]
     for r in active:
         bags=fields[r['id']];matched=sorted(tokens & set().union(*bags))
         if tokens and not matched:continue
+        # A sentence needs more than an incidental word in a caveat. Short,
+        # deliberate keyword searches retain exact one-word discovery.
+        primary=tokens & (bags[0] | bags[1])
+        if len(tokens)>2 and (len(primary)<2 or sum(specificity(t) for t in matched)/query_weight<.30):continue
+        if len(tokens)<=2 and tokens and not primary:continue
         outcome=outcomes(r,feedback)
         if outcome['held_for_review'] and not include_flagged:continue
         score=sum((1+math.log((1+len(active))/(1+frequency[t])))*sum(w for w,bag in zip((4,3,1),bags) if t in bag) for t in matched)
@@ -74,6 +82,8 @@ def rank(records, feedback, query, project='', include_flagged=False):
         score=(score or 1)*(1+outcome['ranking_adjustment'])
         ranked.append((round(score,5),r,matched,None))
     ranked.sort(key=lambda x:(-x[0],x[1]['id']))
+    if len(tokens)>2 and ranked:
+        ranked=[r for r in ranked if r[0]>=ranked[0][0]*.6]
     return ranked
 
 
@@ -84,28 +94,16 @@ def brief(records, feedback, query, project='', limit=3, budget_bytes=6000, incl
     if type(include_flagged) is not bool:raise ValueError('include_flagged must be boolean')
     if not words(query):raise ValueError('Describe the decision or situation')
     ranked=rank(records,feedback,query,project,include_flagged)
-    active=[r for r in records if r['state'] not in ('retired','superseded') and (include_flagged or not outcomes(r,feedback)['held_for_review'])]
-    seeds=ranked[:min(2,limit)]
-    direct_ids={r[1]['id'] for r in ranked};neighbors=[]
-    # One hop, including reverse links. No recursive expansion or hidden query into another scope.
-    for score,seed,matched,_ in seeds:
-        for r in active:
-            if r['id'] in direct_ids:continue
-            links=[(l,seed['id'],r['id']) for l in seed.get('links',[]) if l['target']==r['id']]
-            links += [(l,r['id'],seed['id']) for l in r.get('links',[]) if l['target']==seed['id']]
-            for link,source,target in links:
-                if link['state'] in ('retired','superseded'):continue
-                neighbors.append((score*.35,r,[],{'from':source,'to':target,'type':link['type'],'state':link['state'],'reason':link['reason']}))
-    neighbors.sort(key=lambda x:(-x[0],x[1]['id']))
-    chosen=ranked[:min(2,limit)]
-    for candidate in sorted(neighbors+ranked[min(2,limit):],key=lambda x:(-x[0],x[1]['id'])):
-        if len(chosen)>=limit:break
-        if candidate[1]['id'] not in {x[1]['id'] for x in chosen}:chosen.append(candidate)
+    # Connections remain inspectable through get/catalog. A speculative graph
+    # neighbor is not a relevant answer merely because a matching lesson links it.
+    chosen=ranked[:limit]
     now=time.time();items=[]
     for score,r,matched,via in chosen:
         outcome=outcomes(r,feedback)
         # Exact get keeps complete feedback detail; recall only needs enough to judge fit.
-        outcome['reports']=[dict(f,reason=f['reason'][:300],evidence=f['evidence'][:200]) for f in outcome['reports']]
+        # Successful-use detail is available through exact get; failure context
+        # stays visible so a compact brief cannot quietly hide a correction.
+        outcome['reports']=[dict(f,reason=f['reason'][:180],evidence=f['evidence'][:120]) for f in outcome['reports'] if f['verdict']=='failed']
         item={k:r[k] for k in ('id','revision','claim','kind','evidence','state','owner','classification','projects','applies','limits')}
         item.update(origin=r.get('origin','unspecified'),learning=r.get('learning',{}),subjects=r.get('subjects',[]),
                     match={'terms':matched,'via':via,'project_match':bool(project and project in r['projects'])},
