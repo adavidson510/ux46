@@ -360,6 +360,72 @@ test('listening survives redraws, seeks, and releases media when changing agents
   expect(await page.evaluate(() => state.audio.size)).toBe(0);
 });
 
+// Model a phone that knows the duration but will not preload/play without a
+// fresh tap. No canplay event is emitted: the Play control must break the wait.
+async function metadataOnlySpeech(page, {pending = false} = {}) {
+  await fixture(page);
+  await page.setViewportSize({width: 390, height: 844});
+  await page.route('**/api/room/**/speak', route => route.fulfill({json: {
+    audio_url: '/api/audio/fixture.wav', complete: true}}));
+  await page.route('**/api/audio/fixture.wav', route => route.abort());
+  await page.evaluate(({pending}) => {
+    window.mediaAttempts = 0; window.mediaReady = 1; window.mediaPaused = true;
+    Object.defineProperties(HTMLMediaElement.prototype, {
+      readyState: {configurable: true, get: () => window.mediaReady},
+      duration: {configurable: true, get: () => 155},
+      paused: {configurable: true, get: () => window.mediaPaused},
+      error: {configurable: true, get: () => null},
+      src: {configurable: true, set() { this.dispatchEvent(new Event('loadedmetadata')); }},
+    });
+    HTMLMediaElement.prototype.load = function() {};
+    const setAttribute = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function(name, value) {
+      if (this.tagName === 'AUDIO' && name === 'src') {
+        queueMicrotask(() => this.dispatchEvent(new Event('loadedmetadata')));
+        return;
+      }
+      return setAttribute.call(this, name, value);
+    };
+    HTMLMediaElement.prototype.play = function() {
+      window.mediaAttempts++;
+      if (pending) return new Promise(() => {});
+      if (!window.allowPlayback) return Promise.reject(new DOMException('Tap required', 'NotAllowedError'));
+      window.mediaPaused = false; window.mediaReady = 4;
+      this.dispatchEvent(new Event('play')); this.dispatchEvent(new Event('playing'));
+      return Promise.resolve();
+    };
+    state.voice.enabled = true; applyShell(); renderStream();
+  }, {pending});
+  await page.getByRole('button', {name: 'Listen to response · local voice'}).click();
+}
+
+test('metadata-only mobile audio offers Play without switching windows or waiting for canplay', async ({page}) => {
+  await metadataOnlySpeech(page);
+  await expect(page.locator('.listen-status')).toHaveText('Ready · press Play to listen');
+  await expect(page.locator('.speech-time')).toHaveText('0:00 / 2:35');
+  const play = page.getByRole('button', {name: 'Play response', exact: true});
+  await expect(play).toBeEnabled();
+  await page.evaluate(() => { renderStream(); window.allowPlayback = true; });
+  await play.click();
+  await expect(page.locator('.listen-status')).toHaveText('Playing');
+  expect(await page.evaluate(() => window.mediaAttempts)).toBe(2);
+  await page.screenshot({path: test.info().outputPath('mobile-play-ready.png')});
+});
+
+test('pending audio start exposes recovery and disposed playback cannot return', async ({page}) => {
+  await page.clock.install();
+  await metadataOnlySpeech(page, {pending: true});
+  await expect(page.locator('.listen-status')).toHaveText('Starting audio…');
+  await page.clock.fastForward(8100);
+  await expect(page.getByRole('button', {name: 'Reload audio'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Play response', exact: true})).toBeEnabled();
+  await page.getByRole('button', {name: 'Reload audio'}).click();
+  expect(await page.evaluate(() => window.mediaAttempts)).toBe(2);
+  await page.evaluate(() => resetAgentState());
+  await page.clock.fastForward(10000);
+  await expect(page.locator('audio')).toHaveCount(0);
+});
+
 test('earlier chapter notice follows unambiguous replacements without moving drafts', async ({page}) => {
   await fixture(page);
   await page.setViewportSize({width: 390, height: 844});

@@ -16,6 +16,12 @@ without changing that feed. Choose Listen in another conversation to switch.
 - The speaker button on each response still plays it once. Doing that pauses
   the live feed so the two voices do not overlap.
 
+For a single response, **Preparing audio** means the local voice is generating
+the reading. Once the player appears, Play is available even if the browser
+has only loaded the duration. If automatic playback needs another tap, it says
+**Ready · press Play to listen**. A stalled start offers **Reload audio** after
+eight seconds; there is no need to switch away from the page.
+
 ## A separate listening window
 
 Choose **Pop out listening** (↗) beside the volume control. This opens a real

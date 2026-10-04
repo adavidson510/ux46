@@ -4531,6 +4531,7 @@ async function answerApproval(approval, decision, answers) {
    The small controls node is reused; leaving the room disposes both. */
 function clearSpeech() {
   for (const entry of state.audio.values()) {
+    entry.dispose?.();
     if (entry.audio) {
       entry.audio.pause();
       entry.audio.removeAttribute("src");
@@ -4563,13 +4564,14 @@ function speechFailure(itemId, entry, message) {
 }
 
 function audioPlayer(entry, speech, owner) {
-  const audio = el("audio", {preload: "auto", hidden: true,
-    src: agentPath(owner, speech.audio_url)});
+  const audio = el("audio", {preload: "auto", hidden: true});
   entry.audio = audio;
-  document.body.appendChild(audio);
+  let attempt = 0, waitTimer = null, disposed = false;
+  const clearWait = () => { clearTimeout(waitTimer); waitTimer = null; };
+  entry.dispose = () => { disposed = true; attempt++; clearWait(); };
   const box = el("div", {class: "speech-player", role: "group", "aria-label": "Response audio"});
   const status = el("span", {class: "listen-status", role: "status", text: "Loading audio…"});
-  const play = el("button", {class: "speech-play", type: "button", disabled: true,
+  const play = el("button", {class: "speech-play", type: "button",
     "aria-label": "Play response", title: "Play response"}, [replyIcon("play")]);
   const back = el("button", {class: "speech-skip", type: "button", text: "−10",
     "aria-label": "Back 10 seconds", title: "Back 10 seconds", disabled: true});
@@ -4588,16 +4590,38 @@ function audioPlayer(entry, speech, owner) {
     seek.setAttribute("aria-valuetext", speechTime(audio.currentTime) + " of " + speechTime(total));
     time.textContent = speechTime(audio.currentTime) + " / " + (total ? speechTime(total) : "—");
     back.disabled = forward.disabled = !total;
-    play.disabled = audio.readyState < 2;
+    // Mobile may preload metadata only until Play supplies a user gesture.
+    // Never require canplay to enable the very button that starts loading.
+    play.disabled = Boolean(audio.error);
     const label = audio.paused ? (audio.ended ? "Replay response" : "Play response") : "Pause response";
     play.setAttribute("aria-label", label); play.title = label;
     play.replaceChildren(replyIcon(audio.paused ? "play" : "pause"));
   };
   const start = async () => {
+    const run = ++attempt;
+    clearWait();
+    status.textContent = "Starting audio…";
+    retry.hidden = true;
     window.UX46ListenFeed?.pause();
     for (const other of state.audio.values()) if (other !== entry && other.audio) other.audio.pause();
-    try { await audio.play(); }
-    catch (_) { status.textContent = "Ready · press Play to listen"; sync(); }
+    waitTimer = setTimeout(() => {
+      if (disposed || run !== attempt) return;
+      status.textContent = "Audio is taking longer to load. Try Play or reload audio.";
+      retry.hidden = false;
+      sync();
+    }, 8000);
+    try {
+      await audio.play();
+      if (!disposed && run === attempt) { clearWait(); sync(); }
+    } catch (error) {
+      if (disposed || run !== attempt) return;
+      clearWait();
+      status.textContent = error.name === "NotAllowedError"
+        ? "Ready · press Play to listen"
+        : "Audio couldn’t start. Try Play or reload audio.";
+      retry.hidden = error.name === "NotAllowedError";
+      sync();
+    }
   };
   play.addEventListener("click", () => audio.paused ? void start() : audio.pause());
   const jump = value => { if (duration()) audio.currentTime = Math.max(0, Math.min(duration(), value)); sync(); };
@@ -4607,16 +4631,15 @@ function audioPlayer(entry, speech, owner) {
   speed.addEventListener("change", () => { audio.playbackRate = Number(speed.value); });
   for (const event of ["loadedmetadata", "durationchange", "timeupdate", "seeked", "play", "pause", "ended"])
     audio.addEventListener(event, sync);
-  audio.addEventListener("playing", () => { status.textContent = "Playing"; });
+  audio.addEventListener("playing", () => { clearWait(); retry.hidden = true; status.textContent = "Playing"; });
   audio.addEventListener("pause", () => { status.textContent = audio.ended ? "Finished" : "Paused"; });
   audio.addEventListener("ended", () => { status.textContent = "Finished"; });
   audio.addEventListener("waiting", () => { status.textContent = "Buffering…"; });
   const retry = el("button", {class: "linkbtn", type: "button", text: "Reload audio", hidden: true,
-    on: {click: () => { retry.hidden = true; status.textContent = "Loading audio…"; audio.load(); }}});
-  audio.addEventListener("error", () => { status.textContent = "Audio couldn’t load."; play.disabled = true; retry.hidden = false; });
-  // Listen expresses playback intent; browsers that disallow delayed playback
-  // still expose an enabled Play button rather than silently doing nothing.
-  audio.addEventListener("canplay", () => { sync(); status.textContent = "Ready"; void start(); }, {once: true});
+    on: {click: () => { audio.load(); sync(); void start(); }}});
+  audio.addEventListener("error", () => { clearWait(); status.textContent = "Audio couldn’t load."; play.disabled = true; retry.hidden = false; });
+  // Request playback directly, without waiting for preload. If the browser
+  // needs a fresh tap after synthesis, Play remains usable immediately.
   audio.addEventListener("canplay", sync);
   box.append(back, play, forward, seek, time, speed, status, retry);
   if (speech.complete === false) box.appendChild(el("span", {class: "speech-partial", text:
@@ -4624,6 +4647,9 @@ function audioPlayer(entry, speech, owner) {
   entry.node.replaceChildren(box);
   entry.node.removeAttribute("aria-busy");
   entry.phase = "ready";
+  document.body.appendChild(audio);
+  audio.src = agentPath(owner, speech.audio_url);
+  void start();
 }
 
 async function speakItem(itemId, entry) {
