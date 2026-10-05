@@ -289,42 +289,61 @@ class ConsoleService:
             return
 
     def _dispatch_admitted_queue(self, item: journal.QueuedMessage) -> None:
-        """One FIFO attempt. Ownership and approvals keep the item queued."""
+        """One FIFO attempt. Ownership and approvals keep the item queued.
+
+        `item` is a snapshot; the owner may cancel or edit it while workers
+        attach. Every write here is therefore a compare-and-set, and the
+        message only leaves after an atomic PENDING -> DISPATCHING claim at the
+        version we read. What is sent is the claimed row, never the snapshot.
+        A row that is cancelled or being edited is left exactly where it is.
+        """
+        claimed: journal.QueuedMessage | None = None
+
+        def requeue(reason: str) -> None:
+            self.journal.queue_mark(item.client_id, journal.PENDING, reason,
+                                    expect=journal.DISPATCHING if claimed else journal.PENDING)
+
         try:
             room = self.require_room(item.room)
             if not room.controllable or room.thread_id != item.thread_id:
-                self.journal.queue_mark(item.client_id, journal.PENDING, "native target is unavailable")
+                requeue("native target is unavailable")
                 return
             if self.workers.pending_requests(item.thread_id):
-                self.journal.queue_mark(item.client_id, journal.PENDING, "waiting for a native approval")
+                requeue("waiting for a native approval")
                 return
             if item.thread_id not in self.workers.attached():
                 remembered = next((saved for saved in self.journal.remembered_owned()
                                    if saved["thread_id"] == item.thread_id and saved["room"] == item.room), None)
                 if not remembered:
-                    self.journal.queue_mark(item.client_id, journal.PENDING,
-                                            "Continue here before this message can dispatch")
+                    requeue("Continue here before this message can dispatch")
                     return
                 # Startup recovery: a remembered conversation gets its own
                 # process back, and only that conversation.
                 self.workers.attach(item.thread_id, item.room)
-            self.journal.queue_mark(item.client_id, journal.DISPATCHING)
-            attachments = self.native_attachments(room, item.attachments)
-            result = self.writer_for(item.thread_id).send_input(
-                item.thread_id, item.body, item.client_id, attachments)
+            claimed = self.journal.queue_mark(item.client_id, journal.DISPATCHING,
+                                              expect=journal.PENDING, version=item.version)
+            if claimed is None:
+                return  # cancelled, edited or claimed since it was read: send nothing
+            attachments = self.native_attachments(room, claimed.attachments)
+            result = self.writer_for(claimed.thread_id).send_input(
+                claimed.thread_id, claimed.body, claimed.client_id, attachments)
         except native.UncertainDelivery as exc:
             self.journal.settle(item.client_id, journal.UNCERTAIN, detail=str(exc))
-            self.journal.queue_mark(item.client_id, journal.UNCERTAIN, "delivery is unknown; UX46 will not replay it")
+            self.journal.queue_mark(item.client_id, journal.UNCERTAIN, "delivery is unknown; UX46 will not replay it",
+                                    expect=journal.DISPATCHING)
         except native.NativeError as exc:
             if exc.code in {"held_elsewhere", "ownership_unavailable", "not_owned", "connection_busy"}:
-                self.journal.queue_mark(item.client_id, journal.PENDING, str(exc))
+                requeue(str(exc))
                 return
-            self.journal.settle(item.client_id, journal.FAILED, detail=str(exc))
-            self.journal.queue_mark(item.client_id, journal.FAILED, str(exc))
+            # Before the claim the owner may have cancelled or reopened it;
+            # only a row this attempt still holds is failed.
+            if self.journal.queue_mark(item.client_id, journal.FAILED, str(exc),
+                                       expect=journal.DISPATCHING if claimed else journal.PENDING):
+                self.journal.settle(item.client_id, journal.FAILED, detail=str(exc))
         else:
             self.journal.settle(item.client_id, journal.ACCEPTED,
                                 native_turn_id=result.get("turn_id", ""), mode=result.get("mode", ""))
-            self.journal.queue_mark(item.client_id, journal.ACCEPTED)
+            self.journal.queue_mark(item.client_id, journal.ACCEPTED, expect=journal.DISPATCHING)
             self.events.publish({"type": "queued_message", "room": item.room,
                                  "client_id": item.client_id, "state": journal.ACCEPTED})
 
