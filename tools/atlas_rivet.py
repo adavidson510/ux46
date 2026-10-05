@@ -2620,6 +2620,12 @@ class RivetService:
 class RivetHandler(BaseHTTPRequestHandler):
     server_version = "Ux46Rivet/1.0"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     protocol_version = "HTTP/1.1"
     service: RivetService
 

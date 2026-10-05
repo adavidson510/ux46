@@ -841,6 +841,18 @@ class QueueTest(RivetAdapterTest):
         self.assertEqual(payload["error"], "queue_stale")
 
 
+def assert_stalled_client_is_dropped(test, server, port) -> None:
+    """A client that stops mid-request loses its handler thread on timeout."""
+    import socket as _socket
+    test.assertGreater(server.RequestHandlerClass.timeout, 30)
+    server.RequestHandlerClass.timeout = 0.5
+    with _socket.create_connection(("127.0.0.1", port), timeout=10) as stalled:
+        stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        started = time.time()
+        test.assertEqual(stalled.recv(1024), b"")  # closed by the server
+        test.assertLess(time.time() - started, 8)
+
+
 class CliTransportTest(unittest.TestCase):
     def test_an_argv_too_large_for_exec_is_a_definite_gateway_error(self) -> None:
         # The CLI carries params in one argv element; past the kernel's
@@ -918,6 +930,18 @@ class BoundaryTest(RivetAdapterTest):
                                            headers={"Host": "127.0.0.1:1"})
         self.assertEqual((status, payload["error"]), (403, "bad_host"))
         self.assertEqual(self.harness.calls("chat.send"), [])
+
+    def test_a_stalled_client_is_dropped(self) -> None:
+        assert_stalled_client_is_dropped(self, self.harness.server, self.harness.port)
+
+    def test_a_request_without_a_host_is_refused(self) -> None:
+        conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
+        conn.putrequest("GET", "/api/bootstrap", skip_host=True)
+        conn.endheaders()
+        response = conn.getresponse()
+        payload = json.loads(response.read())
+        conn.close()
+        self.assertEqual((response.status, payload["error"]), (403, "bad_host"))
 
     def test_loopback_names_and_configured_hosts_are_answered(self) -> None:
         port = self.harness.port

@@ -1263,6 +1263,18 @@ class DraftTest(HermesAdapterTest):
         self.assertEqual(payload["body"], "")
 
 
+def assert_stalled_client_is_dropped(test, server, port) -> None:
+    """A client that stops mid-request loses its handler thread on timeout."""
+    import socket as _socket
+    test.assertGreater(server.RequestHandlerClass.timeout, 30)
+    server.RequestHandlerClass.timeout = 0.5
+    with _socket.create_connection(("127.0.0.1", port), timeout=10) as stalled:
+        stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        started = time.time()
+        test.assertEqual(stalled.recv(1024), b"")  # closed by the server
+        test.assertLess(time.time() - started, 8)
+
+
 class AttachmentTest(HermesAdapterTest):
     PNG = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
            + bytes.fromhex("0000000100000001080600000" "01f15c489")
@@ -1388,6 +1400,20 @@ class AttachmentTest(HermesAdapterTest):
 
 
 class RequestBoundaryTest(HermesAdapterTest):
+    def test_a_request_without_a_host_is_refused(self) -> None:
+        conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
+        conn.putrequest("GET", "/api/bootstrap", skip_host=True)
+        conn.endheaders()
+        response = conn.getresponse()
+        payload = json.loads(response.read())
+        conn.close()
+        self.assertEqual(response.status, 403)
+        self.assertEqual(payload["error"], "bad_host")
+        self.assertNotIn("csrf", payload)
+
+    def test_a_stalled_client_is_dropped(self) -> None:
+        assert_stalled_client_is_dropped(self, self.harness.server, self.harness.port)
+
     def test_a_mutation_without_the_csrf_token_is_refused(self) -> None:
         conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
         conn.request("POST", f"/api/room/{self.linked_room}/continue", b"{}",

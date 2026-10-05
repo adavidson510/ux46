@@ -1773,6 +1773,12 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = f"{ADAPTER_NAME}/{ADAPTER_VERSION}"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     service: ClaudeService = None       # bound per server
 
     def log_message(self, fmt, *args):
@@ -1872,7 +1878,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
-            self._check_host()
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
             parsed = urlparse(self.path)
             path = parsed.path

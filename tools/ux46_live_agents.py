@@ -71,8 +71,15 @@ class LiveAgents:
                 wanted = boot.get('csrf') if status == 200 else None
                 if not isinstance(wanted, str) or not wanted or not secrets.compare_digest(wanted, handler.headers.get('X-Atlas-CSRF', '')):
                     self._reject(handler, 403, 'bad_csrf', 'Refresh this page to reconnect.'); return True
-            length = int(handler.headers.get('Content-Length') or 0)
+            raw_length = (handler.headers.get('Content-Length') or '0').strip()
+            # Exact, non-negative framing only: a negative length would make
+            # rfile.read() wait for the client to close the socket.
+            if not raw_length.isdigit():
+                handler.close_connection = True
+                self._reject(handler, 400, 'bad_length', 'The request length was not valid.'); return True
+            length = int(raw_length)
             if length > remote.MAX_PROXY_BODY:
+                handler.close_connection = True
                 self._reject(handler, 413, 'too_large', 'That attachment is too large.'); return True
             body = handler.rfile.read(length) if length else None
             if body is not None and len(body) != length:

@@ -2658,6 +2658,12 @@ class HermesService:
 class HermesHandler(BaseHTTPRequestHandler):
     server_version = "Ux46Hermes/1.0"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     protocol_version = "HTTP/1.1"
     service: HermesService
 
@@ -2769,8 +2775,7 @@ class HermesHandler(BaseHTTPRequestHandler):
             raise AdapterError(HTTPStatus.FORBIDDEN, "denied",
                                "this adapter answers loopback only")
         host = (self.headers.get("Host") or "").strip().casefold()
-        if not host:
-            return
+        # A request with no Host names nobody; it is refused like a foreign one.
         allowed = self.service.allowed_hosts
         if host.rsplit(":", 1)[0].strip("[]") in allowed or host in allowed:
             return
@@ -2809,8 +2814,14 @@ class HermesHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
-            self._check_host()
             parsed = urlparse(self.path)
             path = parsed.path
             prefix = self.service.config.path_prefix

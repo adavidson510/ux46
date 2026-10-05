@@ -926,6 +926,16 @@ class Boundary(AdapterCase):
         status, _raw, _headers = self._raw(f"/api/atlas/files/{record['id']}/preview")
         self.assertEqual(status, 404)
 
+    def test_a_stalled_client_is_dropped(self):
+        import socket
+        self.assertGreater(self.server.RequestHandlerClass.timeout, 30)
+        self.server.RequestHandlerClass.timeout = 0.5
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as stalled:
+            stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            started = time.time()
+            self.assertEqual(stalled.recv(1024), b"")
+            self.assertLess(time.time() - started, 8)
+
     def test_reading_needs_no_token(self):
         status, _ = self.ask("GET", "/api/workspace", csrf="")
         self.assertEqual(status, 200)
