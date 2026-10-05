@@ -542,6 +542,35 @@ class ClientScopingTests(unittest.TestCase):
         self.assertIn('return apiUrl("/api/atlas/files/"', APP_JS)
 
 
+class RelayedContentTypeTests(unittest.TestCase):
+    """A remote's Content-Type is never trusted on this origin (S19/S06)."""
+
+    def relay(self, suffix: str, content_type: str, body: bytes = b"<script>1</script>") -> str:
+        from types import SimpleNamespace
+
+        console = SimpleNamespace(request=lambda *a, **k: (
+            200, {"Content-Type": content_type}, body))
+        agent = SimpleNamespace(id="agent2", is_local=False, console=console,
+                                note_available=lambda: None,
+                                note_unavailable=lambda detail: None)
+        result = remote.AgentRegistry.proxy(None, agent, "GET", suffix, "",
+                                            headers={}, body=None)
+        return result.content_type
+
+    def test_a_relayed_file_gets_the_served_type(self):
+        for declared, served in (("text/html", "application/octet-stream"),
+                                 ("image/svg+xml", "application/octet-stream"),
+                                 ("image/png", "image/png")):
+            self.assertEqual(self.relay("/api/atlas/files/abc/download", declared), served)
+
+    def test_other_operations_are_json_audio_or_bytes(self):
+        self.assertEqual(self.relay("/api/rooms", "text/html; charset=utf-8"),
+                         "application/octet-stream")
+        self.assertEqual(self.relay("/api/rooms", "application/json; charset=utf-8", b"{}"),
+                         "application/json; charset=utf-8")
+        self.assertEqual(self.relay("/api/audio/" + "a" * 32 + ".wav", "audio/wav"), "audio/wav")
+
+
 if __name__ == "__main__":
     os.environ.setdefault("ATLAS_FIXTURE_MODE", "normal")
     unittest.main()

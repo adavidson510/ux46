@@ -11,6 +11,14 @@ from http.client import HTTPConnection
 from pathlib import Path
 import atlas_remote as remote
 
+# The gateway's own page policy (ux46_access_gateway.CONSOLE_CSP), defined
+# here rather than imported: the gateway runs as __main__ and imports this
+# module, so importing it back would load a second copy of the gateway.
+# tests/test_ux46_live_agents.py asserts the two stay identical.
+CONSOLE_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+               "media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; "
+               "frame-ancestors 'none'; base-uri 'none'")
+
 
 class LiveAgents:
     def __init__(self, config_path):
@@ -123,6 +131,10 @@ class LiveAgents:
         handler.send_header('Content-Length', str(len(body)))
         handler.send_header('Cache-Control','no-store')
         handler.send_header('X-Content-Type-Options','nosniff')
+        # Relayed agent bytes are served on the gateway origin: never frameable,
+        # and under the console's own CSP whatever the remote answered (S19).
+        handler.send_header('X-Frame-Options','DENY')
+        handler.send_header('Content-Security-Policy',CONSOLE_CSP)
         for key,value in headers: handler.send_header(key,value)
         if handler.close_connection:handler.send_header('Connection','close')
         handler.end_headers()

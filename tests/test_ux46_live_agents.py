@@ -68,6 +68,14 @@ class LiveCase(unittest.TestCase):
     def test_arbitrary_route_refused(self):
         self.assertEqual(self.ask(path='/api/agents/cp/api/test-thread')[0],400)
         self.assertFalse(self.adapter.seen)
+    def test_relayed_agent_bytes_cannot_be_framed_or_run(self):
+        # S19: agent answers are served on the gateway origin with the
+        # gateway's own CSP and frame refusal, whatever the remote sent.
+        self.assertEqual(live.CONSOLE_CSP, gate.CONSOLE_CSP)
+        status,headers,_=self.ask(path='/api/agents/cp/api/bootstrap')
+        self.assertEqual(status,200)
+        self.assertEqual(headers.get('X-Frame-Options'),'DENY')
+        self.assertEqual(headers.get('Content-Security-Policy'),gate.CONSOLE_CSP)
 
 class _StubHandler:
     """Just enough of a request handler to drive LiveAgents.handle directly."""

@@ -43,6 +43,8 @@ from http.client import HTTPConnection, HTTPException
 from pathlib import Path
 from urllib.parse import urlencode
 
+import atlas_files as files
+
 DEFAULT_LOCAL_AGENT = "local"
 CONFIG_SCHEMA_VERSION = 1
 
@@ -857,6 +859,17 @@ class AgentRegistry:
                 # The browser keeps using this console's token for everything.
                 payload = strip_remote_csrf(payload)
             payload = rewrite_artifact_urls(payload, agent.id)
+        # The remote's Content-Type is relayed on this console's origin, so it
+        # is never trusted as given (S19/S06): a stored file gets the same
+        # served_mime() narrowing a local download gets, and every other
+        # operation may only be JSON or audio; anything else is bytes.
+        base = content_type.split(";")[0].strip().casefold()
+        if suffix.startswith("/api/atlas/files/"):
+            content_type = files.served_mime(content_type)
+        elif base.startswith("audio/") and re.fullmatch(r"audio/[a-z0-9.+-]+", base):
+            content_type = base
+        elif base != "application/json":
+            content_type = "application/octet-stream"
         extra = tuple((name, response_headers[name]) for name in FORWARDED_RESPONSE_HEADERS
                       if response_headers.get(name))
         return ProxiedResponse(status, payload, content_type, extra)
