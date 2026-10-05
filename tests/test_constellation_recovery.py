@@ -60,5 +60,28 @@ class Recovery(unittest.TestCase):
         finally:
             second.send_signal(signal.SIGTERM);second.communicate(timeout=5)
         self.assertEqual(second.returncode,0);self.assertFalse(self.path.exists())
+    def test_the_socket_principal_is_never_the_human_by_name(self):
+        # S24: --local-principal names the socket client; even 'user' (the
+        # workspace's human name) must not make captures human-confirmed.
+        db=self.root/'knowledge.sqlite3'
+        proc=subprocess.Popen([sys.executable,str(Path(__file__).resolve().parents[1]/'tools/constellation_server.py'),
+                               '--db',str(db),'--socket',str(self.path),'--local-principal','user'],
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        self.addCleanup(lambda: proc.kill() if proc.poll() is None else None)
+        if not select.select([proc.stdout],[],[],5)[0]:self.fail('Service did not start before deadline')
+        self.assertIn(b'Constellation ready',proc.stdout.readline())
+        try:
+            args=lesson();args['record']['origin']='human-direction'
+            conn=UnixConnection(self.path)
+            try:
+                conn.request('POST','/v1/call',json.dumps({'operation':'capture','args':args}))
+                response=conn.getresponse();response.read()
+                self.assertEqual(response.status,200)
+            finally:conn.close()
+        finally:
+            proc.send_signal(signal.SIGTERM);proc.communicate(timeout=5)
+        stored=Store(db).get(Principal('owner',('*',),True),'method')
+        record=stored.get('record',stored)
+        self.assertEqual(record['provenance'],'agent-asserted')
 
 if __name__=='__main__':unittest.main()

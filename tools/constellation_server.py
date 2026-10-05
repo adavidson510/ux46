@@ -105,7 +105,11 @@ def main():
         try:server=UnixServer(str(path),Handler)
         except BaseException:lease.close();raise
         socket_identity=path.lstat()
-        server.local_principal=Principal(args.local_principal,('*',),True)
+        # The socket is a local client (the workspace or an agent CLI), not proof
+        # of the human at this machine, so attribution never comes from the
+        # --local-principal name: an operator naming it 'user' must not turn
+        # agent captures into human-confirmed ones (S24).
+        server.local_principal=Principal(args.local_principal,('*',),True,human=False)
     else:
         if not args.grants:p.error('--grants is required for HTTP')
         server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
