@@ -28,6 +28,7 @@ answered by the local agent.
 
 from __future__ import annotations
 
+import atexit
 import collections
 import json
 import logging
@@ -39,6 +40,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import weakref
 from http.client import HTTPConnection, HTTPException
 from pathlib import Path
 from urllib.parse import urlencode
@@ -162,20 +164,52 @@ class ProxiedResponse:
 # the SSH tunnel
 # ---------------------------------------------------------------------------
 
+# sun_path is 104 bytes on macOS (108 on Linux), terminator included. A root
+# is only used if root + "/ux46-ssh-XXXXXXXX/fwd.sock" stays within this many
+# bytes, so bind() never fails on a long $TMPDIR (macOS's /var/folders/...).
+SOCKET_PATH_BUDGET = 100
+_SOCKET_SUFFIX = "/ux46-ssh-XXXXXXXX/fwd.sock"
+
+
+def _socket_root_fits(root: str | Path) -> bool:
+    return len(str(root).encode()) + len(_SOCKET_SUFFIX) <= SOCKET_PATH_BUDGET
+
+
 def _private_runtime_root() -> Path:
     """Where per-tunnel private directories are made.
 
     ``$XDG_RUNTIME_DIR`` is already per-user and 0700 on systemd hosts; the
-    temporary directory is the portable fallback. Either way the forward's
-    socket lives one level further down, in a directory this process creates
-    with mode 0700, so the parent's permissions are not what protects it.
+    temporary directory is the portable fallback, then /tmp, then a 0700
+    ``~/.ux46/run`` - the first whose socket path fits sun_path (S27). Either
+    way the forward's socket lives one level further down, in a directory this
+    process creates with mode 0700, so the parent's permissions are not what
+    protects it.
     """
 
     runtime = os.environ.get("XDG_RUNTIME_DIR") or ""
-    # sun_path is ~104 bytes on macOS; leave room for "/ux46-ssh-XXXXXXXX/fwd.sock".
-    if runtime and len(runtime.encode()) <= 64 and Path(runtime).is_dir():
+    if runtime and _socket_root_fits(runtime) and Path(runtime).is_dir():
         return Path(runtime)
-    return Path(tempfile.gettempdir())
+    for candidate in (tempfile.gettempdir(), "/tmp"):
+        if _socket_root_fits(candidate) and Path(candidate).is_dir():
+            return Path(candidate)
+    own = Path.home() / ".ux46" / "run"
+    own.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(own, 0o700)
+    return own
+
+
+# Every tunnel this process opened, so interpreter exit stops each ssh child
+# and removes its private directory instead of leaving them behind (S27).
+_OPEN_TUNNELS: "weakref.WeakSet[SshTunnel]" = weakref.WeakSet()
+
+
+@atexit.register
+def _close_open_tunnels() -> None:
+    for tunnel in list(_OPEN_TUNNELS):
+        try:
+            tunnel.close()
+        except Exception:  # noqa: BLE001 - exit cleanup is best effort
+            pass
 
 
 class UnixHTTPConnection(HTTPConnection):
@@ -260,6 +294,7 @@ class SshTunnel:
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._socket = ""
+        _OPEN_TUNNELS.add(self)
 
     @property
     def target(self) -> str:

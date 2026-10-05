@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import unittest
@@ -84,6 +85,45 @@ class PrivateSocketForwardTests(unittest.TestCase):
         for path in ("relative.sock", "/tmp/../a.sock", "/tmp/a:123", "/tmp/a\n.sock", "/" + "a" * 101):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 remote.SshTunnel(host="server", remote_port=8878, remote_socket=path)
+
+
+class SocketRootTests(unittest.TestCase):
+    """The forward's socket path must fit sun_path, and exit cleans up (S27)."""
+
+    def setUp(self):
+        from tempfile import TemporaryDirectory
+        from unittest import mock
+
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.mock = mock
+        patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": ""})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_long_temp_dir_falls_back_to_tmp(self):
+        long_tmp = Path(self.tmp.name) / ("x" * 90)
+        long_tmp.mkdir()
+        with self.mock.patch.object(remote.tempfile, "gettempdir", return_value=str(long_tmp)):
+            root = remote._private_runtime_root()
+        self.assertEqual(root, Path("/tmp"))
+        self.assertTrue(remote._socket_root_fits(root))
+
+    def test_with_no_short_temp_dir_a_private_home_dir_is_used(self):
+        home = Path(self.tmp.name)
+        with self.mock.patch.object(remote, "_socket_root_fits",
+                                    side_effect=lambda root: str(root).startswith(str(home))), \
+                self.mock.patch.object(remote.Path, "home", return_value=home):
+            root = remote._private_runtime_root()
+        self.assertEqual(root, home / ".ux46" / "run")
+        self.assertEqual(stat.S_IMODE(os.stat(root).st_mode), 0o700)
+
+    def test_exit_cleanup_removes_each_tunnel_s_private_dir(self):
+        tunnel = remote.SshTunnel(host="server", remote_port=8878, runtime_root=self.tmp.name)
+        private = tunnel._private_dir()
+        self.assertTrue(private.is_dir())
+        remote._close_open_tunnels()
+        self.assertFalse(private.exists())
 
 
 class ProxyHarness:
