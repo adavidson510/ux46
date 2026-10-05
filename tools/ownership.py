@@ -351,8 +351,21 @@ def write_receipt(project_root: Path, scope: Scope, receipt: dict[str, Any]) -> 
     return path
 
 
-def load_receipt(project_root: Path, relative: str) -> dict[str, Any]:
-    path = Path(project_root) / relative
+def load_receipt(
+    project_root: Path, relative: str, scope: Scope | None = None
+) -> dict[str, Any]:
+    # ``relative`` comes from the state file's last_receipt, which is data,
+    # not a trusted path. Resolve it (symlinks included) and require it to be
+    # a file inside the receipt directory: the scope's own, when known.
+    receipts = (
+        scope.receipt_dir(project_root) if scope is not None
+        else Path(project_root) / "ownership" / "receipts"
+    ).resolve()
+    path = (Path(project_root) / relative).resolve()
+    if Path(relative).is_absolute() or not path.is_relative_to(receipts) or path == receipts:
+        raise OwnershipError(
+            f"Ownership receipt {relative!r} is outside the receipt directory {receipts}"
+        )
     if not path.is_file():
         raise OwnershipError(f"Ownership receipt missing: {path}")
     try:
@@ -378,7 +391,7 @@ def verify_transfer_receipt(
         raise OwnershipError(
             f"No ownership receipt is recorded for {scope.label}; there is no accepted transfer"
         )
-    receipt = load_receipt(project_root, relative)
+    receipt = load_receipt(project_root, relative, scope)
     if receipt.get("identity") != scope.identity:
         raise OwnershipError(f"Ownership receipt {relative} names a different scope")
     if receipt.get("event") != "accept":

@@ -877,18 +877,43 @@ def pull_into_cache(
             "refusing to cache a contradictory version."
         )
 
+    # The version manifest lives in a peer-writable store, so it names roles,
+    # never paths. Cache filenames are derived here from the role, mirroring
+    # publish's two-entry allow-list exactly; a manifest that asks for any
+    # other role, repeats a role, or names a different file is refused before
+    # a single byte is cached.
+    cache_names = {"record": f"{session}.md", "origins": f"{session}.origins.json"}
+    items = version.get("items", [])
+    if not isinstance(items, list):
+        raise StoreError(f"Central version manifest for {identity} has no item list")
     verified: list[dict[str, Any]] = []
     payloads: dict[str, bytes] = {}
-    for item in version.get("items", []):
-        digest = str(item.get("sha256", ""))
-        payloads[item["role"]] = verified_object(namespace, digest, f"{identity} {item['role']}")
-        if len(payloads[item["role"]]) != item.get("size"):
+    for item in items:
+        role = item.get("role") if isinstance(item, dict) else None
+        if not isinstance(role, str) or role not in cache_names:
             raise StoreError(
-                f"Central object size mismatch for {identity} {item['role']}; nothing was cached."
+                f"Central version manifest for {identity} lists an unknown role {role!r}; "
+                "nothing was cached."
+            )
+        if role in payloads:
+            raise StoreError(
+                f"Central version manifest for {identity} repeats role {role!r}; nothing was cached."
+            )
+        filename = cache_names[role]
+        if item.get("filename", filename) != filename:
+            raise StoreError(
+                f"Central version manifest for {identity} names {item.get('filename')!r} for "
+                f"{role}; expected {filename}. Nothing was cached."
+            )
+        digest = str(item.get("sha256", ""))
+        payloads[role] = verified_object(namespace, digest, f"{identity} {role}")
+        if len(payloads[role]) != item.get("size"):
+            raise StoreError(
+                f"Central object size mismatch for {identity} {role}; nothing was cached."
             )
         verified.append({
-            "role": item["role"],
-            "filename": item["filename"],
+            "role": role,
+            "filename": filename,
             "sha256": digest,
             "size": item["size"],
             "central_object": item["central_object"],
@@ -905,11 +930,16 @@ def pull_into_cache(
     cache_directory = cache_root / collective / project / session
     written: list[str] = []
     for role, data in payloads.items():
-        name = next(entry["filename"] for entry in verified if entry["role"] == role)
-        target = cache_directory / name
+        target = cache_directory / cache_names[role]
         if target.is_symlink():
             raise StoreError(
                 f"Read cache path is a symlink; refusing to write through it: {target}"
+            )
+        # Belt and braces: even a derived name must land directly in this
+        # room's cache directory, never beside or above it.
+        if target.resolve().parent != cache_directory.resolve():
+            raise StoreError(
+                f"Read cache path escapes {cache_directory}; refusing to write {target}"
             )
         atomic_write_bytes(target, data, mode=0o600)
         written.append(str(target))
