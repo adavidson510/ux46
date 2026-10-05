@@ -75,8 +75,8 @@ class PrivateSocketForwardTests(unittest.TestCase):
     def test_private_socket_forward_retains_logical_http_port(self):
         tunnel = remote.SshTunnel(host="server", user="agent2", remote_port=8878,
                                   remote_socket="/home/agent2/.local/state/ux46/a.sock")
-        argv = tunnel._argv(12345)
-        self.assertIn("127.0.0.1:12345:/home/agent2/.local/state/ux46/a.sock", argv)
+        argv = tunnel._argv("/run/ux46-ssh-x/fwd.sock")
+        self.assertIn("/run/ux46-ssh-x/fwd.sock:/home/agent2/.local/state/ux46/a.sock", argv)
         self.assertEqual(tunnel.remote_port, 8878)
         self.assertEqual(argv[-1], "agent2@server")
 
