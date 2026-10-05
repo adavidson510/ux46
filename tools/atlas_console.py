@@ -1486,6 +1486,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 "refresh_safety_unknown": HTTPStatus.CONFLICT,
                 "release_unconfirmed": HTTPStatus.CONFLICT,
                 "agent_unsupported": HTTPStatus.BAD_REQUEST,
+                "request_kind_mismatch": HTTPStatus.BAD_REQUEST,
                 "read_only_runtime": HTTPStatus.CONFLICT,
                 "runtime_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
                 "uncertain": HTTPStatus.ACCEPTED,

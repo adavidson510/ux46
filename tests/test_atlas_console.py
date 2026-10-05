@@ -1017,6 +1017,34 @@ class ApprovalTests(unittest.TestCase):
         finally:
             h.close()
 
+    def test_answer_kind_comes_from_the_pending_request(self):
+        # The kind picks the response body; a page claiming "permissions" for
+        # a command approval must not turn "accept" into a permissions grant.
+        h = ConsoleHarness(mode="approval")
+        try:
+            h.start_runtime()
+            h.call("POST", "/api/room/fixture/console-work/continue", body={})
+            h.call("POST", "/api/room/fixture/console-work/submit",
+                   body={"client_id": "kind1111bbbb2222", "body": "run something"})
+            request = _wait_for(lambda: h.call("GET", "/api/approvals")[1]["approvals"])[0]
+            self.assertEqual(request["kind"], "command")
+            for claimed in ("permissions", "user_input", "command_legacy"):
+                status, payload = h.call("POST", "/api/approvals/answer",
+                                         body={"key": request["key"], "kind": claimed, "decision": "accept"})
+                self.assertEqual(status, 400, claimed)
+                self.assertEqual(payload["error"], "request_kind_mismatch")
+            self.assertEqual(len(h.call("GET", "/api/approvals")[1]["approvals"]), 1)
+            sessions = h.worker_sessions()
+            with patch.object(sessions.server, "answer_request",
+                                   wraps=sessions.server.answer_request) as sent:
+                status, payload = h.call("POST", "/api/approvals/answer",
+                                         body={"key": request["key"], "decision": "accept"})
+            self.assertEqual(status, 200)
+            self.assertEqual(payload["answered"]["kind"], "command")
+            sent.assert_called_once_with(request["key"], {"decision": "accept"})
+        finally:
+            h.close()
+
     def test_user_input_question_round_trip(self):
         h = ConsoleHarness(mode="question")
         try:
