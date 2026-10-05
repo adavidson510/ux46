@@ -546,15 +546,30 @@ class StateReader:
     def __init__(self, path: Path):
         self.path = Path(path)
         self._local = threading.local()
+        # The outcome of the most recent read, for status displays. It is not
+        # sticky: the next successful read clears it, so one transient error
+        # (a busy lock, a file being replaced) never blanks history until a
+        # restart. `call_error` is the same outcome for this thread's last
+        # read, for a caller deciding about the rows it just got.
         self.error = ""
-        try:
-            self._connect().execute("SELECT 1 FROM sessions LIMIT 1").fetchone()
-        except Exception as exc:
-            self.error = f"Hermes state.db could not be read ({exc})"
+        self._query("SELECT 1 FROM sessions LIMIT 1")
 
     @property
     def available(self) -> bool:
         return not self.error
+
+    @property
+    def call_error(self) -> str:
+        return getattr(self._local, "error", "")
+
+    def _drop_connection(self) -> None:
+        conn = getattr(self._local, "conn", None)
+        self._local.conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _connect(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
@@ -565,13 +580,19 @@ class StateReader:
         return conn
 
     def _query(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
-        if self.error:
-            return []
         try:
-            return self._connect().execute(sql, args).fetchall()
+            rows = self._connect().execute(sql, args).fetchall()
         except Exception as exc:
-            self.error = f"Hermes state.db could not be read ({exc})"
+            # Reconnect on the next read: a handle that failed (or was opened
+            # before the file was replaced) is not reused.
+            self._drop_connection()
+            message = f"Hermes state.db could not be read ({exc})"
+            self._local.error = message
+            self.error = message
             return []
+        self._local.error = ""
+        self.error = ""
+        return rows
 
     # -- sessions ----------------------------------------------------------
     def catalog_rows(self, limit: int, include_derived: bool) -> list[dict]:
@@ -1609,15 +1630,15 @@ class HermesService:
             except ValueError:
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_cursor",
                                    "a history cursor is a message id this adapter issued")
-        if not self.state.available:
+        rows = self.state.messages(room.session_id, limit=size, before_id=before)
+        if self.state.call_error:
             return {
                 "room": room.id, "items": [], "complete": False,
                 "unavailable": True, "retryable": True,
                 "error": "state_unreadable",
-                "message": self.state.error or "Hermes state.db could not be read",
+                "message": self.state.call_error,
                 "source": "hermes state.db (read-only)",
             }
-        rows = self.state.messages(room.session_id, limit=size, before_id=before)
         items = project_messages(rows, room.session_id)
         tail_items: list[dict] = []
         if not before:
@@ -1643,12 +1664,12 @@ class HermesService:
 
     def search_history(self, room: Room, query: str, kinds: tuple[str, ...],
                        limit: int) -> dict:
-        if not self.state.available:
-            return {"room": room.id, "query": query, "hits": [], "complete": False,
-                    "unavailable": True, "retryable": True,
-                    "message": self.state.error}
         rows, capped = self.state.search(room.session_id, query,
                                          max(1, min(int(limit), 200)) * 4)
+        if self.state.call_error:
+            return {"room": room.id, "query": query, "hits": [], "complete": False,
+                    "unavailable": True, "retryable": True,
+                    "message": self.state.call_error}
         items = project_messages(sorted(rows, key=lambda r: int(r["id"])), room.session_id)
         hits = []
         for item in reversed(items):

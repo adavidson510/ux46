@@ -1420,7 +1420,11 @@ class RefreshTest(HermesAdapterTest):
 class DegradedStateTest(HermesAdapterTest):
     def test_an_unreadable_database_makes_everything_unverified(self) -> None:
         service = self.harness.service
-        service.state.error = "state.db could not be read (simulated)"
+        # Point the reader at a file that is not there: every read fails, on
+        # every thread, for as long as it stays that way.
+        real_path = service.state.path
+        service.state.path = real_path.with_name("missing-state.db")
+        service.state._drop_connection()
         service.catalog.refresh(force=True)
         _, detail = self.harness.get(f"/api/room/{self.linked_room}")
         self.assertEqual(detail["ownership"]["state"], "unknown")
@@ -1435,6 +1439,27 @@ class DegradedStateTest(HermesAdapterTest):
         status, _ = self.harness.post(f"/api/room/{self.linked_room}/continue")
         self.assertEqual(status, 409)
         self.assertEqual(self.harness.calls("session.resume"), [])
+
+    def test_one_failed_read_does_not_blank_history_until_restart(self) -> None:
+        state = self.harness.service.state
+        _, before = self.harness.get(f"/api/room/{self.linked_room}/history")
+        self.assertFalse(before["unavailable"])
+        self.assertTrue(before["items"])
+        # A transient failure on this thread's handle (e.g. a lock).
+        conn = state._connect()
+        state._local.conn = sqlite3.connect(":memory:")  # no `messages` table
+        conn.close()
+        self.assertEqual(state.message_count("anything"), 0)
+        self.assertTrue(state.error)
+        self.assertTrue(state.call_error)
+        # The failed handle is dropped and the next read reconnects; both the
+        # shared status and the per-call outcome clear on success.
+        self.assertGreaterEqual(len(state.catalog_rows(10, True)), 1)
+        self.assertEqual(state.error, "")
+        self.assertEqual(state.call_error, "")
+        _, after = self.harness.get(f"/api/room/{self.linked_room}/history")
+        self.assertFalse(after["unavailable"])
+        self.assertEqual(len(after["items"]), len(before["items"]))
 
 
 if __name__ == "__main__":
