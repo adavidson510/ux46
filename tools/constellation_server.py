@@ -38,7 +38,9 @@ class Handler(BaseHTTPRequestHandler):
                 found=next((p for p in config['principals'] if p.get('enabled',True)
                             and hmac.compare_digest(p['token_sha256'],token_hash)),None)
                 if not found:raise PermissionError('Authentication refused')
-                principal=Principal(found['name'],tuple(found['projects']),found.get('write',False))
+                # A bearer grant is a remote client, never the human at this machine,
+                # whatever name an operator gave it.
+                principal=Principal(found['name'],tuple(found['projects']),found.get('write',False),human=False)
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=16000:raise ValueError('Request must be under 16 KB')
             payload=json.loads(self.rfile.read(length))

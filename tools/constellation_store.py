@@ -437,8 +437,9 @@ class Store:
         with self.db() as db:
             tables={t:[dict(r) for r in db.execute('SELECT * FROM '+t)] for t in
                     ('records','events','requests','feedback','measurements','metadata')}
-        with Path(path).open('xb') as out:
-            os.chmod(path,0o600)
+        # Created 0600 in one step: a chmod after open leaves a window in
+        # which another account could open the full export under umask 022.
+        with os.fdopen(os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600),'wb') as out:
             for table,rows in tables.items():
                 for row in rows:out.write(encoded({'schema':1,'table':table,'row':row})+b'\n')
         return {'sha256':hashlib.sha256(Path(path).read_bytes()).hexdigest(),'bytes':Path(path).stat().st_size}
@@ -447,6 +448,9 @@ class Store:
         dest=Path(destination)
         if dest.exists():raise Conflict('Backup destination already exists')
         dest.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        # Reserve the file 0600 before sqlite writes the copy into it, so the
+        # backup is never readable by other accounts, even briefly.
+        os.close(os.open(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600))
         target=sqlite3.connect(dest)
         try:
             with self.db() as db:db.backup(target)
