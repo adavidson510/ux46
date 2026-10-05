@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import json
 import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -311,6 +314,62 @@ class AtlasStudioTests(unittest.TestCase):
                 self.assertIn("fake codex ready", snapshot["content"])
             finally:
                 manager.close(launched["panel_id"])
+
+    def test_http_answers_only_its_own_loopback_origin(self) -> None:
+        # DNS rebinding reaches this socket under a foreign name; bootstrap
+        # hands out the CSRF token, so every verb must check Host first.
+        with tempfile.TemporaryDirectory() as temporary:
+            server = atlas_ui.AtlasServer(("127.0.0.1", 0), self.make_service(Path(temporary)))
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            port = server.server_port
+            own = f"127.0.0.1:{port}"
+
+            def request(method: str, path: str, headers: dict[str, str], body: bytes | None = None):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+                try:
+                    connection.request(method, path, body=body, headers=headers)
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            try:
+                for path in ("/api/bootstrap", "/", "/healthz"):
+                    status, payload = request("GET", path, {"Host": f"attacker.example:{port}"})
+                    self.assertEqual(403, status, path)
+                    self.assertNotIn(server.csrf.encode(), payload)
+                self.assertEqual(403, request("GET", "/api/bootstrap", {"Host": "127.0.0.1"})[0])
+                self.assertEqual(403, request("HEAD", "/", {"Host": f"attacker.example:{port}"})[0])
+                status, payload = request("GET", "/api/bootstrap", {"Host": f"localhost:{port}"})
+                self.assertEqual(200, status)
+                csrf = json.loads(payload)["csrf"]
+                command = json.dumps({"text": "show projects"}).encode()
+                base = {"Host": own, "Content-Type": "application/json", "X-Atlas-CSRF": csrf}
+                for origin in (None, "null", f"http://attacker.example:{port}", f"http://localhost:{port}"):
+                    headers = dict(base)
+                    if origin is not None:
+                        headers["Origin"] = origin
+                    self.assertEqual(403, request("POST", "/api/command", headers, command)[0], origin)
+                rebound = {**base, "Host": f"attacker.example:{port}", "Origin": f"http://attacker.example:{port}"}
+                self.assertEqual(403, request("POST", "/api/command", rebound, command)[0])
+                status, _ = request("POST", "/api/command", {**base, "Origin": f"http://{own}"}, command)
+                self.assertEqual(200, status)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_terminal_input_cannot_become_tmux_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = atlas_ui.TerminalManager(Path(temporary) / "registry.json", Path(temporary) / "vault")
+            manager.tmux = "/usr/bin/tmux"
+            manager._terminals["0123456789ab"] = atlas_ui.Terminal(
+                "0123456789ab", "atlas-0123456789ab", "orbit/v3-ux", "t", temporary, time.time()
+            )
+            with mock.patch.object(manager, "alive", return_value=True), \
+                    mock.patch.object(atlas_ui.subprocess, "run") as run:
+                manager.input("0123456789ab", "-t victim -l rm -rf ~", enter=False)
+            argv = run.call_args.args[0]
+            self.assertEqual(["send-keys", "-t", "atlas-0123456789ab", "-l", "--", "-t victim -l rm -rf ~"], argv[1:])
 
 
 if __name__ == "__main__":

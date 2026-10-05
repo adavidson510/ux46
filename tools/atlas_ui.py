@@ -12,6 +12,7 @@ import argparse
 import copy
 import datetime as dt
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -713,7 +714,9 @@ class TerminalManager:
             raise UiError("Terminal input is too large")
         if clean:
             subprocess.run(
-                [self.tmux, "send-keys", "-t", terminal.tmux_name, "-l", clean],
+                # "--" ends tmux option parsing: typed text such as "-t other"
+                # is literal input for this pane, never a send-keys option.
+                [self.tmux, "send-keys", "-t", terminal.tmux_name, "-l", "--", clean],
                 check=False,
                 timeout=3,
             )
@@ -1171,11 +1174,49 @@ class AtlasHandler(BaseHTTPRequestHandler):
             raise UiError("Request body must be an object")
         return value
 
+    def _deny(self, reason: str) -> None:
+        # The body (if any) was never read, so this connection cannot be reused.
+        self.close_connection = True
+        self.json_response({"error": reason}, HTTPStatus.FORBIDDEN)
+
+    def _admit(self, mutating: bool = False) -> bool:
+        """Admit only this machine's own Atlas tab, before any route or body read.
+
+        The CSRF token is handed out by /api/bootstrap, so it only protects
+        mutations if a foreign page can never read that response. A
+        DNS-rebinding page reaches this loopback socket under its own name
+        (Host: attacker.example:4732), so every verb, static files included,
+        must name this listener exactly. Mutations must also come from that
+        same origin. The peer must be loopback: Atlas never serves the network.
+        """
+        try:
+            peer = ipaddress.ip_address((self.client_address or ("",))[0])
+        except ValueError:
+            peer = None
+        if peer is not None and getattr(peer, "ipv4_mapped", None):
+            peer = peer.ipv4_mapped
+        if peer is None or not peer.is_loopback:
+            self._deny("Atlas Studio only answers this machine")
+            return False
+        port = self.app.server_port
+        host = (self.headers.get("Host") or "").strip().casefold()
+        if host not in {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}:
+            self._deny("Atlas Studio only answers its own loopback address")
+            return False
+        if mutating:
+            origin = (self.headers.get("Origin") or "").strip().rstrip("/").casefold()
+            if origin != f"http://{host}":
+                self._deny("Atlas Studio changes must come from its own page")
+                return False
+        return True
+
     def require_csrf(self) -> None:
         if not secrets.compare_digest(self.headers.get("X-Atlas-CSRF", ""), self.app.csrf):
             raise UiError("Atlas request token is missing or invalid")
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._admit():
+            return
         parsed = urlparse(self.path)
         try:
             if parsed.path == "/healthz":
@@ -1214,6 +1255,8 @@ class AtlasHandler(BaseHTTPRequestHandler):
             return self.error_response(UiError(f"Atlas Studio error: {exc}"), 500)
 
     def do_HEAD(self) -> None:  # noqa: N802
+        if not self._admit():
+            return
         parsed = urlparse(self.path)
         try:
             relative = "index.html" if parsed.path in ("", "/") else unquote(parsed.path.lstrip("/"))
@@ -1231,6 +1274,8 @@ class AtlasHandler(BaseHTTPRequestHandler):
             self.error_response(exc, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._admit(mutating=True):
+            return
         parsed = urlparse(self.path)
         try:
             self.require_csrf()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -120,18 +121,48 @@ class FramingTests(unittest.TestCase):
         finally:
             pipe.close()
 
-    def test_early_rejection_leaves_the_connection_usable(self):
+    def test_early_rejection_closes_instead_of_draining(self):
+        # A refused request's body was never read, so the connection ends and
+        # the browser's next request simply opens a fresh one.
+        conn = HTTPConnection("127.0.0.1", self.h.port, timeout=10)
+        payload = json.dumps({"body": "x", "base_version": 0}).encode()
+        conn.request("PUT", f"/api/room/{ROOM}/draft", body=payload, headers={
+            "Host": f"127.0.0.1:{self.h.port}", "Origin": f"http://127.0.0.1:{self.h.port}",
+            "Content-Type": "application/json"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 403)
+        self.assertEqual(json.loads(response.read())["error"], "bad_csrf")
+        self.assertEqual(response.getheader("Connection"), "close")
+        conn.close()
         pipe = PersistentConnection(self.h)
         try:
-            status, payload = pipe.send("PUT", f"/api/room/{ROOM}/draft",
-                                        body={"body": "x", "base_version": 0}, csrf=False)
-            self.assertEqual(status, 403)
-            self.assertEqual(payload["error"], "bad_csrf")
             status, payload = pipe.send("GET", "/api/bootstrap")
             self.assertEqual(status, 200)
             self.assertIn("csrf", payload)
         finally:
             pipe.close()
+
+    def test_host_is_checked_before_any_body_is_read(self):
+        # A rebinding page announcing a 20 MB upload is refused at once, not
+        # after the console has buffered (or waited for) the bytes.
+        for host, origin in ((f"attacker.example:{self.h.port}", "http://attacker.example"),
+                             (f"127.0.0.1:{self.h.port}", "http://attacker.example")):
+            sock = socket.create_connection(("127.0.0.1", self.h.port), timeout=5)
+            try:
+                sock.sendall((f"POST /api/room/{ROOM}/files HTTP/1.1\r\nHost: {host}\r\n"
+                              f"Origin: {origin}\r\nContent-Length: {20 * 1024 * 1024}\r\n\r\n").encode()
+                             + b"x" * 10)
+                started = time.monotonic()
+                head = sock.recv(4096)
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertTrue(head.startswith(b"HTTP/1.1 403"), head[:60])
+                self.assertIn(b"Connection: close", head)
+            finally:
+                sock.close()
+
+    def test_stalled_sockets_time_out_after_the_longest_poll(self):
+        self.assertGreater(console.ConsoleHandler.timeout, 30)
+        self.assertLessEqual(console.ConsoleHandler.timeout, 120)
 
     def test_unframeable_requests_close_the_connection(self):
         for headers, raw, expected in (

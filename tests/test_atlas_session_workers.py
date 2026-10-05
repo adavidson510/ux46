@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -28,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 sys.path.insert(0, str(REPO_ROOT / "tests"))
 
+import atlas_console as console  # noqa: E402
 import atlas_journal as journal  # noqa: E402
 import atlas_native as native  # noqa: E402
 import atlas_workers as workers  # noqa: E402
@@ -345,6 +347,75 @@ class ProcessIsolationTests(unittest.TestCase):
         self.assertEqual(self.h.call("GET", f"/api/room/{ROOM_A}")[0], 200)
         self.assertEqual(self.h.service.workers.attached(), {})
         self.assertEqual(self.h.service.sessions.owned_threads(), {})
+
+
+class QueueClaimTests(unittest.TestCase):
+    """The owner's Cancel or Edit wins over a dispatcher that read the row first."""
+
+    def setUp(self):
+        self.jr = journal.Journal(Path(tempfile.mkdtemp(prefix="atlas-queue-claim-")) / "j.sqlite3")
+        self.room = types.SimpleNamespace(id=ROOM_A, controllable=True, thread_id=THREAD_ONE)
+        self.sent: list[str] = []
+        self.during_attach = lambda: None
+        test = self
+
+        class Workers:
+            def pending_requests(self, thread_id): return []
+            def attached(self): return {}
+            def attach(self, thread_id, room): test.during_attach()  # the slow window
+
+        class Writer:
+            def send_input(self, thread_id, body, client_id, attachments):
+                test.sent.append(body)
+                return {"turn_id": "turn-x", "mode": "start"}
+
+        self.svc = types.SimpleNamespace(
+            journal=self.jr, workers=Workers(), events=types.SimpleNamespace(publish=lambda event: None),
+            require_room=lambda room_id: self.room, writer_for=lambda thread_id: Writer(),
+            native_attachments=lambda room, attachments: [])
+        self.jr.remember_owned(THREAD_ONE, ROOM_A, "/tmp")
+
+    def dispatch(self, client_id):
+        console.ConsoleService._dispatch_admitted_queue(self.svc, self.jr.queue_get(client_id))
+
+    def test_cancel_while_attaching_sends_nothing(self):
+        item, _ = self.jr.enqueue("claim-cancel-0001", ROOM_A, THREAD_ONE, "deploy prod", [], time.time() - 1)
+        self.during_attach = lambda: self.jr.queue_cancel(item.client_id, item.version)
+        self.dispatch(item.client_id)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.jr.queue_get(item.client_id).status, journal.CANCELLED)
+        self.assertEqual(self.jr.get(item.client_id).status, journal.FAILED)
+
+    def test_edit_while_attaching_sends_the_edited_body_once(self):
+        item, _ = self.jr.enqueue("claim-edit-00001", ROOM_A, THREAD_ONE, "old words", [], time.time() - 1)
+        self.during_attach = lambda: self.jr.queue_update(item.client_id, item.version, body="new words")
+        self.dispatch(item.client_id)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.jr.queue_get(item.client_id).status, journal.PENDING)
+        self.during_attach = lambda: None
+        self.dispatch(item.client_id)
+        self.assertEqual(self.sent, ["new words"])
+        self.assertEqual(self.jr.queue_get(item.client_id).status, journal.ACCEPTED)
+
+    def test_reopened_for_editing_stays_editing(self):
+        item, _ = self.jr.enqueue("claim-editing-01", ROOM_A, THREAD_ONE, "draft", [], time.time() - 1)
+        self.during_attach = lambda: self.jr.queue_update(item.client_id, item.version, editing=True)
+        self.dispatch(item.client_id)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.jr.queue_get(item.client_id).status, journal.EDITING)
+
+    def test_requeue_never_resurrects_or_reopens_a_row(self):
+        item, _ = self.jr.enqueue("claim-revive-001", ROOM_A, THREAD_ONE, "second", [], time.time() - 1)
+        self.jr.queue_cancel(item.client_id, item.version)
+        self.jr.queue_mark(item.client_id, journal.PENDING, "waiting for a native approval")
+        self.assertEqual(self.jr.queue_get(item.client_id).status, journal.CANCELLED)
+        self.assertEqual(self.jr.queue_due(time.time()), [])
+        other, _ = self.jr.enqueue("claim-revive-002", ROOM_A, THREAD_ONE, "third", [], time.time() - 1)
+        self.assertIsNone(self.jr.queue_mark(other.client_id, journal.DISPATCHING,
+                                             expect=journal.PENDING, version=other.version + 1))
+        self.assertIsNotNone(self.jr.queue_mark(other.client_id, journal.DISPATCHING,
+                                                expect=journal.PENDING, version=other.version))
+        self.assertIsNone(self.jr.queue_mark(other.client_id, journal.DISPATCHING, expect=journal.PENDING))
 
 
 class RoutingTests(unittest.TestCase):

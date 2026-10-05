@@ -37,6 +37,7 @@ EDITING = "editing"
 ACCEPTED = "accepted"
 FAILED = "failed"
 UNCERTAIN = "uncertain"
+CANCELLED = "cancelled"  # queue only: the owner withdrew it before dispatch
 TERMINAL = (ACCEPTED, FAILED, UNCERTAIN)
 
 SCHEMA = """
@@ -413,10 +414,32 @@ class Journal:
                 conn.execute("ROLLBACK"); raise
         return self.queue_get(client_id)  # type: ignore[return-value]
 
-    def queue_mark(self, client_id: str, status: str, reason: str = "") -> QueuedMessage:
+    def queue_mark(self, client_id: str, status: str, reason: str = "", *,
+                   expect: str | tuple[str, ...] | None = None,
+                   version: int | None = None) -> QueuedMessage | None:
+        """Move a queued row to `status` as one compare-and-set.
+
+        With `expect` (and optionally `version`) the row only moves if it is
+        still in that state at that version; otherwise nothing changes and
+        None is returned, so a dispatcher can never act on a row the owner
+        cancelled or reopened for editing after it was read. A cancelled row
+        is the owner's final word and never moves again, whoever asks.
+        """
+        clauses = ["client_id=?", "status<>?"]
+        params: list = [client_id, CANCELLED]
+        if expect is not None:
+            wanted = (expect,) if isinstance(expect, str) else tuple(expect)
+            clauses.append("status IN (%s)" % ",".join("?" * len(wanted)))
+            params.extend(wanted)
+        if version is not None:
+            clauses.append("version=?")
+            params.append(version)
         with self._write_lock:
-            self._connect().execute("UPDATE queued_messages SET status=?, queued_reason=?, updated_at=? WHERE client_id=?",
-                                    (status, reason, time.time(), client_id))
+            changed = self._connect().execute(
+                "UPDATE queued_messages SET status=?, queued_reason=?, updated_at=? WHERE " + " AND ".join(clauses),
+                (status, reason, time.time(), *params)).rowcount
+        if not changed and (expect is not None or version is not None):
+            return None
         return self.queue_get(client_id)  # type: ignore[return-value]
 
     def queue_cancel(self, client_id: str, version: int) -> QueuedMessage:
@@ -429,7 +452,7 @@ class Journal:
                 if current.version != version: raise JournalError("that queued message changed elsewhere", "queue_conflict", current.as_json())
                 if current.status not in (PENDING, EDITING): raise JournalError("that message is already dispatching and cannot be cancelled", "queue_locked", current.as_json())
                 conn.execute("UPDATE queued_messages SET status=?, version=version+1, updated_at=? WHERE client_id=?",
-                             ("cancelled", time.time(), client_id))
+                             (CANCELLED, time.time(), client_id))
                 conn.execute("UPDATE submissions SET status=?, detail=?, updated_at=? WHERE client_id=?",
                              (FAILED, "cancelled before native dispatch", time.time(), client_id))
                 conn.execute("COMMIT")
