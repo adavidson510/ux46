@@ -6,6 +6,9 @@
   const signalCards=new Map();
   let all=null,roomData=null,signature='',activeDialog=null,lastRoom='',busy=false,queuedRefresh=null;
   const reviewOpen=new Map();
+  // Mirrors ux46_work.url(): links stored before that check tightened (or from an
+  // older server) open only as http(s) or a same-site path, never '/\host'.
+  const safeHref=u=>typeof u==='string'&&!/[\\\u0000-\u001f\u007f]/.test(u)&&(/^https?:\/\//i.test(u)||/^\/(?!\/)/.test(u))?u:'';
   async function call(path,body){const r=await fetch('/api/work/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-Atlas-CSRF':window.__atlas?.state.csrf||''}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.message||'Work review unavailable');return d;}
   function note(host,e){let p=host.querySelector('.work-note');if(!p){p=n('p',{class:'work-note',role:'status'});host.append(p);}p.textContent=e.message||String(e);}
   async function change(body,host){try{const r=await call('action',body);await refresh(true);return r;}catch(e){note(host,e);return null;}}
@@ -37,8 +40,8 @@
     if(roomData.results.length)host.append(n('div',{class:'ws-actions'},[n('h3',{text:'Current result'}),btn('Edit',()=>editResult(roomData.results[0]))]));
     const result=roomData.results[0];
     if(result){host.append(n('strong',{text:result.title}),n('p',{text:result.summary}),n('p',{class:'ws-sub',text:result.artifact_version+' · Reported by '+result.reporter}));
-      if(result.url)host.append(n('a',{href:result.url,target:'_blank',rel:'noopener noreferrer',class:'ws-primary',text:'Open current result'}));
-      if(result.changes_url)host.append(n('a',{href:result.changes_url,target:'_blank',rel:'noopener noreferrer',text:'Inspect changes'}));
+      if(safeHref(result.url))host.append(n('a',{href:safeHref(result.url),target:'_blank',rel:'noopener noreferrer',class:'ws-primary',text:'Open current result'}));
+      if(safeHref(result.changes_url))host.append(n('a',{href:safeHref(result.changes_url),target:'_blank',rel:'noopener noreferrer',text:'Inspect changes'}));
       const detail=n('details',{},[n('summary',{text:'What changed and what was checked'}),n('p',{text:result.changed||'No change attribution supplied.'}),n('p',{text:'Checked: '+(result.checked||'No checks reported.')}),n('p',{text:'Still to check: '+(result.unchecked||'Not specified.')}),n('p',{class:'ws-sub',text:'Evidence: '+(result.evidence||'No check evidence supplied.')}),n('p',{class:'ws-sub',text:'Reported checks are not inferred from a completed agent turn. Repository changes may include other work.'})]);host.append(detail);
       if(result.article)host.append(n('details',{},[n('summary',{text:'Read current article'}),n('div',{class:'work-article',text:result.article})]));
     }else host.append(btn('Add result',()=>editResult()));
