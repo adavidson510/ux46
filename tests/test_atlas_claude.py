@@ -917,6 +917,35 @@ class Boundary(AdapterCase):
         time.sleep(0.5)
         self.assertEqual(self.cli_calls(), [])
 
+    def test_a_queued_message_sends_the_claimed_body_not_a_stale_read(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        status, payload = self.post(f"/api/room/{self.linked_room()}/pending",
+                                    {"client_id": "queued-claim-0001", "body": "first draft"})
+        self.assertEqual(status, 201, payload)
+        item = self.service.journal.queue_get("queued-claim-0001")
+        edited = self.service.journal.queue_update(item.client_id, item.version,
+                                                   body="edited text")
+        room = self.service.catalog.room(self.linked_room())
+        # The dispatcher read "first draft" before the edit landed.
+        self.service.dispatch(room, item.client_id, "first draft", [],
+                              background=False, reserved=True)
+        sent = json.dumps(self.cli_calls())
+        self.assertIn("edited text", sent)
+        self.assertNotIn("first draft", sent)
+        self.assertEqual(edited.body, "edited text")
+
+    def test_a_cancelled_queued_message_is_never_claimed(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        self.post(f"/api/room/{self.linked_room()}/pending",
+                  {"client_id": "queued-claim-0002", "body": "do not send"})
+        item = self.service.journal.queue_get("queued-claim-0002")
+        self.service.journal.queue_cancel(item.client_id, item.version)
+        room = self.service.catalog.room(self.linked_room())
+        with self.assertRaises(cp.recovery.RecoveryBusy):
+            self.service.dispatch(room, item.client_id, item.body, [],
+                                  background=False, reserved=True)
+        self.assertEqual(self.cli_calls(), [])
+
     def test_a_request_addressed_to_another_host_is_refused(self):
         status, payload = self.ask("GET", "/api/bootstrap", host="ux46.example.com")
         self.assertEqual(status, 403)

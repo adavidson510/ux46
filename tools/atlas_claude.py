@@ -1410,7 +1410,14 @@ class ClaudeService:
                 queued = self.journal.queue_get(client_id)
                 if not queued or queued.status != PENDING:
                     raise recovery.RecoveryBusy("Queued input is held and has not been sent")
-                self.journal.queue_mark(client_id, DISPATCHING)
+                # Claim the row as one compare-and-set at the version just
+                # read, and send the claimed body: a Cancel or Edit that lands
+                # between the queue read and this claim wins, never the send.
+                claimed = self.journal.queue_mark(client_id, DISPATCHING,
+                                                  expect=PENDING, version=queued.version)
+                if claimed is None:
+                    raise recovery.RecoveryBusy("Queued input changed before it was sent")
+                text = claimed.body
             if self.running(room.id) is not None:
                 raise AdapterError(HTTPStatus.CONFLICT, "busy",
                                    "a turn is already running in this conversation")
@@ -1533,7 +1540,8 @@ class ClaudeService:
                 except AdapterError as exc:
                     # Still queued, still exactly once: it waits for the next
                     # pass rather than being retried into a second send.
-                    self.journal.queue_mark(item.client_id, PENDING, exc.message)
+                    self.journal.queue_mark(item.client_id, PENDING, exc.message,
+                                            expect=(PENDING, DISPATCHING))
                     continue
                 except Exception as exc:  # noqa: BLE001 - report, never crash the loop
                     self.journal.queue_mark(item.client_id, FAILED, str(exc)[:200])
