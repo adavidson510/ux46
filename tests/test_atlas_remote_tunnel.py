@@ -32,6 +32,9 @@ SERVING_SSH = textwrap.dedent('''\
     import json, os, socketserver, sys
     from http.server import BaseHTTPRequestHandler
     local = sys.argv[sys.argv.index("-L") + 1].split(":", 1)[0]
+    for n in range(int(os.environ.get("FAKE_SSH_FLOOD", "0"))):
+        sys.stderr.write("debug1: chatter %d svc-agent@10.20.30.40 %s\\n" % (n, "x" * 200))
+    sys.stderr.flush()
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
         def do_GET(self):
@@ -144,6 +147,69 @@ class UnixSocketForwardTests(TunnelTestCase):
         path = tunnel._private_dir() / tunnel.SOCKET_NAME
         path.write_text("not a socket")
         self.assertFalse(tunnel._owned_socket(str(path)))
+
+
+LEAKY_SSH = ("#!/bin/sh\n"
+             "echo 'svc-agent@10.20.30.40: Permission denied (publickey). "
+             "key /home/owner/.ssh/id_studio_ed25519' >&2\nexit 255\n")
+
+
+class SshDiagnosticsStayServerSideTests(TunnelTestCase):
+    def registry(self, ssh: str) -> remote.AgentRegistry:
+        runtime = str(self.runtime)
+
+        def transport(definition):
+            return remote.SshTunnel(host="studio", user="svc-agent", remote_port=8877,
+                                    ssh_binary=ssh, runtime_root=runtime)
+
+        config = self.tmp / "agents.json"
+        config.write_text(json.dumps({"schema_version": 1, "agents": [
+            {"id": "studio", "remote_port": 8877}]}))
+        registry = remote.AgentRegistry(config_path=str(config), transport_factory=transport)
+        self.addCleanup(registry.close)
+        return registry
+
+    def test_ssh_stderr_is_logged_but_never_published(self):
+        registry = self.registry(self.fake_ssh(LEAKY_SSH))
+        with self.assertLogs("ux46.remote", level="WARNING") as logs:
+            listing = registry.listing()
+        published = json.dumps(listing)
+        for secret in ("10.20.30.40", "svc-agent", "id_studio_ed25519", "Permission denied"):
+            self.assertNotIn(secret, published)
+        studio = next(a for a in listing["agents"] if a["id"] == "studio")
+        self.assertEqual(studio["availability"]["detail"],
+                         remote.TRANSPORT_MESSAGES["tunnel_failed"])
+        self.assertIn("id_studio_ed25519", "\n".join(logs.output))
+
+    def test_proxy_errors_carry_only_the_fixed_message(self):
+        registry = self.registry(self.fake_ssh(LEAKY_SSH))
+        with self.assertLogs("ux46.remote", level="WARNING"):
+            with self.assertRaises(remote.RemoteError) as caught:
+                registry.proxy(registry.get("studio"), "GET", "/api/rooms", "",
+                               headers={}, body=None)
+        self.assertEqual(str(caught.exception), remote.TRANSPORT_MESSAGES["tunnel_failed"])
+        self.assertIsNone(caught.exception.detail)
+
+    def test_an_unreachable_console_does_not_echo_socket_errors(self):
+        tunnel = remote.DirectPort(1)
+        console = remote.RemoteConsole(tunnel, 8878)
+        with self.assertLogs("ux46.remote", level="WARNING"):
+            with self.assertRaises(remote.RemoteError) as caught:
+                console.bootstrap()
+        self.assertEqual(caught.exception.code, "agent_unreachable")
+        self.assertEqual(str(caught.exception), remote.TRANSPORT_MESSAGES["agent_unreachable"])
+
+    def test_a_chatty_ssh_cannot_block_on_a_full_stderr_pipe(self):
+        ssh = self.fake_ssh(SERVING_SSH.format(python=sys.executable))
+        tunnel = self.tunnel(ssh)
+        console = remote.RemoteConsole(tunnel, 8878)
+        # ~1.2 MB of stderr before the listener opens: far beyond a pipe buffer.
+        with mock.patch.dict(os.environ, {"FAKE_SSH_FLOOD": "5000"}):
+            boot = console.bootstrap()
+        self.assertEqual(boot["host_seen"], "127.0.0.1:8878")
+        tail = tunnel._proc._ux46_stderr_tail
+        self.assertLessEqual(len(tail), remote.SSH_STDERR_TAIL_LINES)
+        self.assertTrue(all(len(line) <= remote.SSH_STDERR_LINE_CHARS for line in tail))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,9 @@ answered by the local agent.
 
 from __future__ import annotations
 
+import collections
 import json
+import logging
 import os
 import re
 import socket
@@ -117,6 +119,21 @@ FORWARDED_RESPONSE_HEADERS = ("Content-Disposition", "Accept-Ranges", "Content-R
 #: CSRF token are deliberately absent: the remote gets its own token, obtained
 #: internally, and never sees this console's.
 FORWARDED_REQUEST_HEADERS = ("Content-Type", "Accept", "Range")
+
+
+LOG = logging.getLogger("ux46.remote")
+
+#: How much of ssh's own diagnostics is kept, and only in this server's log.
+#: ssh's stderr names accounts, hosts, key paths and host-key fingerprints, so
+#: none of it is ever put into an error the browser can read.
+SSH_STDERR_TAIL_LINES = 20
+SSH_STDERR_LINE_CHARS = 300
+
+#: The only text the browser is given when the transport fails.
+TRANSPORT_MESSAGES = {
+    "tunnel_failed": "The secure connection to this agent's host could not be opened.",
+    "agent_unreachable": "This agent's console did not answer (it may not be running).",
+}
 
 
 class RemoteError(Exception):
@@ -298,6 +315,8 @@ class SshTunnel:
         with self._lock:
             if self._alive():
                 return self._socket
+            if self._proc is not None and self._proc.poll() is not None:
+                self._log_stderr(self._proc, "exited")
             self._stop_locked()
             local_socket = str(self._private_dir() / self.SOCKET_NAME)
             try:
@@ -310,18 +329,19 @@ class SshTunnel:
                     env=dict(os.environ, SSH_ASKPASS_REQUIRE="never"),
                 )
             except OSError as exc:
-                raise RemoteError(f"could not start the ssh forward: {exc}",
+                LOG.warning("ssh forward for %s could not start: %s", self.host,
+                            str(exc)[:SSH_STDERR_LINE_CHARS])
+                raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"],
                                   code="tunnel_failed") from exc
             self._proc = proc
+            self._start_stderr_reader(proc)
             deadline = time.monotonic() + TUNNEL_READY_TIMEOUT_S
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
-                    detail = self._drain_stderr()
                     self._proc = None
-                    raise RemoteError(
-                        "the ssh forward to this agent's host closed immediately"
-                        + (f": {detail}" if detail else ""),
-                        code="tunnel_failed")
+                    self._log_stderr(proc, "closed immediately")
+                    raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"],
+                                      code="tunnel_failed")
                 # Only a socket this uid owns, in this uid's 0700 directory,
                 # counts as ssh's listener; a connect proves it is listening.
                 if self._owned_socket(local_socket):
@@ -338,23 +358,49 @@ class SshTunnel:
                         probe.close()
                 time.sleep(0.15)
             self._stop_locked()
-            raise RemoteError("the ssh forward to this agent's host did not come up",
-                              code="tunnel_failed")
+            self._log_stderr(proc, "did not come up")
+            raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"], code="tunnel_failed")
 
     def open_connection(self, timeout: float) -> HTTPConnection:
         return UnixHTTPConnection(self.socket_path(), timeout=timeout)
 
-    def _drain_stderr(self) -> str:
-        """A short, bounded diagnostic. ssh never prints a key here."""
+    def _start_stderr_reader(self, proc: subprocess.Popen) -> None:
+        """Keep reading ssh's stderr for as long as ssh lives.
 
-        proc = self._proc
-        if not proc or not proc.stderr:
-            return ""
-        try:
-            raw = proc.stderr.read() or b""
-        except (OSError, ValueError):
-            return ""
-        return raw.decode("utf-8", "replace").strip().replace("\n", " ")[:200]
+        A long-lived ``ssh -N`` that warns repeatedly (keepalive, a refused
+        channel) would otherwise fill the pipe and block. Only a bounded tail
+        is kept, and it only ever reaches this server's log.
+        """
+
+        tail: collections.deque[str] = collections.deque(maxlen=SSH_STDERR_TAIL_LINES)
+        proc._ux46_stderr_tail = tail  # type: ignore[attr-defined]
+        stream = proc.stderr
+
+        def drain() -> None:
+            try:
+                for raw in iter(stream.readline, b""):
+                    tail.append(raw.decode("utf-8", "replace").rstrip()[:SSH_STDERR_LINE_CHARS])
+            except (OSError, ValueError):
+                pass
+            finally:
+                # The reader owns the pipe; closing it from another thread
+                # while a read is blocked would wait on the buffer lock.
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+        reader = threading.Thread(target=drain, name="ux46-ssh-stderr", daemon=True)
+        proc._ux46_stderr_reader = reader  # type: ignore[attr-defined]
+        reader.start()
+
+    def _log_stderr(self, proc: subprocess.Popen, what: str) -> None:
+        reader = getattr(proc, "_ux46_stderr_reader", None)
+        if reader is not None:
+            reader.join(timeout=1.0)
+        tail = list(getattr(proc, "_ux46_stderr_tail", ()))
+        LOG.warning("ssh forward for %s %s (exit %s)%s", self.host, what, proc.poll(),
+                    (": " + " | ".join(tail)) if tail else "")
 
     def mark_broken(self) -> None:
         with self._lock:
@@ -381,7 +427,10 @@ class SshTunnel:
                 except OSError:
                     pass
         finally:
-            for stream in (proc.stdout, proc.stderr):
+            reader = getattr(proc, "_ux46_stderr_reader", None)
+            if reader is not None:
+                reader.join(timeout=1.0)   # it closes stderr itself
+            for stream in (proc.stdout, None if reader is not None else proc.stderr):
                 if stream:
                     try:
                         stream.close()
@@ -474,10 +523,10 @@ class RemoteConsole:
                 code="agent_request_timeout") from exc
         except (OSError, HTTPException) as exc:
             self.transport.mark_broken()
-            raise RemoteError(
-                "this agent's console did not answer on its own loopback port "
-                f"(it may not be running there): {exc}",
-                code="agent_unreachable") from exc
+            LOG.warning("agent console request failed: %s: %s", type(exc).__name__,
+                        str(exc)[:SSH_STDERR_LINE_CHARS])
+            raise RemoteError(TRANSPORT_MESSAGES["agent_unreachable"],
+                              code="agent_unreachable") from exc
         finally:
             conn.close()
 
