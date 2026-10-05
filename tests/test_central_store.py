@@ -482,6 +482,55 @@ class CentralStorePullTests(CentralStoreHarness, unittest.TestCase):
             self.assertIn("overlaps the registered project root", result.stderr)
             self.assertIn("never allowed to touch a writer copy", result.stderr)
 
+    def rewrite_manifest(self, store: Path, digest: str, edit) -> None:
+        manifest_path = self.room(store) / "versions" / f"{digest}.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        edit(manifest["items"])
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def test_pull_never_takes_a_cache_path_from_the_peer_written_manifest(self) -> None:
+        # The store is shared with peers, so the manifest is untrusted input:
+        # a traversal or absolute filename, an unknown role, or a repeated
+        # role is refused and nothing lands in or outside the cache.
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            _, registry, store = self.build_world(base)
+            published = json.loads(self.publish(registry, store).stdout)
+            digest = published["current"]["record_sha256"]
+            outside = base / "outside.txt"
+            manifest_path = self.room(store) / "versions" / f"{digest}.json"
+            honest = manifest_path.read_bytes()
+
+            def traversal(items):
+                items[1]["filename"] = "../../../../outside.txt"
+
+            def absolute(items):
+                items[1]["filename"] = str(outside)
+
+            def unknown_role(items):
+                items.append(dict(items[1], role="extra", filename="extra.txt"))
+
+            def repeated_role(items):
+                items.append(dict(items[0]))
+
+            for edit, message in (
+                (traversal, "expected review.origins.json"),
+                (absolute, "expected review.origins.json"),
+                (unknown_role, "unknown role 'extra'"),
+                (repeated_role, "repeats role 'record'"),
+            ):
+                with self.subTest(edit.__name__):
+                    manifest_path.write_bytes(honest)
+                    self.rewrite_manifest(store, digest, edit)
+                    cache = base / f"cache-{edit.__name__}"
+                    result = self.pull(registry, store, cache)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(message, result.stderr)
+                    self.assertIn("Nothing was cached" if "expected" in message
+                                  else "nothing was cached", result.stderr)
+                    self.assertFalse(cache.exists())
+                    self.assertFalse(outside.exists())
+
     def test_pull_without_a_central_current_is_a_clear_refusal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
