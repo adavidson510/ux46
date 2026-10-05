@@ -363,8 +363,8 @@ class Harness:
         except ValueError:
             return response.status, {"raw": raw.decode("utf-8", "replace")}
 
-    def get(self, path: str) -> tuple[int, dict]:
-        return self.request("GET", path)
+    def get(self, path: str, headers: dict | None = None) -> tuple[int, dict]:
+        return self.request("GET", path, headers=headers)
 
     def post(self, path: str, body: dict | None = None, **kwargs) -> tuple[int, dict]:
         return self.request("POST", path, body or {}, **kwargs)
@@ -848,6 +848,60 @@ class BoundaryTest(RivetAdapterTest):
         conn.close()
         self.assertEqual(response.status, 403)
         self.assertEqual(payload["error"], "bad_csrf")
+
+    def test_a_request_under_a_foreign_host_is_refused_before_any_route(self) -> None:
+        # DNS rebinding: the page's own name arrives in Host. The token route
+        # is refused as well, or the page could read the CSRF token.
+        evil = f"rebind.attacker.example:{self.harness.port}"
+        for path in ("/api/bootstrap", "/api/rooms", f"/api/room/{self.main_room}/history",
+                     "/", "/index.html"):
+            status, payload = self.harness.get(path, headers={"Host": evil})
+            self.assertEqual(status, 403, path)
+            self.assertEqual(payload["error"], "bad_host", path)
+        status, payload = self.harness.post(
+            f"/api/room/{self.main_room}/submit",
+            {"client_id": "rebind-0001", "body": "hello"},
+            headers={"Host": evil, "Origin": f"http://{evil}"})
+        self.assertEqual((status, payload["error"]), (403, "bad_host"))
+        # A loopback name on another port is not this adapter either.
+        status, payload = self.harness.get("/api/bootstrap",
+                                           headers={"Host": "127.0.0.1:1"})
+        self.assertEqual((status, payload["error"]), (403, "bad_host"))
+        self.assertEqual(self.harness.calls("chat.send"), [])
+
+    def test_loopback_names_and_configured_hosts_are_answered(self) -> None:
+        port = self.harness.port
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+            status, _payload = self.harness.get("/api/workspace", headers={"Host": host})
+            self.assertEqual(status, 200, host)
+        self.harness.service.allowed_hosts.add("agent3.internal")
+        status, _payload = self.harness.get("/api/workspace",
+                                            headers={"Host": f"agent3.internal:{port}"})
+        self.assertEqual(status, 200)
+
+    def test_a_present_foreign_origin_is_refused_without_a_configured_origin(self) -> None:
+        self.assertEqual(self.harness.service.config.browser_origin, "")
+        status, payload = self.harness.post(
+            f"/api/room/{self.main_room}/continue", {},
+            headers={"Origin": "http://evil.example"})
+        self.assertEqual((status, payload["error"]), (403, "bad_origin"))
+        # The console's RemoteConsole sends its own loopback address as
+        # Origin; that, and no Origin at all, still pass.
+        status, _payload = self.harness.post(
+            f"/api/room/{self.main_room}/continue", {},
+            headers={"Origin": f"http://127.0.0.1:{self.harness.port}"})
+        self.assertEqual(status, 200)
+        status, _payload = self.harness.post(f"/api/room/{self.main_room}/continue", {})
+        self.assertEqual(status, 200)
+
+    def test_a_configured_browser_origin_is_enforced_on_mutations(self) -> None:
+        self.harness.service.config.browser_origin = "https://ux46.example"
+        status, payload = self.harness.post(f"/api/room/{self.main_room}/continue", {},
+                                            headers={"Origin": "https://evil.example"})
+        self.assertEqual((status, payload["error"]), (403, "bad_origin"))
+        status, _payload = self.harness.post(f"/api/room/{self.main_room}/continue", {},
+                                             headers={"Origin": "https://ux46.example"})
+        self.assertEqual(status, 200)
 
     def test_a_proxy_path_prefix_is_stripped(self) -> None:
         self.harness.service.config.path_prefix = "/api/agents/agent3"

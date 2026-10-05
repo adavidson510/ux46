@@ -1478,6 +1478,12 @@ class RivetService:
         self.events = Events()
         self.csrf_token = secrets.token_urlsafe(32)
         self.started_at = time.time()
+        # The names this port answers under. The socket is loopback-only, but a
+        # browser page whose DNS name was rebound to 127.0.0.1 reaches it too;
+        # such a request carries its own name in `Host` and is refused.
+        self.allowed_hosts = {"127.0.0.1", "localhost", "::1"} | {
+            str(name).strip().casefold()
+            for name in (getattr(config, "allow_host", None) or [])}
         registry = Path(config.registry).expanduser()
         projects, links, warnings = read_projects(registry)
         if config.unfiled_project in projects:
@@ -2672,15 +2678,62 @@ class RivetHandler(BaseHTTPRequestHandler):
         raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_upload",
                            "name a file part in that upload")
 
+    # -- request gate ------------------------------------------------------
+    def _allowed_ports(self) -> set[int] | None:
+        """The ports a `Host` may name, or None when the port is not checked.
+
+        On TCP this is the configured and the bound port. Under
+        ux46_host_socket the listener is an account-private Unix socket: the
+        OS permission check admits the caller, and the port in `Host` is only
+        the console's label for the forward, so the name is checked alone.
+        """
+
+        address = getattr(self.server, "server_address", None)
+        if not isinstance(address, tuple):
+            return None
+        return {int(port) for port in (self.service.config.port, address[1]) if port}
+
+    def _check_host(self) -> None:
+        """This port answers loopback only, under a name it recognises.
+
+        Runs before every route, /api/bootstrap included: that route hands
+        out the CSRF token, so a DNS-rebound page that could read it could
+        then drive the agent. A missing `Host` is refused too.
+        """
+
+        client = self.client_address[0] if self.client_address else ""
+        if client not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            raise AdapterError(HTTPStatus.FORBIDDEN, "denied",
+                               "this adapter answers loopback only")
+        host = (self.headers.get("Host") or "").strip().casefold()
+        match = re.fullmatch(r"(\[[0-9a-f:.]+\]|[^:\[\]]+)(?::([0-9]{1,5}))?", host)
+        allowed = self.service.allowed_hosts
+        if match and match.group(1).strip("[]") in allowed:
+            ports = self._allowed_ports()
+            port = match.group(2)
+            if ports is None or port is None or int(port) in ports:
+                return
+        raise AdapterError(HTTPStatus.FORBIDDEN, "bad_host",
+                           "this adapter is not served under that name")
+
     def _check_mutation(self) -> None:
         token = self.headers.get("X-Atlas-CSRF", "")
         if not secrets.compare_digest(token, self.service.csrf_token):
             raise AdapterError(HTTPStatus.FORBIDDEN, "bad_csrf",
                                "stale page — reload it to get this adapter's token")
         allowed = self.service.config.browser_origin
+        origin = (self.headers.get("Origin") or "").rstrip("/")
         if allowed:
-            origin = (self.headers.get("Origin") or "").rstrip("/")
             if origin.casefold() != allowed.rstrip("/").casefold():
+                raise AdapterError(HTTPStatus.FORBIDDEN, "bad_origin",
+                                   "a change must come from the console's own page")
+        elif origin:
+            # No fronting origin configured: a caller without a browser (the
+            # console's RemoteConsole, curl) may omit Origin, but one that is
+            # present must be this adapter's own address. A foreign page's
+            # Origin is refused even if it somehow holds the token.
+            host = (self.headers.get("Host") or "").strip()
+            if origin.casefold() != f"http://{host}".casefold():
                 raise AdapterError(HTTPStatus.FORBIDDEN, "bad_origin",
                                    "a change must come from the console's own page")
 
@@ -2704,6 +2757,13 @@ class RivetHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
             parsed = urlparse(self.path)
             path = parsed.path
@@ -3003,6 +3063,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--browser-origin", default="",
                         help="require this exact Origin on mutations; the fronting proxy "
                              "normally owns that check")
+    parser.add_argument("--allow-host", action="append", default=[],
+                        help="an extra Host name this adapter answers under")
     parser.add_argument("--identity-header", default="X-Forwarded-User",
                         help="header the fronting proxy uses to name the person")
     parser.add_argument("--path-prefix", default="",
