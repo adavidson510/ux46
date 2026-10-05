@@ -66,7 +66,17 @@ test('picker finds aliases, canonical names and owners, selects the exact target
 
 test('phone picker provides readable names and separate options/close controls without sending a prompt', async ({page}) => {
   await fixture(page,390);
-  await expect(page.locator('#mobileTabs')).toBeVisible();
+  await page.evaluate(() => {
+    const result = document.createElement('button'); result.id='btnCurrentResult';
+    result.className='result-shortcut'; result.textContent='Result';
+    document.querySelector('#btnDock').before(result);
+  });
+  await expect(page.locator('#mobileTabName')).toBeVisible();
+  await expect(page.locator('#mobileTabSelect')).toHaveCount(0);
+  await expect(page.locator('#btnConversations')).toContainText('Current workspace');
+  expect((await page.locator('#btnConversations').boundingBox()).height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.querySelector('.topbar').scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({path:test.info().outputPath('phone-single-picker.png')});
   await page.getByRole('button',{name:'All conversations (16)',exact:true}).click();
   const search=page.getByRole('searchbox',{name:'Search open conversations'});await search.fill('Conversation 8');
   await page.screenshot({path:test.info().outputPath('phone-picker.png')});

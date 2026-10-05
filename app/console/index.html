@@ -186,14 +186,9 @@
     <header class="topbar">
       <!-- One strip of open sessions across every configured agent. -->
       <div class="tabs" role="tablist" aria-label="Open sessions" id="tabs"></div>
-      <button class="conversation-picker-button" id="btnConversations" type="button" aria-haspopup="dialog" aria-controls="conversationPicker" title="Find an open conversation">
-        <span class="conversation-picker-label">All conversations</span><span id="conversationCount">0</span><span aria-hidden="true">⌄</span>
+      <button class="conversation-picker-button" id="btnConversations" type="button" aria-haspopup="dialog" aria-controls="conversationPicker" title="Find an open conversation" aria-describedby="mobileTabName">
+        <span class="conversation-picker-label">All conversations</span><span class="mobile-tab-name" id="mobileTabName">Choose conversation</span><span id="conversationCount">0</span><span aria-hidden="true">⌄</span>
       </button>
-      <div class="mobile-tabs" id="mobileTabs">
-        <span class="mobile-tab-name" id="mobileTabName" aria-hidden="true">Choose conversation</span>
-        <span class="mobile-tab-chevron" aria-hidden="true">⌄</span>
-        <select id="mobileTabSelect" aria-label="Switch open conversation"></select>
-      </div>
       <button class="tool record-button" id="btnRecord" type="button" aria-label="Record audio" title="Record audio, separate from dictation">● Record</button>
       <button class="iconbtn" id="btnRecordings" type="button" aria-label="Saved recordings" title="Saved recordings"><svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><path d="M4 3h12v14H4zM7 7h6M7 10h6M7 13h3"/></svg></button>
       <span class="chip-state" id="connState" role="status">connecting…</span>
@@ -605,6 +600,7 @@
      aria-label="Workspace settings">
   <p class="workspace-menu-title">Your workspace</p>
   <button type="button" id="customizeWorkspace">Customize my workspace</button>
+  <a href="https://github.com/adavidson510/ux46/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">What’s new · version history</a>
   <button type="button" id="openWorkspaceRecovery">Recover UX46</button>
   <button type="button" data-settings="room" autofocus>Room settings</button>
   <button type="button" data-settings="appearance">Appearance &amp; voice</button>

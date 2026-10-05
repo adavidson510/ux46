@@ -36,6 +36,8 @@ No GitHub account or contribution is required to make it yours.
 
 **macOS & Linux · local-first · alpha · MIT licensed**
 
+[What’s new · version history](CHANGELOG.md)
+
 <table>
 <tr>
 <td width="50%" valign="top">

@@ -20,3 +20,7 @@ For onboarding, public presentation, or code explanations, use
 learning their first terms; the AI path should stay compact. Comment decisions,
 data boundaries and failure behavior where they occur. Keep the code tour linked
 to actual source; don't reorganize unrelated code for appearances.
+
+For every published release, add a dated entry to `CHANGELOG.md` describing visible
+changes, fixes, any refresh/update action, and material verification limits. Keep
+the matching GitHub release notes aligned; do not infer older behavior without evidence.

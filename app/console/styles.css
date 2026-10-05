@@ -211,10 +211,10 @@ dialog::backdrop{backdrop-filter:blur(6px);}
   border-radius:12px;background:var(--ink-100);color:var(--text);
   box-shadow:0 12px 40px #0005;}
 .workspace-menu-title{margin:5px 10px 8px;font:600 12px/1.4 var(--sans);color:var(--text-faint);}
-.workspace-menu button{display:flex;align-items:center;gap:12px;width:100%;min-height:42px;
+.workspace-menu button,.workspace-menu a{display:flex;align-items:center;gap:12px;width:100%;min-height:42px;
   padding:10px;border-radius:7px;text-align:left;font:13.5px/1.4 var(--sans);}
-.workspace-menu button:hover{background:var(--hover);}
-.workspace-menu button:focus-visible{outline:2px solid var(--lav);outline-offset:-2px;}
+.workspace-menu button:hover,.workspace-menu a:hover{background:var(--hover);}
+.workspace-menu button:focus-visible,.workspace-menu a:focus-visible{outline:2px solid var(--lav);outline-offset:-2px;}
 .workspace-menu button span{margin-left:auto;color:var(--text-mute);font-size:12px;}
 .workspace-menu-separator{height:1px;background:var(--line-soft);margin:6px 2px;}
 
@@ -1495,18 +1495,14 @@ body.nav-dragging .navgrip{cursor:grabbing;}
  .service-heading{align-items:flex-start;flex-wrap:wrap;}
 }
 
-/* On phones the open conversations are a native picker, not squeezed tabs. */
-.mobile-tabs{display:none;position:relative;align-items:center;gap:10px;
-  flex:1 1 auto;min-width:0;height:44px;color:var(--text);}
-.mobile-tab-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font:600 16px/1.3 var(--sans);}
-.mobile-tab-chevron{flex:none;color:var(--text-mute);font-size:20px;}
-.mobile-tabs select{position:absolute;inset:0;width:100%;height:100%;opacity:0;
-  cursor:pointer;font-size:16px;}
-.mobile-tabs:focus-within{outline:2px solid var(--focus);outline-offset:-2px;border-radius:8px;}
+/* One phone entrypoint keeps the current name, count and searchable picker together. */
+.mobile-tab-name{display:none;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font:600 16px/1.3 var(--sans);color:var(--text);}
 @media (max-width:640px),(max-height:500px) and (max-width:950px){
   .topbar .tabs{display:none;}
-  .mobile-tabs{display:flex;}
+  .topbar #btnConversations{flex:1 1 auto;min-width:0;min-height:44px;gap:6px;text-align:left;}
+  .topbar .mobile-tab-name{display:block;flex:1 1 auto;}
+  .topbar #conversationCount{flex:none;font-size:11px;color:var(--text-mute);}
   .topbar #connState{display:none;}
 }
 
@@ -1766,7 +1762,7 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 }
 
 /* Satellites have their own view, never their own conversation or desktop. */
-.satellite .side,.satellite #tabs,.satellite #mobileTabs,.satellite #btnConversations,
+.satellite .side,.satellite #tabs,.satellite #btnConversations,
 .satellite #btnMenu,.satellite #btnNewConvPhone,.satellite #focusRooms,.satellite #btnFocus{display:none!important;}
 .satellite .app{grid-template-columns:minmax(0,1fr) auto;}
 .satellite .topbar{justify-content:flex-end;min-height:42px;}

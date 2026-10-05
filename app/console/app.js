@@ -762,32 +762,8 @@ function tabNode(tab, compact) {
 }
 
 function renderMobileTabs(tabs) {
-  const select = $("#mobileTabSelect");
   const active = tabs.find(isActiveTab);
-  $("#mobileTabName").textContent = active ? tabLabel(active) : "Choose conversation";
-  const options = tabs.map((tab) => ({
-    value: JSON.stringify([tab.agent || DEFAULT_AGENT, tab.room]),
-    label: tabLabel(tab) + " · " + agentLabel(tab.agent)
-      + (tab.unavailable ? " · unavailable" : ""),
-    disabled: Boolean(tab.unavailable || tab.closing),
-  }));
-  const signature = JSON.stringify(options);
-  // Polling must not rebuild an unchanged picker while it is open on a phone.
-  if (select.dataset.options !== signature) {
-    select.replaceChildren(el("option", {value: "", text: "Choose conversation", disabled: true}),
-      ...options.map((option) => el("option", {
-        value: option.value, text: option.label, disabled: option.disabled,
-      })));
-    select.dataset.options = signature;
-  }
-  select.value = active ? JSON.stringify([active.agent || DEFAULT_AGENT, active.room]) : "";
-  select.disabled = !tabs.length;
-  select.onchange = async () => {
-    if (!select.value) return;
-    const [agent, room] = JSON.parse(select.value);
-    await openTabForTyping(agent, room);
-    renderTabs();
-  };
+  $("#mobileTabName").textContent = active ? tabLabel(active) : "Conversations";
 }
 
 function renderTabs() {
