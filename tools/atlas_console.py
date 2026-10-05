@@ -1243,6 +1243,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     server_version = "AtlasConsole/1.0"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    # Idle or trickling sockets are dropped instead of pinning a thread
+    # forever. Longer than the longest legitimate wait (the 30 s events poll).
+    timeout = 60
     service: ConsoleService  # set on the server instance
 
     # -- plumbing ----------------------------------------------------------
@@ -1353,7 +1356,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                            "that submission is too large for the console")
         if not length:
             return
-        body = self.rfile.read(length)
+        try:
+            body = self.rfile.read(length)
+        except TimeoutError:
+            self.close_connection = True
+            raise ApiError(HTTPStatus.REQUEST_TIMEOUT, "slow_body", "the request body stalled")
         if len(body) != length:
             self.close_connection = True
             raise ApiError(HTTPStatus.BAD_REQUEST, "short_body",
@@ -1417,8 +1424,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            # Who is asking is settled before a single body byte is read: a
+            # foreign Host, cross-site page or wrong Origin must not get up to
+            # an upload's worth of bytes buffered first. A refusal ends the
+            # connection rather than draining a body nobody admitted.
+            try:
+                decision = self._gate()
+                if method in ("POST", "PUT", "PATCH", "DELETE"):
+                    self._check_mutation(decision)
+            except ApiError:
+                self.close_connection = True
+                raise
             self._consume_body()      # exact framing for every route
-            decision = self._gate()
             parsed = urlparse(self.path)
             path = parsed.path
             query = parse_qs(parsed.query)
@@ -1426,8 +1443,6 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._serve_static(path)
             if not path.startswith("/api/"):
                 raise ApiError(HTTPStatus.NOT_FOUND, "not_found", "no such page")
-            if method in ("POST", "PUT", "PATCH", "DELETE"):
-                self._check_mutation(decision)
             scoped = AGENT_PREFIX_RE.fullmatch(path)
             target_agent = scoped.group(1) if scoped else "local"
             suffix = scoped.group(2) if scoped else path
