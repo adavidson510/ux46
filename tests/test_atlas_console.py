@@ -234,6 +234,15 @@ class SecurityTests(unittest.TestCase):
             body={"body": "x" * (console.MAX_BODY + 10), "base_version": 0})
         self.assertEqual(status, 413)
 
+    def test_events_timeout_must_be_finite(self):
+        for value in ("nan", "inf", "-inf", "NaN", "soon"):
+            status, payload = self.h.call("GET", f"/api/events?after=0&timeout={value}")
+            self.assertEqual(status, 400, value)
+            self.assertEqual(payload["error"], "bad_timeout")
+        started = time.monotonic()
+        self.assertEqual(self.h.call("GET", "/api/events?after=0&timeout=-9")[0], 200)
+        self.assertLess(time.monotonic() - started, 5)
+
     def test_unknown_room_and_bad_room_id(self):
         self.assertEqual(self.h.call("GET", "/api/room/fixture/nope")[0], 404)
         self.assertIn(self.h.call("GET", "/api/room/..%2F..%2Fetc/passwd")[0], (400, 404))

@@ -23,6 +23,7 @@ from email.parser import BytesParser
 import html
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -1775,7 +1776,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/events":
             after = int(get("after", "0") or 0)
             room = get("room")
-            timeout = min(float(get("timeout", "25") or 25), 30.0)
+            try:
+                timeout = float(get("timeout", "25") or 25)
+            except ValueError:
+                timeout = float("nan")
+            # nan/inf would make the long-poll deadline never arrive (a busy
+            # loop any page can start blind), so only a finite wait is served.
+            if not math.isfinite(timeout):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "bad_timeout", "timeout must be a number of seconds")
+            timeout = min(max(timeout, 0.0), 30.0)
             return self._json(HTTPStatus.OK, service.events.since(after, timeout, room, get("epoch")))
 
         if method == "GET" and path == "/api/approvals":

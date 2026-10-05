@@ -1,5 +1,6 @@
 """Event cursors must not silently acknowledge unread completions."""
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -58,6 +59,21 @@ class EventJourneys(unittest.TestCase):
         self.assertEqual(second["seq"], 220)
         log.publish({"room": "fixture/other"})
         self.assertEqual(log.since(220, timeout=0, room="fixture/selected")["seq"], 221)
+
+    def test_wait_is_always_finite_and_bounded(self):
+        # nan made the deadline unreachable: wait(0) in a loop, one core per request.
+        log = EventLog()
+        for timeout in (float("nan"), float("-inf"), -5.0):
+            started = time.monotonic()
+            self.assertEqual(log.since(0, timeout=timeout)["events"], [])
+            self.assertLess(time.monotonic() - started, 1.0, timeout)
+        log.MAX_WAIT = 0.2  # the clamp, not the caller, ends an infinite wait
+        started = time.monotonic()
+        log.since(0, timeout=float("inf"))
+        self.assertLess(time.monotonic() - started, 1.0)
+        started = time.monotonic()
+        log.since(0, timeout=3600)
+        self.assertLess(time.monotonic() - started, 1.0)
 
 
 if __name__ == "__main__":
