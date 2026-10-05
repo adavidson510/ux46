@@ -33,9 +33,11 @@ scrub_uv_environment() {
 # group nor other users can write. Installer control files must pass before they
 # are read or run: a shared parent folder could otherwise hold a pre-planted one.
 private_path() {
-  [ -e "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
-  mode=$(LC_ALL=C ls -ld "$1") || return 1
-  case "$mode" in ?????w*|????????w*) return 1;; esac
+  # Same test as [ -O ], written with POSIX ls -n and id -u.
+  [ -e "$1" ] && [ ! -L "$1" ] || return 1
+  listing=$(LC_ALL=C ls -ldn "$1") || return 1
+  [ "$(printf '%s\n' "$listing" | awk 'NR==1{print $3}')" = "$(id -u)" ] || return 1
+  case "$listing" in ?????w*|????????w*) return 1;; esac
 }
 main() {
   release='v0.2.0-alpha.39'
