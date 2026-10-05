@@ -60,7 +60,7 @@ class AtlasFileStoreTests(unittest.TestCase):
             # Metadata and managed bytes remain available after a fresh store instance.
             reopened = FileStore(root / "state")
             loaded, downloaded = reopened.open_download(record["id"], room="alpha/room")
-            self.assertEqual(loaded, record)
+            self.assertEqual(loaded, {**record, "declared_mime": "image/png"})
             self.assertEqual(downloaded, PNG)
             with self.assertRaises(FileStoreError):
                 reopened.get(record["id"], room="other/room")
@@ -101,6 +101,40 @@ class AtlasFileStoreTests(unittest.TestCase):
             self.assertEqual(downloaded, payload)
             self.assertEqual(loaded["sha256"], hashlib.sha256(payload).hexdigest())
             self.assertIsNone(loaded["preview_url"])
+
+    def test_download_type_is_allowlisted_and_the_declared_type_kept_for_display(self) -> None:
+        # Downloads share the console origin under script-src 'self'; a stored
+        # script, document or stylesheet type must never be served back as such.
+        with tempfile.TemporaryDirectory() as temporary:
+            store = FileStore(Path(temporary) / "state")
+            cases = {
+                "text/javascript; charset=utf-8": "application/octet-stream",
+                "application/javascript": "application/octet-stream",
+                "application/x-ecmascript": "application/octet-stream",
+                "text/html": "application/octet-stream",
+                "application/xhtml+xml": "application/octet-stream",
+                "image/svg+xml": "application/octet-stream",
+                "text/xml": "application/octet-stream",
+                "text/css": "application/octet-stream",
+                "video/vnd.xml-thing": "application/octet-stream",
+                "made/up": "application/octet-stream",
+                "text/plain": "text/plain",
+                "application/pdf": "application/pdf",
+                "audio/mpeg": "audio/mpeg",
+                "video/mp4": "video/mp4",
+            }
+            for declared, served in cases.items():
+                with self.subTest(declared):
+                    record = store.upload("room", "notes.txt", b"alert(document.domain)", declared)
+                    loaded, _ = store.open_download(record["id"], room="room")
+                    self.assertEqual(loaded["mime"], served)
+                    self.assertEqual(loaded["declared_mime"], record["mime"])
+                    self.assertEqual(store.get(record["id"])["mime"], record["mime"])
+            # Without a declared type, a guessed .js/.html/.svg type is narrowed too.
+            for name in ("x.js", "x.html", "x.svg", "x.css"):
+                record = store.upload("room", name, b"payload", None)
+                self.assertEqual(store.open_download(record["id"])[0]["mime"],
+                                 "application/octet-stream")
 
     def test_content_disposition_never_allows_filename_header_injection(self) -> None:
         header = content_disposition('report\r\nX-Evil: yes; "名".txt')
