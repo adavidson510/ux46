@@ -19,6 +19,13 @@ KINDS = {'principle', 'preference', 'decision', 'method', 'failure', 'component'
 STATES = {'proposed', 'supported', 'contradicted', 'superseded', 'retired'}
 EVIDENCE = {'explicit-direction', 'observed', 'inference', 'proposal'}
 ID = re.compile(r'^[A-Za-z0-9._-]{1,96}$')
+# The browser workspace acts as this principal (ux46_workspace_api). It is the
+# only one whose word is the human's own; every CLI or granted agent token is an
+# agent, however it is named elsewhere.
+HUMAN_PRINCIPAL = 'user'
+# Values that say "the human said so". An agent may report them, but only as
+# its own assertion (see Store.capture); it cannot record them as fact.
+HUMAN_ATTRIBUTION = {'origin': 'human-direction', 'evidence': 'explicit-direction'}
 
 
 def encoded(value):
@@ -54,6 +61,13 @@ class Principal:
     name: str
     projects: tuple[str, ...]
     write: bool = False
+    # None infers from the name (the workspace's 'user'); callers that know
+    # better pass it explicitly, as the agent CLI does with human=False.
+    human: bool | None = None
+
+    @property
+    def is_human(self):
+        return self.name == HUMAN_PRINCIPAL if self.human is None else self.human
 
     def allows(self, record):
         return '*' in self.projects or set(record['projects']).issubset(self.projects)
@@ -120,6 +134,8 @@ class Store:
 
     def _visible(self, db, principal, record):
         record = json.loads(json.dumps(record))
+        import constellation_learning as learning
+        record['provenance'] = learning.provenance(record)
         visible = []
         for link in record.get('links', []):
             try:
@@ -217,6 +233,20 @@ class Store:
         if review_after is not None and (type(review_after) not in (int,float) or not 0<review_after<1e11):
             raise ValueError('Invalid review date')
         record.update(origin=origin,learning=learning,subjects=subjects,review_after=review_after)
+        # Attribution follows who wrote the record, not what the record says. An
+        # agent that reports a human direction keeps the report (in 'asserted')
+        # but the record is stored as an agent observation, so recall cannot
+        # present it as the human's own choice. The human confirms it by saving
+        # the record from the workspace, which records 'human-confirmed'.
+        asserted={k:v for k,v in HUMAN_ATTRIBUTION.items() if record[k]==v}
+        if principal.is_human:
+            record['provenance']='human-confirmed'
+        else:
+            record['provenance']='agent-asserted'
+            if asserted:
+                record['asserted']=asserted
+                if record['origin']=='human-direction':record['origin']='unspecified'
+                if record['evidence']=='explicit-direction':record['evidence']='observed'
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             receipt = self._request(db, principal, key, payload)
@@ -224,7 +254,9 @@ class Store:
                 return receipt
             row = db.execute('SELECT body FROM records WHERE id=?',(rid,)).fetchone()
             old = json.loads(row['body']) if row else None
-            if old and (not principal.allows(old) or old['owner'] != principal.name):
+            # The human can revise or retire any record in scope, including one an
+            # agent captured; agents still revise only their own.
+            if old and (not principal.allows(old) or (old['owner'] != principal.name and not principal.is_human)):
                 raise PermissionError('Only the record owner may revise it; propose a separate correction')
             if type(payload.get('base_revision')) is not int or payload['base_revision'] != (old['revision'] if old else 0):
                 raise Conflict('Stale revision; reread before changing')
@@ -237,11 +269,14 @@ class Store:
                 target = self._get(db, principal, link['target'])
                 if not set(target['projects']).issubset(projects):
                     raise ValueError('Connection provenance must share all target project scopes')
+            if old and old['owner'] != principal.name:record['previous_owner']=old['owner']
             record.update(owner=principal.name, revision=(old['revision'] if old else 0)+1,
                           created_at=old['created_at'] if old else time.time(), updated_at=time.time())
             db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', (rid,record['revision'],encoded(record).decode()))
             event = self._event(db, {'type':'record','record':record,'projects':projects})
-            return self._receipt(db,principal,key,payload,{'accepted':True,'id':rid,'revision':record['revision'],'event_id':event})
+            result={'accepted':True,'id':rid,'revision':record['revision'],'event_id':event,'provenance':record['provenance']}
+            if record.get('asserted'):result['recorded_as']={'origin':record['origin'],'evidence':record['evidence']}
+            return self._receipt(db,principal,key,payload,result)
 
     def lookup(self, principal, query='', project='', kinds=None, limit=5):
         start = time.monotonic()

@@ -15,10 +15,12 @@ def main():
     a=p.parse_args()
     root=home(); config=initialize(root)
     if not config.get('modules',{}).get('constellation'):p.error('Constellation is disabled')
+    # This CLI is how agents reach Constellation, so it is never the human: a
+    # human-direction claim made here is stored as the agent's assertion.
     # Use stdin for record bodies so private lessons need not appear in command
     # arguments. Retrieval is a local database operation, not a model call.
     values=json.load(sys.stdin) if a.stdin else json.loads(a.args)
-    result=constellation_call(Store(root/'workspace/constellation.sqlite3'),Principal('local-agent',('*',),True),a.operation,values)
+    result=constellation_call(Store(root/'workspace/constellation.sqlite3'),Principal('local-agent',('*',),True,human=False),a.operation,values)
     print(json.dumps(result,ensure_ascii=False))
 
 if __name__=='__main__':main()

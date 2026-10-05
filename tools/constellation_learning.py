@@ -4,7 +4,7 @@ import re
 import time
 import unicodedata
 from collections import Counter
-from constellation_store import encoded, text, identifier
+from constellation_store import encoded, text, identifier, HUMAN_PRINCIPAL, HUMAN_ATTRIBUTION
 
 STOP = set('a an the is are was were be been being it its this that these those i me my you your we our they their to from for of on in at with and or as by can could would should do does did have has had how what when where why please need want use using work working something about into'.split())
 STOP.update('which while after before then than just still also only any each another same new current existing make without through inside out but not cannot person human agent keep preserve changing changes'.split())
@@ -42,8 +42,16 @@ def outcomes(record, feedback):
                            for f in current if f.get('suggestion')][-2:]}
 
 
+def provenance(record):
+    """Who stands behind a record: 'human-confirmed' only when the human wrote it.
+    Records from before the field existed are judged by their owner."""
+    return record.get('provenance') or ('human-confirmed' if record.get('owner')==HUMAN_PRINCIPAL else 'agent-asserted')
+
+
 def warnings(record, outcome, records, now):
     result=[]
+    if provenance(record)=='agent-asserted' and (record.get('asserted') or any(record.get(k)==v for k,v in HUMAN_ATTRIBUTION.items())):
+        result.append('An agent reported this as the human’s direction; the human has not confirmed it.')
     if record['state']=='contradicted':result.append('Record is marked contradicted; inspect before applying.')
     if record['state']=='proposed' or record['evidence'] in ('inference','proposal'):
         result.append('Unvalidated proposal or inference; check fit.')
@@ -105,12 +113,13 @@ def brief(records, feedback, query, project='', limit=3, budget_bytes=6000, incl
         # stays visible so a compact brief cannot quietly hide a correction.
         outcome['reports']=[dict(f,reason=f['reason'][:180],evidence=f['evidence'][:120]) for f in outcome['reports'] if f['verdict']=='failed']
         item={k:r[k] for k in ('id','revision','claim','kind','evidence','state','owner','classification','projects','applies','limits')}
-        item.update(origin=r.get('origin','unspecified'),learning=r.get('learning',{}),subjects=r.get('subjects',[]),
+        item.update(origin=r.get('origin','unspecified'),provenance=provenance(r),asserted=r.get('asserted',{}),learning=r.get('learning',{}),subjects=r.get('subjects',[]),
                     match={'terms':matched,'via':via,'project_match':bool(project and project in r['projects'])},
                     outcome=outcome,warnings=warnings(r,outcome,records,now),
                     sources=[{k:s[k] for k in ('id','room','revision')} for s in r['sources']])
         items.append(item)
     result={'items':items,'coverage':'authorized captured lessons; project is a relevance hint, not a scope filter',
+            'provenance':'human-confirmed means the human saved it; agent-asserted is an agent’s report, including any human direction it claims',
             'scope':'No inference of permission from shared knowledge','offline':False,
             'ranking':'word relevance with capped reported-use adjustment; two reporters with predominant failures hold a revision for review',
             'measurement':{'returned_bytes':0,'budget_bytes':budget_bytes,'candidates':len(ranked),'truncated':False,'model_calls':0}}
