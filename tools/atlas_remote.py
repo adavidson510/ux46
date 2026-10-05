@@ -28,11 +28,15 @@ answered by the local agent.
 
 from __future__ import annotations
 
+import collections
 import json
+import logging
 import os
 import re
 import socket
+import stat
 import subprocess
+import tempfile
 import threading
 import time
 from http.client import HTTPConnection, HTTPException
@@ -117,6 +121,21 @@ FORWARDED_RESPONSE_HEADERS = ("Content-Disposition", "Accept-Ranges", "Content-R
 FORWARDED_REQUEST_HEADERS = ("Content-Type", "Accept", "Range")
 
 
+LOG = logging.getLogger("ux46.remote")
+
+#: How much of ssh's own diagnostics is kept, and only in this server's log.
+#: ssh's stderr names accounts, hosts, key paths and host-key fingerprints, so
+#: none of it is ever put into an error the browser can read.
+SSH_STDERR_TAIL_LINES = 20
+SSH_STDERR_LINE_CHARS = 300
+
+#: The only text the browser is given when the transport fails.
+TRANSPORT_MESSAGES = {
+    "tunnel_failed": "The secure connection to this agent's host could not be opened.",
+    "agent_unreachable": "This agent's console did not answer (it may not be running).",
+}
+
+
 class RemoteError(Exception):
     """The named agent could not answer. Never a reason to answer locally."""
 
@@ -141,24 +160,68 @@ class ProxiedResponse:
 # the SSH tunnel
 # ---------------------------------------------------------------------------
 
-def _free_local_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def _private_runtime_root() -> Path:
+    """Where per-tunnel private directories are made.
+
+    ``$XDG_RUNTIME_DIR`` is already per-user and 0700 on systemd hosts; the
+    temporary directory is the portable fallback. Either way the forward's
+    socket lives one level further down, in a directory this process creates
+    with mode 0700, so the parent's permissions are not what protects it.
+    """
+
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or ""
+    # sun_path is ~104 bytes on macOS; leave room for "/ux46-ssh-XXXXXXXX/fwd.sock".
+    if runtime and len(runtime.encode()) <= 64 and Path(runtime).is_dir():
+        return Path(runtime)
+    return Path(tempfile.gettempdir())
+
+
+class UnixHTTPConnection(HTTPConnection):
+    """Plain HTTP spoken over an ``AF_UNIX`` stream socket.
+
+    The host given to ``HTTPConnection`` only feeds the default ``Host``
+    header; callers here always set ``Host`` themselves so the remote console
+    sees the loopback authority it expects.
+    """
+
+    def __init__(self, socket_path: str, *, timeout: float):
+        super().__init__("127.0.0.1", timeout=timeout)
+        self.socket_path = socket_path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.settimeout(self.timeout)
+            sock.connect(self.socket_path)
+        except OSError:
+            sock.close()
+            raise
+        self.sock = sock
 
 
 class SshTunnel:
-    """One reused ``ssh -N -L`` forward to an account-local loopback port.
+    """One reused ``ssh -N -L`` forward to an account-local loopback endpoint.
 
     The command is built from validated configuration as a fixed argument
     vector — there is no shell, and no part of it comes from a request. Only
     the forward is opened: no remote command runs, and nothing is written on
     the far side.
+
+    The local end is a Unix socket inside a directory this process creates with
+    mode 0700, not a TCP port on 127.0.0.1. A loopback TCP port can be bound
+    first by any local account, and a readiness check that "something accepts
+    on the port" would then hand that account every prompt and let it forge the
+    agent's answers. Nobody but this account can create an entry in a 0700
+    directory, so a socket that appears there, owned by this uid, is ssh's own
+    listener. ``local_port`` is still accepted in configuration for
+    compatibility but no longer opens a TCP listener.
     """
+
+    SOCKET_NAME = "fwd.sock"
 
     def __init__(self, *, host: str, user: str = "", ssh_port: int = 0,
                  identity_file: str = "", remote_port: int = 0, remote_socket: str = "",
-                 local_port: int = 0, ssh_binary: str = "ssh"):
+                 local_port: int = 0, ssh_binary: str = "ssh", runtime_root: str = ""):
         if not SSH_HOST_RE.match(host or ""):
             raise ValueError("ssh host must be a plain hostname or ssh alias")
         if user and not SSH_USER_RE.match(user):
@@ -178,6 +241,7 @@ class SshTunnel:
             raise ValueError("remote_socket must be a short absolute account-private socket path")
         self.remote_socket = remote_socket
         self.remote_port = int(remote_port)
+        # Validated and kept for old configurations; see the class docstring.
         self.configured_local_port = int(local_port or 0)
         self.ssh_binary = ssh_binary
         self.identity_file = ""
@@ -189,44 +253,75 @@ class SshTunnel:
             if not resolved.is_file():
                 raise ValueError("the configured ssh identity file does not exist")
             self.identity_file = str(resolved)
+        self._runtime_root = Path(runtime_root) if runtime_root else None
+        self._dir: Path | None = None
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
-        self._port = 0
+        self._socket = ""
 
     @property
     def target(self) -> str:
         return f"{self.user}@{self.host}" if self.user else self.host
 
-    def _argv(self, local_port: int) -> list[str]:
+    def _argv(self, local_socket: str) -> list[str]:
         argv = [self.ssh_binary,
                 "-o", "BatchMode=yes",
                 "-o", "ExitOnForwardFailure=yes",
                 "-o", f"ConnectTimeout={int(CONNECT_TIMEOUT_S)}",
                 "-o", "ServerAliveInterval=15",
                 "-o", "ServerAliveCountMax=3",
+                # A stale socket left by a killed ssh is removed by ssh itself
+                # before it binds; the directory is private, so nothing else
+                # could have put an entry there.
+                "-o", "StreamLocalBindUnlink=yes",
+                "-o", "StreamLocalBindMask=0177",
                 "-N", "-T"]
         if self.identity_file:
             argv += ["-i", self.identity_file]
         if self.ssh_port:
             argv += ["-p", str(self.ssh_port)]
         destination = self.remote_socket or f"127.0.0.1:{self.remote_port}"
-        argv += ["-L", f"127.0.0.1:{local_port}:{destination}", self.target]
+        argv += ["-L", f"{local_socket}:{destination}", self.target]
         return argv
 
-    def _alive(self) -> bool:
-        return bool(self._proc and self._proc.poll() is None and self._port)
+    def _private_dir(self) -> Path:
+        """This tunnel's 0700 directory, created once and re-verified each use."""
 
-    def port(self) -> int:
-        """The live local port, opening or re-opening the forward as needed."""
+        if self._dir is None or not self._dir.is_dir():
+            root = self._runtime_root or _private_runtime_root()
+            self._dir = Path(tempfile.mkdtemp(prefix="ux46-ssh-", dir=str(root)))
+        info = os.lstat(self._dir)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077):
+            raise RemoteError("the ssh forward's private directory is not private",
+                              code="tunnel_failed")
+        return self._dir
+
+    @staticmethod
+    def _owned_socket(path: str) -> bool:
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return False
+        return stat.S_ISSOCK(info.st_mode) and info.st_uid == os.getuid()
+
+    def _alive(self) -> bool:
+        return bool(self._proc and self._proc.poll() is None and self._socket
+                    and self._owned_socket(self._socket))
+
+    def socket_path(self) -> str:
+        """The live local socket, opening or re-opening the forward as needed."""
 
         with self._lock:
             if self._alive():
-                return self._port
+                return self._socket
+            if self._proc is not None and self._proc.poll() is not None:
+                self._log_stderr(self._proc, "exited")
             self._stop_locked()
-            local_port = self.configured_local_port or _free_local_port()
+            local_socket = str(self._private_dir() / self.SOCKET_NAME)
             try:
                 proc = subprocess.Popen(
-                    self._argv(local_port),
+                    self._argv(local_socket),
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
@@ -234,46 +329,91 @@ class SshTunnel:
                     env=dict(os.environ, SSH_ASKPASS_REQUIRE="never"),
                 )
             except OSError as exc:
-                raise RemoteError(f"could not start the ssh forward: {exc}",
+                LOG.warning("ssh forward for %s could not start: %s", self.host,
+                            str(exc)[:SSH_STDERR_LINE_CHARS])
+                raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"],
                                   code="tunnel_failed") from exc
             self._proc = proc
+            self._start_stderr_reader(proc)
             deadline = time.monotonic() + TUNNEL_READY_TIMEOUT_S
             while time.monotonic() < deadline:
                 if proc.poll() is not None:
-                    detail = self._drain_stderr()
                     self._proc = None
-                    raise RemoteError(
-                        "the ssh forward to this agent's host closed immediately"
-                        + (f": {detail}" if detail else ""),
-                        code="tunnel_failed")
-                try:
-                    with socket.create_connection(("127.0.0.1", local_port), timeout=0.5):
-                        self._port = local_port
-                        return local_port
-                except OSError:
-                    time.sleep(0.15)
+                    self._log_stderr(proc, "closed immediately")
+                    raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"],
+                                      code="tunnel_failed")
+                # Only a socket this uid owns, in this uid's 0700 directory,
+                # counts as ssh's listener; a connect proves it is listening.
+                if self._owned_socket(local_socket):
+                    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    try:
+                        probe.settimeout(0.5)
+                        probe.connect(local_socket)
+                    except OSError:
+                        pass
+                    else:
+                        self._socket = local_socket
+                        return local_socket
+                    finally:
+                        probe.close()
+                time.sleep(0.15)
             self._stop_locked()
-            raise RemoteError("the ssh forward to this agent's host did not come up",
-                              code="tunnel_failed")
+            self._log_stderr(proc, "did not come up")
+            raise RemoteError(TRANSPORT_MESSAGES["tunnel_failed"], code="tunnel_failed")
 
-    def _drain_stderr(self) -> str:
-        """A short, bounded diagnostic. ssh never prints a key here."""
+    def open_connection(self, timeout: float) -> HTTPConnection:
+        return UnixHTTPConnection(self.socket_path(), timeout=timeout)
 
-        proc = self._proc
-        if not proc or not proc.stderr:
-            return ""
-        try:
-            raw = proc.stderr.read() or b""
-        except (OSError, ValueError):
-            return ""
-        return raw.decode("utf-8", "replace").strip().replace("\n", " ")[:200]
+    def _start_stderr_reader(self, proc: subprocess.Popen) -> None:
+        """Keep reading ssh's stderr for as long as ssh lives.
+
+        A long-lived ``ssh -N`` that warns repeatedly (keepalive, a refused
+        channel) would otherwise fill the pipe and block. Only a bounded tail
+        is kept, and it only ever reaches this server's log.
+        """
+
+        tail: collections.deque[str] = collections.deque(maxlen=SSH_STDERR_TAIL_LINES)
+        proc._ux46_stderr_tail = tail  # type: ignore[attr-defined]
+        stream = proc.stderr
+
+        def drain() -> None:
+            try:
+                for raw in iter(stream.readline, b""):
+                    tail.append(raw.decode("utf-8", "replace").rstrip()[:SSH_STDERR_LINE_CHARS])
+            except (OSError, ValueError):
+                pass
+            finally:
+                # The reader owns the pipe; closing it from another thread
+                # while a read is blocked would wait on the buffer lock.
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+        reader = threading.Thread(target=drain, name="ux46-ssh-stderr", daemon=True)
+        proc._ux46_stderr_reader = reader  # type: ignore[attr-defined]
+        reader.start()
+
+    def _log_stderr(self, proc: subprocess.Popen, what: str) -> None:
+        reader = getattr(proc, "_ux46_stderr_reader", None)
+        if reader is not None:
+            reader.join(timeout=1.0)
+        tail = list(getattr(proc, "_ux46_stderr_tail", ()))
+        LOG.warning("ssh forward for %s %s (exit %s)%s", self.host, what, proc.poll(),
+                    (": " + " | ".join(tail)) if tail else "")
 
     def mark_broken(self) -> None:
         with self._lock:
             self._stop_locked()
 
     def _stop_locked(self) -> None:
-        proc, self._proc, self._port = self._proc, None, 0
+        proc, self._proc, local_socket = self._proc, None, self._socket
+        self._socket = ""
+        if local_socket:
+            try:
+                os.unlink(local_socket)
+            except OSError:
+                pass
         if not proc:
             return
         try:
@@ -287,7 +427,10 @@ class SshTunnel:
                 except OSError:
                     pass
         finally:
-            for stream in (proc.stdout, proc.stderr):
+            reader = getattr(proc, "_ux46_stderr_reader", None)
+            if reader is not None:
+                reader.join(timeout=1.0)   # it closes stderr itself
+            for stream in (proc.stdout, None if reader is not None else proc.stderr):
                 if stream:
                     try:
                         stream.close()
@@ -296,6 +439,13 @@ class SshTunnel:
 
     def close(self) -> None:
         self.mark_broken()
+        with self._lock:
+            if self._dir is not None:
+                try:
+                    os.rmdir(self._dir)
+                except OSError:
+                    pass
+                self._dir = None
 
 
 class DirectPort:
@@ -311,6 +461,9 @@ class DirectPort:
 
     def port(self) -> int:
         return self._port
+
+    def open_connection(self, timeout: float) -> HTTPConnection:
+        return HTTPConnection("127.0.0.1", self._port, timeout=timeout)
 
     def mark_broken(self) -> None:
         pass
@@ -344,7 +497,7 @@ class RemoteConsole:
         return f"127.0.0.1:{self.remote_port}"
 
     def _open(self, timeout: float) -> HTTPConnection:
-        return HTTPConnection("127.0.0.1", self.transport.port(), timeout=timeout)
+        return self.transport.open_connection(timeout)
 
     def _raw(self, method: str, url: str, headers: dict, body: bytes | None,
              timeout: float) -> tuple[int, dict, bytes]:
@@ -370,10 +523,10 @@ class RemoteConsole:
                 code="agent_request_timeout") from exc
         except (OSError, HTTPException) as exc:
             self.transport.mark_broken()
-            raise RemoteError(
-                "this agent's console did not answer on its own loopback port "
-                f"(it may not be running there): {exc}",
-                code="agent_unreachable") from exc
+            LOG.warning("agent console request failed: %s: %s", type(exc).__name__,
+                        str(exc)[:SSH_STDERR_LINE_CHARS])
+            raise RemoteError(TRANSPORT_MESSAGES["agent_unreachable"],
+                              code="agent_unreachable") from exc
         finally:
             conn.close()
 

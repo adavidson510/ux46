@@ -158,5 +158,85 @@ class UsageStoreTests(unittest.TestCase):
             self.assertNotIn("dollars", result)
 
 
+
+class UsageCollectBoundaryTests(unittest.TestCase):
+    """S22: configured headers stay with the configured endpoint; state is private."""
+
+    def serve(self, routes):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                seen.append((self.path, dict(self.headers)))
+                status, headers, body = routes(self.path)
+                self.send_response(status)
+                for name, value in headers:
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}", seen
+
+    def test_a_redirect_is_refused_and_headers_never_follow_it(self):
+        import urllib.error
+        import ux46_usage_collect as collect
+        other, other_seen = self.serve(lambda path: (200, [("Content-Type", "application/json")], b'{"state": {}}'))
+        origin, _ = self.serve(lambda path: (302, [("Location", other + path)], b""))
+        config = {"headers": {"X-Fixture-Token": "fixture-secret"}}
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            collect.request(config, {"url": origin}, "/api/desktop-state")
+        self.assertEqual(caught.exception.code, 302)
+        self.assertEqual(other_seen, [])
+
+    def test_the_state_file_is_private_from_creation(self):
+        import stat as stat_module
+        from unittest import mock
+        import ux46_usage_collect as collect
+
+        def routes(path):
+            body = {"/api/desktop-state": {"state": {}}, "/api/usage": {"native_threads": []}}[path]
+            return 200, [("Content-Type", "application/json")], json.dumps(body).encode()
+
+        origin, _ = self.serve(routes)
+        config = {"desktop": {"url": origin},
+                  "agents": [{"id": "local", "label": "Local", "runtime": "codex", "url": origin}]}
+        modes = []
+        real_replace, real_chmod = os.replace, os.chmod
+
+        def replace(src, dst):
+            modes.append(stat_module.S_IMODE(os.stat(src).st_mode))
+            return real_replace(src, dst)
+
+        def chmod(path, mode, *args, **kwargs):
+            # A file tightened after it was written was readable before that.
+            if os.path.isfile(path):
+                modes.append(stat_module.S_IMODE(os.stat(path).st_mode))
+            return real_chmod(path, mode, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.umask(0)
+            try:
+                with mock.patch.object(collect.os, "replace", side_effect=replace), \
+                        mock.patch("os.chmod", side_effect=chmod):
+                    summary = collect.collect(config, tmp)
+            finally:
+                os.umask(previous)
+            self.assertEqual(summary["agents_reporting"], 1)
+            self.assertEqual(modes, [0o600])
+            state = Path(tmp) / "usage-collection.json"
+            self.assertEqual(stat_module.S_IMODE(state.stat().st_mode), 0o600)
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["usage-collection.json"])
+
+
 if __name__ == "__main__":
     unittest.main()

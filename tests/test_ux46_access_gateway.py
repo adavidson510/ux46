@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import unittest
+import unittest.mock
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -82,6 +83,20 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             self.send_response(401)
             self.send_header("WWW-Authenticate", 'Basic realm="SomeProvider"')
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(payload)
+            return
+        elif path in ("/html", "/api/tell/html"):
+            # An upstream answer that tries to set its own cookie and loosen
+            # the page policy on the console's origin.
+            payload = b"<script>document.title='upstream'</script>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Set-Cookie", "upstream=1; Path=/")
+            self.send_header("Content-Security-Policy", "default-src *")
+            self.send_header("X-Frame-Options", "ALLOWALL")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             if self.command != "HEAD":
@@ -712,6 +727,88 @@ class RecoveryGateway(GateCase):
                     launch.assert_not_called()
                 self.assertEqual(self.console.seen,[])
             finally: self.server.recovery_root = None
+
+
+class RelayedHeaders(GateCase):
+    """S19: what the console or Tell says about cookies and policy stops here."""
+
+    def headers_of(self, path: str) -> tuple[int, list, bytes]:
+        token = gate.Login(self.gate_state.stored).mint(USER)
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=30)
+        try:
+            connection.request("GET", path, headers={
+                "Host": HOST, "Tailscale-User-Login": USER,
+                "Cookie": f"{gate.COOKIE_NAME}={token}"})
+            response = connection.getresponse()
+            return response.status, response.getheaders(), response.read()
+        finally:
+            connection.close()
+
+    def assert_console_policy(self, headers: list) -> None:
+        named = lambda name: [v for k, v in headers if k.casefold() == name]
+        self.assertEqual(named("set-cookie"), [])
+        self.assertEqual(named("content-security-policy"), [gate.CONSOLE_CSP])
+        self.assertEqual(named("x-frame-options"), ["DENY"])
+        self.assertEqual(named("x-content-type-options"), ["nosniff"])
+
+    def test_an_upstream_cannot_set_cookies_or_loosen_the_policy(self):
+        status, headers, body = self.headers_of("/html")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"<script>document.title='upstream'</script>")
+        self.assertEqual(self.console.seen[0]["path"], "/html")
+        self.assert_console_policy(headers)
+
+    def test_ordinary_console_answers_and_audio_carry_the_same_policy(self):
+        for path in ("/api/bootstrap", "/binary", "/nolength", "/api/audio/fixture.wav"):
+            with self.subTest(path=path):
+                status, headers, _ = self.headers_of(path)
+                self.assertEqual(status, 200)
+                self.assert_console_policy(headers)
+
+    def test_tell_html_is_refused_and_tell_json_still_relays(self):
+        status, headers, body = self.headers_of("/api/tell/html")
+        self.assertEqual(status, 502)
+        self.assertNotIn(b"<script>", body)
+        self.assertEqual(json.loads(body)["error"], "tell_unexpected_content")
+        status, headers, body = self.headers_of("/api/tell/summary")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["upstream"], "tell")
+        self.assert_console_policy(headers)
+
+    def test_a_non_ascii_digit_length_is_refused_not_crashed(self):
+        for value in ("\u00b2", "+3", "0x3", "1" * 21):
+            with self.subTest(value=value):
+                status, _, _ = self.ask(method="POST", path="/echo",
+                                        raw=[("Content-Length", value)])
+                self.assertEqual(status, 400)
+        self.assertEqual(self.console.seen, [])
+
+
+@needs_scrypt
+class StartupFlags(unittest.TestCase):
+    """S19: a bad flag combination is a usage error, not a NameError."""
+
+    def test_bad_flag_combinations_exit_with_a_usage_error(self):
+        with TemporaryDirectory(prefix="ux46-gate-") as tmp:
+            path = Path(tmp) / "password.json"
+            gate.write_password(path, "user", PASSWORD)
+            modules = Path(tmp) / "modules.json"
+            modules.write_text('{"email": "yes"}')
+            base = ["--public-origin", ORIGIN, "--public-user", USER, "--port", "0",
+                    "--password-file", str(path), "--username", "user",
+                    "--boards-store", str(Path(tmp) / "boards.sqlite3")]
+            for extra in (["--modules-config", str(modules)],
+                          ["--visualization-root", tmp],
+                          ["--workspace-ui-dir", tmp]):
+                with self.subTest(extra=extra[0]):
+                    parser = gate.build_parser()
+                    args = parser.parse_args(base + extra)
+                    with self.assertRaises(SystemExit) as caught, \
+                            unittest.mock.patch("sys.stderr"):
+                        gate.serve(args, parser)
+                    self.assertEqual(caught.exception.code, 2)
+                    with self.assertRaises(SystemExit), unittest.mock.patch("sys.stderr"):
+                        gate.serve(parser.parse_args(base + extra))
 
 
 if __name__ == "__main__":

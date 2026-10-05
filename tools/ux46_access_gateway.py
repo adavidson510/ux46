@@ -153,6 +153,32 @@ BRAND_PREFIX = "/brand/"
 # the command line; nothing a request carries can name a third.
 TELL_PREFIX = "/api/tell"
 
+# Strict framing: plain ASCII digits only. ``str.isdigit`` also accepts
+# characters such as "²" that ``int`` then refuses, which crashed the handler.
+CONTENT_LENGTH_RE = re.compile(r"[0-9]{1,20}")
+
+# The console's own policy (tools/atlas_console.py ``_security_headers``).
+# Every relayed response carries exactly these, whatever the upstream sent, so
+# a console route or Tell answer that omits or loosens them cannot widen what
+# the browser allows on this origin.
+CONSOLE_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+               "media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; "
+               "frame-ancestors 'none'; base-uri 'none'")
+RELAY_SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("X-Frame-Options", "DENY"),
+    ("Content-Security-Policy", CONSOLE_CSP),
+)
+# Dropped from every upstream answer: the forced headers above (so there is
+# one copy, ours) and cookies, since this gate's login is the only cookie this
+# origin sets.
+RELAY_DROPPED_HEADERS = frozenset({"set-cookie", "set-cookie2", "x-content-type-options",
+                                   "x-frame-options", "content-security-policy"})
+# Tell only ever answers JSON (or speech); anything else is refused rather
+# than rendered on the console's origin.
+TELL_CONTENT_TYPES = ("application/json",)
+TELL_CONTENT_PREFIXES = ("audio/",)
+
 
 # ---------------------------------------------------------------------------
 # the password file
@@ -689,7 +715,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type',mime);self.send_header('Content-Length',str(len(body)))
         self.send_header('Cache-Control','no-store, private');self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Referrer-Policy','no-referrer');self.send_header('X-Frame-Options','DENY')
-        self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; frame-ancestors 'none'; base-uri 'none'")
+        self.send_header('Content-Security-Policy',CONSOLE_CSP)
         self.end_headers()
         if self.command!='HEAD':self.wfile.write(body)
         return True
@@ -795,7 +821,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return (HTTPStatus.BAD_REQUEST, "conflicting Content-Length")
         if lengths:
             raw = lengths[0].strip()
-            if not raw.isdigit():
+            if not CONTENT_LENGTH_RE.fullmatch(raw):
                 return (HTTPStatus.BAD_REQUEST, "malformed Content-Length")
             if int(raw) > MAX_UPLOAD:
                 return (HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "that upload is too large")
@@ -890,11 +916,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             return
         try:
-            self._relay(response)
+            self._relay(response, tell=upstream is self.server.tell)
         finally:
             connection.close()
 
-    def _relay(self, response) -> None:
+    def _relay(self, response, tell: bool = False) -> None:
         skip = set(HOP_BY_HOP)
         for value in response.headers.get_all("Connection") or []:
             for token in value.split(","):
@@ -903,9 +929,26 @@ class GatewayHandler(BaseHTTPRequestHandler):
         # would put a browser password box over UX46 for a login UX46 does not
         # hold. The status and the body go through; the challenge does not.
         skip.add("www-authenticate")
+        skip |= RELAY_DROPPED_HEADERS
         headers = [(name, value) for name, value in response.headers.items()
                    if name.casefold() not in skip and name.casefold() != "content-length"]
+        headers += RELAY_SECURITY_HEADERS
         length = response.headers.get("Content-Length")
+        if length is not None:
+            length = length.strip()
+            if not CONTENT_LENGTH_RE.fullmatch(length):
+                self.close_connection = True
+                self._refuse(HTTPStatus.BAD_GATEWAY, "the service behind this gate sent a malformed length")
+                return
+        if tell and not (self.command == "HEAD" or response.status in (204, 304)):
+            kind = response.headers.get_content_type()
+            if kind not in TELL_CONTENT_TYPES and not kind.startswith(TELL_CONTENT_PREFIXES):
+                self.close_connection = True
+                self._refuse(HTTPStatus.BAD_GATEWAY,
+                             json.dumps({"error": "tell_unexpected_content",
+                                         "message": "Tell answered with content this gate does not relay."}),
+                             content_type="application/json")
+                return
         # Older agent adapters return the complete WAV even for a Range
         # request. Adapt that authenticated response here so player upgrades
         # don't require interrupting every agent to replace its adapter.
@@ -913,7 +956,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         is_audio = re.fullmatch(r"/api/(?:agents/[^/]+/api/)?audio/[a-zA-Z0-9_-]+\.wav", self.path)
         if (self.command == "GET" and response.status == 200 and is_audio
                 and response.headers.get_content_type() == "audio/wav"
-                and length and length.isdigit() and int(length) <= 64 * 1024 * 1024):
+                and length and int(length) <= 64 * 1024 * 1024):
             data = response.read(int(length))
             if len(data) != int(length):
                 self.close_connection = True
@@ -1078,7 +1121,10 @@ def set_password_flow(args) -> int:
     return 0
 
 
-def serve(args) -> int:
+def serve(args, parser: argparse.ArgumentParser | None = None) -> int:
+    # Flag combinations are checked after the options parse, so the parser is
+    # needed here to report them; callers that built their own pass it in.
+    parser = parser or build_parser()
     if not args.public_origin or not args.public_user:
         print("--public-origin and --public-user are required: this gate is only "
               "ever in front of a private origin.", file=sys.stderr)
@@ -1115,6 +1161,12 @@ def serve(args) -> int:
                            console, tell, brand_dir, args.public_brand, args.verbose,
                            recovery_root=getattr(args, 'recovery_root', '') or None)
     server.modules = None
+
+    def refuse(message: str):
+        # Release the bound port before argparse exits with its usage error.
+        server.server_close()
+        parser.error(message)
+
     if args.modules_config:
         try:
             path = Path(args.modules_config).expanduser()
@@ -1125,18 +1177,18 @@ def serve(args) -> int:
                 raise ValueError('invalid module settings')
             server.modules = dict(email=False, tell=False, constellation=True) | modules
         except (OSError, ValueError):
-            parser.error('--modules-config must contain only boolean email, tell and constellation settings')
+            refuse('--modules-config must contain only boolean email, tell and constellation settings')
     from ux46_board_gateway import BoardAPI
     server.boards = BoardAPI(args.boards_store)
     if args.workspace_store:
         from ux46_workspace_api import WorkspaceAPI
         server.workspace_api = WorkspaceAPI(args.workspace_store,args.constellation_client or None, modules=server.modules)
     if args.visualization_root:
-        if not args.visualization_kit:parser.error('--visualization-root requires --visualization-kit')
+        if not args.visualization_kit:refuse('--visualization-root requires --visualization-kit')
         from ux46_visualizations import Visualizations
         server.visualizations = Visualizations(args.visualization_root, args.visualization_kit)
     if args.workspace_ui_dir:
-        if not args.workspace_store:parser.error('--workspace-ui-dir requires --workspace-store')
+        if not args.workspace_store:refuse('--workspace-ui-dir requires --workspace-store')
         server.workspace_ui = Path(args.workspace_ui_dir).expanduser().resolve()
     if args.account_usage_config:
         from ux46_account_gateway import AccountUsageAPI
@@ -1160,10 +1212,11 @@ def serve(args) -> int:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if args.set_password:
         return set_password_flow(args)
-    return serve(args)
+    return serve(args, parser)
 
 
 if __name__ == "__main__":
