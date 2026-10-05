@@ -33,6 +33,34 @@ class Reminders(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.action(dict(id='job',revision=1,action='complete'))
         with self.assertRaises(ValueError):self.store.action(dict(id='job',revision=1,action='execute'))
 
+class Malformed(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.store=ScheduleStore(self.temp.name)
+        self.good=dict(id='good',kind='reminder',title='Review',counter='constellation.applied_uses',baseline=1,uses=10,deadline=2000)
+        self.store.register(self.good)
+    def test_register_refuses_a_reminder_without_its_shape(self):
+        for broken in (dict(id='r1',kind='reminder'),dict(self.good,id='r2',deadline='soon'),dict(self.good,id='r3',uses=0),
+                       dict(self.good,id='r4',baseline=-1),dict({k:v for k,v in self.good.items() if k!='baseline'},id='r8'),dict(self.good,id='r5',title=''),dict(self.good,id='r6',uses=True),
+                       dict(self.good,id='r7',deadline=float('nan')),dict(self.good,id=''),dict(self.good,kind='other'),['not','a','task']):
+            with self.subTest(broken):
+                with self.assertRaises(ValueError):self.store.register(broken)
+        self.assertEqual([t['id'] for t in self.store.view(0)['items']],['good'])
+        self.store.register(dict(id='dated',kind='reminder',title='Date only',uses=10,deadline=3000))
+    def test_a_malformed_stored_record_is_skipped_and_reported(self):
+        # Rows written before validation existed, or edited on disk, must not break the schedule.
+        with self.store.db() as db:
+            db.execute('INSERT INTO tasks VALUES (?,?)',('legacy',json.dumps({'id':'legacy','kind':'reminder','state':'scheduled','revision':1,'created_at':1})))
+            db.execute('INSERT INTO tasks VALUES (?,?)',('garbled','{not json'))
+        view=self.store.view(2500)
+        self.assertEqual([t['id'] for t in view['items']],['good'])
+        self.assertEqual(view['due'],1)
+        self.assertEqual({i['id'] for i in view['invalid']},{'legacy','garbled'})
+        ticked=self.store.tick(uses=50,now=1000)
+        self.assertEqual(ticked['due'],1);self.assertEqual(len(ticked['invalid']),2)
+        with self.store.db() as db:
+            self.assertEqual(db.execute("SELECT body FROM tasks WHERE id='garbled'").fetchone()[0],'{not json')
+
 class Collection(unittest.TestCase):
     def test_desktops_only_safe_deduplicated_rooms(self):
         from ux46_usage_collect import desktop_rooms

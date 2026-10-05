@@ -8,6 +8,38 @@ from pathlib import Path
 from constellation_store import Conflict
 
 
+def _number(value):
+    return type(value) in (int, float) and value == value and abs(value) != float('inf')
+
+
+def task_problem(task, *, stored=False):
+    """Return why a task record is unusable, or None.
+
+    register() refuses a bad shape up front; view() and tick() use the same
+    check to skip and report a stored record (written before this check, or
+    edited on disk) instead of letting one bad row break the whole schedule.
+    """
+    if not isinstance(task, dict): return 'not an object'
+    tid = task.get('id')
+    if not isinstance(tid, str) or not tid or len(tid) > 100: return 'invalid id'
+    if task.get('kind') not in ('reminder', 'job'): return 'unknown kind'
+    title = task.get('title')
+    if title is not None and (not isinstance(title, str) or len(title) > 200): return 'invalid title'
+    if task['kind'] == 'reminder':
+        if not isinstance(title, str) or not title.strip(): return 'reminder needs a title'
+        if not _number(task.get('deadline')): return 'reminder needs a numeric deadline'
+        if type(task.get('uses')) is not int or task['uses'] < 1: return 'reminder needs uses >= 1'
+        # A counted reminder measures progress from its baseline; a date-only one may omit it.
+        if (task.get('counter') is not None or 'baseline' in task) and (
+                type(task.get('baseline')) is not int or task['baseline'] < 0): return 'reminder needs baseline >= 0'
+        if 'progress' in task and not _number(task['progress']): return 'invalid progress'
+        if 'counter' in task and not isinstance(task['counter'], str): return 'invalid counter'
+    if stored:
+        if type(task.get('revision')) is not int or not _number(task.get('created_at')): return 'invalid revision'
+        if not isinstance(task.get('state'), str): return 'invalid state'
+    return None
+
+
 class ScheduleStore:
     def __init__(self, directory):
         root = Path(directory)
@@ -22,8 +54,8 @@ class ScheduleStore:
         return sqlite3.connect(self.path, timeout=5)
 
     def register(self, task):
-        if task['kind'] not in ('reminder', 'job') or not task['id'] or len(task['id']) > 100:
-            raise ValueError('Invalid task')
+        problem = task_problem(task)
+        if problem: raise ValueError('Invalid task: ' + problem)
         with self.db() as db:
             if db.execute('SELECT 1 FROM tasks WHERE id=?', (task['id'],)).fetchone():
                 raise Conflict('Task already registered')
@@ -54,7 +86,8 @@ class ScheduleStore:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             for tid, raw in db.execute('SELECT id,body FROM tasks').fetchall():
-                task = json.loads(raw)
+                task = _load(raw)
+                if task_problem(task, stored=True): continue  # Left untouched; view() reports it.
                 if task['kind'] == 'reminder' and task['state'] in ('scheduled', 'due'):
                     if uses is not None and task.get('counter') == 'constellation.applied_uses':
                         # High-water mark: a later feedback revision must not undo a due reminder.
@@ -74,18 +107,31 @@ class ScheduleStore:
     def view(self, now=None):
         now = time.time() if now is None else now
         with self.db() as db:
-            tasks = [json.loads(row[0]) for row in db.execute('SELECT body FROM tasks')]
+            rows = db.execute('SELECT id,body FROM tasks').fetchall()
             row = db.execute("SELECT body FROM metadata WHERE key='tick'").fetchone()
-        tick = json.loads(row[0]) if row else {}
+        tick = _load(row[0]) if row else None
+        if not isinstance(tick, dict) or not _number(tick.get('at')): tick = {}
+        tasks, invalid = [], []
+        for tid, raw in rows:
+            task = _load(raw); problem = task_problem(task, stored=True)
+            if problem: invalid.append({'id': tid, 'problem': problem})
+            else: tasks.append(task)
         for task in tasks:
             if task['kind'] == 'reminder' and task['state'] == 'scheduled' and now >= task['deadline']:
                 task.update(state='due', due_reason='date')  # Time deadlines still surface if checker is down.
             if task['kind'] == 'job':
-                task['stale'] = not task.get('checked_at') or now-task['checked_at'] > 900
+                task['stale'] = not _number(task.get('checked_at')) or now-task['checked_at'] > 900
         return {'items':sorted(tasks,key=lambda t:(t['state']!='due',t['kind']!='reminder',t['created_at'])),
-                'due':sum(t['state']=='due' for t in tasks), 'checked_at':tick.get('at'),
+                'due':sum(t['state']=='due' for t in tasks), 'invalid':invalid, 'checked_at':tick.get('at'),
                 'checker_stale':bool(tasks) and (not tick.get('at') or now-tick['at']>900), 'model_calls':0,
                 'coverage':'Registered UX46 tasks only; operating-system and other agents’ schedules are not inventoried.'}
+
+
+def _load(raw):
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def observe(directory, client_config, replica_directory=None):
