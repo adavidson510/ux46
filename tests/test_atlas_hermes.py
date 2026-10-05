@@ -1230,6 +1230,30 @@ class QueueTest(HermesAdapterTest):
         self.assertEqual(cancelled["cancelled"]["status"], "cancelled")
         self.assertEqual(self.harness.calls("prompt.submit"), [])
 
+    def test_a_cancel_after_the_queue_read_is_never_sent(self) -> None:
+        # S04: the owner cancels after the loop read its snapshot but before
+        # it claimed the row; the claim must lose and nothing is submitted.
+        room = self.room_for(S_LINKED)
+        journal = self.harness.service.journal
+        real_ready = journal.queue_ready
+
+        def ready():
+            snapshot = real_ready()
+            for item in snapshot:
+                catalog = self.harness.service.catalog
+                live = catalog.live_session_for(catalog.room(item["room"]).session_id)
+                if item["client_id"] == "queuedrace01" and item["status"] == "pending" and live:
+                    journal.queue_cancel(item["client_id"], item["version"])
+            return snapshot
+
+        journal.queue_ready = ready
+        self.harness.post(f"/api/room/{room}/pending", {
+            "client_id": "queuedrace01", "body": "never mind"})
+        self.harness.post(f"/api/room/{room}/continue")
+        time.sleep(4.5)
+        self.assertEqual(self.harness.calls("prompt.submit"), [])
+        self.assertEqual(journal.queue_get("queuedrace01")["status"], "cancelled")
+
     def test_a_stale_version_cannot_clobber_a_queued_message(self) -> None:
         room = self.room_for(S_LINKED)
         self.harness.post(f"/api/room/{room}/pending",

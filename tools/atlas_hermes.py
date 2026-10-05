@@ -2281,10 +2281,16 @@ class HermesService:
                 room = self.catalog.room(item["room"])
                 if room is None or not self.catalog.live_session_for(room.session_id):
                     continue
+                # Claim as one compare-and-set at the version just read and send
+                # the claimed body (the shared Agent3 journal's queue_mark): a
+                # Cancel or Edit that lands after queue_ready() wins, never the send.
                 try:
-                    self.journal.queue_mark(item["client_id"], DISPATCHING)
-                    result = self.dispatch(room, item["client_id"], item["body"],
-                                           item.get("attachments") or [])
+                    claimed = self.journal.queue_mark(item["client_id"], DISPATCHING,
+                                                      expect=PENDING, version=item["version"])
+                    if claimed is None:
+                        continue
+                    result = self.dispatch(room, item["client_id"], claimed["body"],
+                                           claimed.get("attachments") or [])
                     status = (ACCEPTED if result.get("accepted")
                               else UNCERTAIN if result.get("uncertain")
                               else FAILED if result.get("failed") else DISPATCHING)

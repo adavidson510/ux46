@@ -831,6 +831,57 @@ class QueueTest(RivetAdapterTest):
         self.assertEqual(journal.queue_get(other)["status"], agent3.ACCEPTED)
         self.assertTrue(self.harness.service._worker.is_alive())
 
+    def _race_queue_read(self, change) -> None:
+        """Let the owner act after the queue loop read its snapshot (S04).
+
+        queue_ready() hands back the row as read, then `change` runs on the
+        real journal before the loop gets to claim it - the exact window a
+        Cancel or Edit can land in.
+        """
+
+        journal = self.harness.service.journal
+        real_ready = journal.queue_ready
+        raced: list[str] = []
+
+        def ready():
+            snapshot = real_ready()
+            for item in snapshot:
+                # Only once the view is attached, so this pass will claim it.
+                if item["client_id"] not in raced and item["room"] in journal.attached():
+                    raced.append(item["client_id"])
+                    change(journal, item)
+            return snapshot
+
+        journal.queue_ready = ready
+
+    def test_a_cancel_after_the_queue_read_is_never_sent(self) -> None:
+        self._race_queue_read(
+            lambda journal, item: journal.queue_cancel(item["client_id"], item["version"]))
+        self.harness.post(f"/api/room/{self.main_room}/pending",
+                          {"client_id": "client-race0001", "body": "never mind"})
+        self.harness.post(f"/api/room/{self.main_room}/continue")
+        time.sleep(1.5)
+        self.assertEqual(self.harness.calls("chat.send"), [])
+        journal = self.harness.service.journal
+        self.assertEqual(journal.queue_get("client-race0001")["status"], agent3.CANCELLED)
+        # Cancelled is final: even an unconditional mark cannot revive it.
+        journal.queue_mark("client-race0001", agent3.PENDING)
+        self.assertEqual(journal.queue_get("client-race0001")["status"], agent3.CANCELLED)
+
+    def test_an_edit_after_the_queue_read_sends_the_edited_body(self) -> None:
+        self._race_queue_read(
+            lambda journal, item: journal.queue_update(
+                item["client_id"], item["version"], "edited", None))
+        self.harness.post(f"/api/room/{self.main_room}/pending",
+                          {"client_id": "client-race0002", "body": "original"})
+        self.harness.post(f"/api/room/{self.main_room}/continue")
+        deadline = time.time() + 10
+        while time.time() < deadline and not self.harness.calls("chat.send"):
+            time.sleep(0.2)
+        time.sleep(0.3)
+        sends = self.harness.calls("chat.send")
+        self.assertEqual([send["params"]["message"] for send in sends], ["edited"])
+
     def test_a_stale_cancel_is_refused(self) -> None:
         self.harness.post(f"/api/room/{self.main_room}/pending",
                           {"client_id": "client-cccc3333", "body": "hold"})

@@ -814,16 +814,38 @@ class Journal:
             "SELECT * FROM queue WHERE status = ? ORDER BY created_at", (PENDING,)).fetchall()
         return [self._queue_json(row) for row in rows]
 
-    def queue_mark(self, client_id: str, status: str, reason: str = "") -> dict:
+    def queue_mark(self, client_id: str, status: str, reason: str = "", *,
+                   expect: str | tuple[str, ...] | None = None,
+                   version: int | None = None) -> dict | None:
+        """Move a queued row to `status` as one compare-and-set.
+
+        With `expect` (and optionally `version`) the row only moves if it is
+        still in that state at that version; otherwise nothing changes and
+        None is returned, so the queue loop can never send a row the owner
+        cancelled or edited after it was read. A cancelled row is the owner's
+        final word and never moves again, whoever asks.
+        """
+
+        clauses = ["client_id = ?", "status <> ?"]
+        params: list = [client_id, CANCELLED]
+        if expect is not None:
+            wanted = (expect,) if isinstance(expect, str) else tuple(expect)
+            clauses.append("status IN (%s)" % ",".join("?" * len(wanted)))
+            params.extend(wanted)
+        if version is not None:
+            clauses.append("version = ?")
+            params.append(version)
         with self._lock, self._connect() as conn:
-            conn.execute(
+            changed = conn.execute(
                 "UPDATE queue SET status = ?, reason = ?, version = version + 1,"
-                " updated_at = ? WHERE client_id = ?",
-                (status, reason[:400], time.time(), client_id),
-            )
+                " updated_at = ? WHERE " + " AND ".join(clauses),
+                (status, reason[:400], time.time(), *params),
+            ).rowcount
             row = conn.execute("SELECT * FROM queue WHERE client_id = ?",
                                (client_id,)).fetchone()
-        return self._queue_json(row)
+        if not changed and (expect is not None or version is not None):
+            return None
+        return self._queue_json(row) if row else None
 
     def queue_cancel(self, client_id: str, version: int) -> dict:
         with self._lock, self._connect() as conn:
@@ -2528,11 +2550,17 @@ class RivetService:
                 self.journal.queue_mark(item["client_id"], PENDING,
                                         "the gateway no longer lists that session")
                 continue
-            self.journal.queue_mark(item["client_id"], DISPATCHING)
+            # Claim the row as one compare-and-set at the version just read and
+            # send what was claimed, not the snapshot: a Cancel or Edit that
+            # lands between queue_ready() and this claim wins, never the send.
+            claimed = self.journal.queue_mark(item["client_id"], DISPATCHING,
+                                              expect=PENDING, version=item["version"])
+            if claimed is None:
+                continue
             with self._send_lock:
                 try:
-                    result = self.dispatch(room, item["client_id"], item["body"],
-                                           item["attachments"])
+                    result = self.dispatch(room, item["client_id"], claimed["body"],
+                                           claimed["attachments"])
                 except AdapterError as exc:
                     self.journal.queue_mark(item["client_id"], FAILED, exc.message)
                     self.events.publish({"type": "queued_message", "room": room.id,
