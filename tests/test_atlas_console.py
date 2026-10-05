@@ -237,6 +237,8 @@ class SecurityTests(unittest.TestCase):
     def test_other_sites_are_refused_on_every_verb(self):
         # A page elsewhere can make the browser send our own Host; the
         # browser's Sec-Fetch-Site and Origin labels are what give it away.
+        # These carry no navigation labels, so they are fetches and refused
+        # even for "/"; a followed link is test_a_deep_link_from_another_site.
         own = f"http://127.0.0.1:{self.h.port}"
         for path in ("/", "/api/bootstrap", "/api/events?after=0&timeout=0"):
             for site in ("cross-site", "same-site", "Cross-Site"):
@@ -255,6 +257,30 @@ class SecurityTests(unittest.TestCase):
         status, payload = self.h.call(
             "PUT", "/api/room/fixture/console-work/draft", body={"body": "x", "base_version": 0},
             headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(status, 403)
+        self.assertEqual(payload["error"], "cross_site")
+
+    def test_a_deep_link_from_another_site_opens_the_page(self):
+        # S12: clicking a ?room= link in mail or chat is a cross-site
+        # top-level navigation; it opens the page. Navigation labels never
+        # unlock /api/ or a mutation, and a cross-site fetch of / still fails.
+        navigate = {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+        for site in ("cross-site", "same-site"):
+            status, _ = self.h.call("GET", "/?room=fixture/console-work",
+                                    headers={"Sec-Fetch-Site": site, **navigate})
+            self.assertEqual(status, 200, site)
+            for path in ("/api/bootstrap", "/api/events?after=0&timeout=0"):
+                status, payload = self.h.call("GET", path, headers={"Sec-Fetch-Site": site, **navigate})
+                self.assertEqual(status, 403, (path, site))
+                self.assertEqual(payload["error"], "cross_site")
+            for headers in ({"Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"},
+                            {"Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "iframe"},
+                            {"Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "document"}):
+                status, payload = self.h.call("GET", "/", headers={"Sec-Fetch-Site": site, **headers})
+                self.assertEqual(status, 403, (site, headers))
+        status, payload = self.h.call(
+            "PUT", "/api/room/fixture/console-work/draft", body={"body": "x", "base_version": 0},
+            headers={"Sec-Fetch-Site": "cross-site", **navigate})
         self.assertEqual(status, 403)
         self.assertEqual(payload["error"], "cross_site")
 

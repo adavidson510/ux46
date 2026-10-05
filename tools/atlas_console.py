@@ -1297,7 +1297,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         self._json(status, payload)
 
     # -- request gate ------------------------------------------------------
-    def _gate(self) -> AuthDecision:
+    def _gate(self, method: str = "GET") -> AuthDecision:
         service = self.service
         host = self.headers.get("Host", "")
         client_ip = self.client_address[0] if self.client_address else ""
@@ -1311,7 +1311,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         # Absent (curl, older browsers), "none" (a bookmark or typed URL) and
         # "same-origin" pass; Origin, when sent, must be exactly ours.
         fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().casefold()
-        if fetch_site in ("cross-site", "same-site"):
+        if fetch_site in ("cross-site", "same-site") and not self._top_level_page_navigation(method):
             raise ApiError(HTTPStatus.FORBIDDEN, "cross_site",
                            "this console only answers its own pages")
         origin = self.headers.get("Origin")
@@ -1319,6 +1319,26 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             raise ApiError(HTTPStatus.FORBIDDEN, "bad_origin",
                            "a request must come from this console's own page")
         return decision
+
+    def _top_level_page_navigation(self, method: str) -> bool:
+        """Is this a person following a link to a console page (S12)?
+
+        A ?room= deep link clicked in mail, chat or another tailnet host
+        arrives labelled cross-site; refusing it broke ordinary links. Only a
+        top-level document navigation to a non-API page is let through:
+        GET/HEAD, outside /api/, Sec-Fetch-Mode navigate and Sec-Fetch-Dest
+        document. Every /api/ route and every mutation stays refused, and
+        X-Frame-Options/CSP frame-ancestors already stop the page being framed.
+        """
+
+        if method not in ("GET", "HEAD"):
+            return False
+        path = urlparse(self.path).path
+        if path == "/api" or path.startswith("/api/"):
+            return False
+        mode = (self.headers.get("Sec-Fetch-Mode") or "").strip().casefold()
+        dest = (self.headers.get("Sec-Fetch-Dest") or "").strip().casefold()
+        return mode == "navigate" and dest == "document"
 
     def _check_mutation(self, decision: AuthDecision) -> None:
         service = self.service
@@ -1443,7 +1463,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             # an upload's worth of bytes buffered first. A refusal ends the
             # connection rather than draining a body nobody admitted.
             try:
-                decision = self._gate()
+                decision = self._gate(method)
                 if method in ("POST", "PUT", "PATCH", "DELETE"):
                     self._check_mutation(decision)
             except ApiError:
