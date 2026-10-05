@@ -800,3 +800,35 @@ for (const outcome of ['resumed', 'queued', 'failed', 'already active']) {
     await expect(page.locator('#draft')).toHaveValue('unsent words');
   });
 }
+
+for (const format of ['native ID', 'room descriptor']) {
+  test(`new CP conversation opens immediately from ${format}`, async ({page}) => {
+    await fixture(page);
+    const room = 'fixture/new-cp';
+    const posts = [];
+    page.on('request', request => { if (request.method() === 'POST') posts.push(new URL(request.url()).pathname); });
+    await page.route('**/api/agents/cp/api/session-options', route => route.fulfill({json: {available: true, projects: [{id: 'fixture', name: 'Fixture'}]}}));
+    await page.route('**/api/agents/cp/api/sessions', route => route.fulfill({json: {
+      state: 'created', new_room: format === 'native ID' ? room : {id: room, title: 'Code Review', project_id: 'fixture'},
+      message: 'Started a CP conversation. It is empty until the first message.'
+    }}));
+    await page.route('**/api/agents/cp/api/room/fixture/new-cp', route => route.fulfill({json: detail(room, {title:'Code Review', runtime:'claude'})}));
+    await page.route('**/api/agents/cp/api/room/fixture/new-cp/history?**', route => route.fulfill({json: history([])}));
+    await page.evaluate(() => {
+      state.agents = [{id:'local',label:'Keel'}, {id:'cp',label:'CP'}];
+      document.querySelector('#draft').value = '';
+      openNewConversation(null, 'cp');
+    });
+    await page.locator('#newList [data-project="fixture"]').click();
+    await page.locator('#newName').fill('Code Review');
+    await page.locator('#newStart').click();
+    await expect(page.locator('#newDialog')).not.toBeVisible();
+    await expect.poll(() => page.evaluate(() => ({agent:state.agent, room:state.room}))).toEqual({agent:'cp',room});
+    await expect(page.locator('#draft')).toBeVisible();
+    await expect(page.locator('#draft')).toBeEditable();
+    await expect(page.locator('#draft')).toHaveValue('');
+    expect(await page.evaluate(() => state.tabs.some(tab => tab.agent === 'cp' && tab.room === 'fixture/new-cp' && tab.title === 'Code Review'))).toBe(true);
+    expect(posts.filter(p => p.endsWith('/api/sessions'))).toHaveLength(1);
+    expect(posts.some(p => p.endsWith('/submit'))).toBe(false);
+  });
+}

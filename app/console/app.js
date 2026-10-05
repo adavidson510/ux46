@@ -2876,8 +2876,13 @@ async function submitNewConversation() {
   }
   if (gen !== newConv.gen || !newConv.open) return false;
 
-  if (result && result.state === "created" && result.new_room && result.new_room.id) {
-    return finishNewConversation(agent, result.new_room);
+  // Native adapters return either a room ID (CP) or a room descriptor.
+  // Both confirm creation; an empty transcript does not mean creation failed.
+  const createdRoom = typeof result?.new_room === "string"
+    ? {id: result.new_room, title: body.title || "New conversation", project_id: body.project_id}
+    : result?.new_room;
+  if (result?.state === "created" && createdRoom?.id) {
+    return finishNewConversation(agent, createdRoom);
   }
   if (result && result.state === "uncertain") {
     unknown = true;
