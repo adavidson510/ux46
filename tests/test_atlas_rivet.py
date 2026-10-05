@@ -799,6 +799,38 @@ class QueueTest(RivetAdapterTest):
         time.sleep(0.8)
         self.assertEqual(self.harness.calls("chat.send"), [])
 
+    def test_an_unexpected_send_failure_marks_the_item_and_keeps_the_queue(self) -> None:
+        # One item blows up inside the transport with something no Gateway*
+        # handler expects; the loop must record it uncertain (it may have
+        # gone out) and still deliver the next item.
+        real_call = self.harness.transport.call
+        blown: list[str] = []
+
+        def flaky(method, params=None, timeout=20.0):
+            if method == "chat.send" and not blown:
+                blown.append(params["idempotencyKey"])
+                raise RuntimeError("synthetic transport fault")
+            return real_call(method, params, timeout=timeout)
+
+        self.harness.transport.call = flaky
+        self.harness.service.config.quiet = True
+        for client_id in ("client-eeee5555", "client-ffff6666"):
+            self.harness.post(f"/api/room/{self.main_room}/pending",
+                              {"client_id": client_id, "body": client_id})
+        self.harness.post(f"/api/room/{self.main_room}/continue")
+        journal = self.harness.service.journal
+        deadline = time.time() + 10
+        while time.time() < deadline and not (
+                blown and self.harness.calls("chat.send")):
+            time.sleep(0.2)
+        time.sleep(0.3)
+        failed_id = blown[0].split(":", 1)[1]
+        other = ({"client-eeee5555", "client-ffff6666"} - {failed_id}).pop()
+        self.assertEqual(journal.queue_get(failed_id)["status"], agent3.UNCERTAIN)
+        self.assertEqual(journal.submission(failed_id)["status"], agent3.UNCERTAIN)
+        self.assertEqual(journal.queue_get(other)["status"], agent3.ACCEPTED)
+        self.assertTrue(self.harness.service._worker.is_alive())
+
     def test_a_stale_cancel_is_refused(self) -> None:
         self.harness.post(f"/api/room/{self.main_room}/pending",
                           {"client_id": "client-cccc3333", "body": "hold"})
@@ -807,6 +839,24 @@ class QueueTest(RivetAdapterTest):
             {"version": 99})
         self.assertEqual(status, 409)
         self.assertEqual(payload["error"], "queue_stale")
+
+
+class CliTransportTest(unittest.TestCase):
+    def test_an_argv_too_large_for_exec_is_a_definite_gateway_error(self) -> None:
+        # The CLI carries params in one argv element; past the kernel's
+        # per-argument limit exec fails with E2BIG before anything is sent.
+        transport = agent3.CliTransport(["/bin/true"])
+        with self.assertRaises(agent3.GatewayError) as caught:
+            transport.call("chat.send", {"message": "\u6f22" * 60000})
+        self.assertNotIsInstance(caught.exception, agent3.GatewayUncertain)
+        self.assertEqual(caught.exception.code, "cli_exec_failed")
+        self.assertIn("too large", str(caught.exception))
+
+    def test_an_unstartable_cli_is_a_gateway_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transport = agent3.CliTransport([tmp])  # a directory: EACCES
+            with self.assertRaises(agent3.GatewayError):
+                transport.call("agent.identity.get", {})
 
 
 class BoundaryTest(RivetAdapterTest):

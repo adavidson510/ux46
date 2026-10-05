@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import atlas_creation as creation
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -540,6 +541,19 @@ class CliTransport(Transport):
                 "the openclaw CLI did not return in time; this adapter will not "
                 "repeat the call",
             ) from exc
+        except OSError as exc:
+            # The CLI takes its params as one argv element, so a long message
+            # or inline attachment can exceed the kernel's per-argument limit
+            # (E2BIG). exec failed before the child ran: nothing reached the
+            # gateway, so this is a definite refusal, never an uncertain send.
+            self._detail = str(exc)[:400]
+            raise GatewayError(
+                "cli_exec_failed",
+                "the openclaw CLI could not be started for this call"
+                + (" (the message is too large for the CLI transport; the "
+                   "persistent bridge has no such limit)"
+                   if getattr(exc, "errno", None) == errno.E2BIG else
+                   f" ({exc.strerror or exc})")) from exc
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip()[:400]
             self._detail = detail
@@ -2480,33 +2494,61 @@ class RivetService:
         while not self._stop.is_set():
             self._queue_wake.wait(timeout=2.0)
             self._queue_wake.clear()
-            attached = self.journal.attached()
-            for item in self.journal.queue_ready():
-                if self._stop.is_set():
-                    return
-                if item["room"] not in attached:
+            try:
+                self._queue_pass()
+            except Exception:  # noqa: BLE001 - the queue thread must outlive any one pass
+                if not self.config.quiet:
+                    traceback.print_exc()
+
+    def _queue_pass(self) -> None:
+        attached = self.journal.attached()
+        for item in self.journal.queue_ready():
+            if self._stop.is_set():
+                return
+            if item["room"] not in attached:
+                continue
+            room = self.catalog.room(item["room"])
+            if room is None:
+                self.journal.queue_mark(item["client_id"], PENDING,
+                                        "the gateway no longer lists that session")
+                continue
+            self.journal.queue_mark(item["client_id"], DISPATCHING)
+            with self._send_lock:
+                try:
+                    result = self.dispatch(room, item["client_id"], item["body"],
+                                           item["attachments"])
+                except AdapterError as exc:
+                    self.journal.queue_mark(item["client_id"], FAILED, exc.message)
+                    self.events.publish({"type": "queued_message", "room": room.id,
+                                         "client_id": item["client_id"],
+                                         "state": FAILED})
                     continue
-                room = self.catalog.room(item["room"])
-                if room is None:
-                    self.journal.queue_mark(item["client_id"], PENDING,
-                                            "the gateway no longer lists that session")
+                except Exception as exc:  # noqa: BLE001 - report, never kill the loop
+                    self._queue_unexpected(room, item["client_id"], exc)
                     continue
-                self.journal.queue_mark(item["client_id"], DISPATCHING)
-                with self._send_lock:
-                    try:
-                        result = self.dispatch(room, item["client_id"], item["body"],
-                                               item["attachments"])
-                    except AdapterError as exc:
-                        self.journal.queue_mark(item["client_id"], FAILED, exc.message)
-                        self.events.publish({"type": "queued_message", "room": room.id,
-                                             "client_id": item["client_id"],
-                                             "state": FAILED})
-                        continue
-                status = result["submission"]["status"]
-                self.journal.queue_mark(item["client_id"], status,
-                                        result["submission"].get("detail", ""))
-                self.events.publish({"type": "queued_message", "room": room.id,
-                                     "client_id": item["client_id"], "state": status})
+            status = result["submission"]["status"]
+            self.journal.queue_mark(item["client_id"], status,
+                                    result["submission"].get("detail", ""))
+            self.events.publish({"type": "queued_message", "room": room.id,
+                                 "client_id": item["client_id"], "state": status})
+
+    def _queue_unexpected(self, room: Room, client_id: str, exc: Exception) -> None:
+        """Record an unexpected dispatch failure as unknown, never as unsent.
+
+        The call may or may not have reached the gateway, so the item is
+        marked uncertain (and its journaled submission too, if one was still
+        open) and is never resent automatically.
+        """
+
+        if not self.config.quiet:
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
+        detail = f"the adapter failed while sending this message: {str(exc)[:200]}"
+        submission = self.journal.submission(client_id)
+        if submission and submission.get("status") in (PENDING, DISPATCHING):
+            self.journal.settle(client_id, UNCERTAIN, detail=detail)
+        self.journal.queue_mark(client_id, UNCERTAIN, detail)
+        self.events.publish({"type": "queued_message", "room": room.id,
+                             "client_id": client_id, "state": UNCERTAIN})
 
     # -- bootstrap ---------------------------------------------------------
     def bootstrap(self, identity: str) -> dict:
