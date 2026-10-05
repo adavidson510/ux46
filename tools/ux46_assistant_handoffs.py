@@ -88,7 +88,7 @@ class Handoffs:
                 old=json.loads(old[0])
                 if old['request']!=body: raise ValueError('This request was already sent with different wording; inspect its receipt')
                 return old
-            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'state':'checking','readback':bool(readback)}
+            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'human_message':human.get('text','').strip(),'state':'checking','readback':bool(readback)}
             c.execute('INSERT INTO requests VALUES (?,?)',(ident,json.dumps(item)))
         dispatched=False
         try:
@@ -97,8 +97,7 @@ class Handoffs:
             # The normal native submit path steers active work, starts idle work,
             # and preserves native approvals. It never interrupts a running turn.
             item['state']='sending';self.save(item);dispatched=True
-            message=('Human request relayed through '+cfg.get('name','Assistant')+'.\n'
-                     'Answer in this room; the assistant will bring your reply back. Keep your existing work and action boundaries.\n\n'+body)
+            message=relay_message(cfg.get('name','Assistant'),human.get('text',''),body)
             code, result = receiver.request('POST','/api/room/'+dst['room']+'/submit',
                 {'client_id':ident,'thread_id':dst['thread'],'body':message})
             submission=result.get('submission',{})
@@ -142,6 +141,27 @@ class Handoffs:
                     item.update(state='answered',reply=text[:limit],reply_complete=len(text)<=limit,reply_id=reply['id'],answered_at=time.time())
                     self.save(item)
             except Exception:continue
+
+
+HUMAN_QUOTE_LIMIT=6000
+
+
+def quoted(text):
+    # Every line is prefixed, so neither section can end early or imitate the
+    # other's heading.
+    return '\n'.join('> '+line for line in text.strip().splitlines()) or '> (empty)'
+
+
+def relay_message(name, human, body):
+    """The destination sees whose words are whose. The verified human message is
+    quoted as the human's; the assistant's request is labelled as its own wording,
+    which the human did not write and may not have seen."""
+    human=human.strip()
+    if len(human)>HUMAN_QUOTE_LIMIT:human=human[:HUMAN_QUOTE_LIMIT]+'\n[truncated]'
+    return ('Request relayed by '+name+' (an assistant) from its conversation with the human.\n'
+            'Answer in this room; the assistant will bring your reply back. Keep your existing work and action boundaries.\n\n'
+            "The human's latest message to "+name+' (verbatim):\n'+quoted(human)+'\n\n'
+            'Relayed by '+name+" — assistant's wording, not the human's:\n"+quoted(body))
 
 
 def local_clients(directory, cfg):

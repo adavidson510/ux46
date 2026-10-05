@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
-from ux46_work import WorkStore
+from ux46_work import WorkStore, url as work_url
 from ux46_work_checkpoint import packet
 from constellation_store import Conflict
 
@@ -63,5 +63,11 @@ class WorkTests(unittest.TestCase):
         self.assertEqual(self.s.view()['routes'][0]['id'],latest['id'])
     def test_result_refuses_active_content_urls_and_cross_room_experiment(self):
         with self.assertRaises(ValueError):self.s.action({'action':'result','agent':'local','room':'app/timer','url':'javascript:alert(1)'})
+    def test_result_url_refuses_backslash_and_protocol_relative_paths(self):
+        # S20: '/\host' and '/<tab>/host' are protocol-relative in a browser.
+        for bad in ('/\\evil.example','\\\\evil.example','//evil.example','/\t/evil.example','https://a\\@evil.example'):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):work_url(bad)
+        self.assertEqual(work_url('/work/result'),'/work/result')
+        self.assertEqual(work_url('https://example.com/timer'),'https://example.com/timer')
 
 if __name__=='__main__':unittest.main()

@@ -6,6 +6,7 @@ state, so the same controls also work when those optional services are absent.
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import time
 import uuid
@@ -18,7 +19,12 @@ def line(value,limit=1000):return text(value,limit,'Text',True)
 def url(value):
     value=line(value,1800)
     if not value:return ''
-    if value.startswith('/') and not value.startswith('//'):return value
+    # Browsers read a backslash as '/' in http(s) URLs and silently drop tabs and
+    # newlines, so '/\host' or '/<tab>/host' would become a protocol-relative
+    # link to another site. Neither is accepted, and a workspace path is a single
+    # leading '/' not followed by another.
+    if re.search(r'[\\\x00-\x1f\x7f]',value):raise ValueError('Use an http(s) result URL or a workspace path')
+    if re.match(r'^/(?!/)',value):return value
     p=urlsplit(value)
     if p.scheme not in ('https','http') or not p.netloc or p.username or p.password:raise ValueError('Use an http(s) result URL or a workspace path')
     return value
