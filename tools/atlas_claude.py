@@ -902,13 +902,29 @@ class Turn:
             args += ["--resume", self.native_id]
         else:
             args += ["--session-id", self.native_id]
-        model = self.service.preference(self.room.id, "model") or config.model
-        if model and MODEL_VALUE_RE.fullmatch(model):
-            args += ["--model", model]
-        effort = self.service.preference(self.room.id, "effort")
-        if effort and MODEL_VALUE_RE.fullmatch(effort):
-            args += ["--effort", effort]
+        # Each value travels as ONE argv element, "--model=<value>": the CLI's
+        # option parser (commander.js) takes the whole remainder as the value,
+        # so nothing in it can ever be read as another option. That lets the
+        # operator's configured --model be any id the CLI knows - "sonnet[1m]",
+        # a Bedrock "...-v1:0", an ARN - without the browser regex (S14).
+        # MODEL_VALUE_RE still guards what a browser stored via /model and
+        # /effort; a stored value that fails it is skipped out loud, not
+        # silently, and the configured model is used instead.
+        model = self._browser_value("model") or config.model
+        if model:
+            args.append(f"--model={model}")
+        effort = self._browser_value("effort")
+        if effort:
+            args.append(f"--effort={effort}")
         return args
+
+    def _browser_value(self, key: str) -> str:
+        value = self.service.preference(self.room.id, key)
+        if value and not MODEL_VALUE_RE.fullmatch(value):
+            sys.stderr.write(f"ux46-claude: ignoring stored /{key} value {value!r} for "
+                             f"{self.room.id}; it is not a value this adapter passes on\n")
+            return ""
+        return value
 
     def start(self) -> dict:
         """Hand the message to the CLI. This is what acceptance means.

@@ -10,6 +10,7 @@ is read or touched.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from argparse import Namespace
 from http.client import HTTPConnection
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -858,8 +860,30 @@ class Commands(AdapterCase):
                   {"client_id": "client-oooooooo", "body": "go"})
         self.settle()
         argv = self.cli_calls()[0]["argv"]
-        self.assertEqual(argv[argv.index("--model") + 1], "opus")
-        self.assertEqual(argv[argv.index("--effort") + 1], "high")
+        self.assertIn("--model=opus", argv)
+        self.assertIn("--effort=high", argv)
+
+    def test_the_operator_s_configured_model_is_passed_whole(self):
+        # S14: the browser regex must not drop operator-configured ids; each
+        # goes as one "--model=<id>" element, never readable as an option.
+        for model in ("sonnet[1m]", "anthropic.claude-sonnet-4-5-v1:0",
+                      "arn:aws:bedrock:us-east-1:123456789012:inference-profile/x"):
+            with self.subTest(model=model):
+                self.service.config.model = model
+                run = cp.Turn(self.service, self.service.catalog.room(self.linked_room()),
+                              "client-model01", [], resume=False)
+                self.assertIn(f"--model={model}", run.argv())
+                self.assertNotIn("--model", run.argv())
+
+    def test_a_bad_stored_browser_model_is_skipped_out_loud(self):
+        self.service.config.model = "sonnet[1m]"
+        self.service.set_preference(self.linked_room(), "model", "-x")
+        run = cp.Turn(self.service, self.service.catalog.room(self.linked_room()),
+                      "client-model02", [], resume=False)
+        with mock.patch.object(cp.sys, "stderr", new_callable=io.StringIO) as err:
+            argv = run.argv()
+        self.assertIn("--model=sonnet[1m]", argv)
+        self.assertIn("ignoring stored /model", err.getvalue())
 
     def test_a_model_value_that_could_read_as_an_option_is_refused(self):
         for value in ("-x", "--dangerously-skip-permissions", ".hidden", "_x"):
