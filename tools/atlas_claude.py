@@ -82,6 +82,8 @@ CAPABILITY_LABEL = ("the Claude Code CLI on this machine — its own transcripts
                     "read here, and sendable one turn at a time")
 
 MAX_BODY = 64 * 1024
+# A /model or /effort value passed to the CLI as its own argv element.
+MODEL_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 # Stored attachment bytes are served as an inert document: if a browser is
 # ever pointed at one directly it may not run script, load anything, submit a
 # form or be framed, whatever MIME label the uploader supplied.
@@ -901,10 +903,10 @@ class Turn:
         else:
             args += ["--session-id", self.native_id]
         model = self.service.preference(self.room.id, "model") or config.model
-        if model:
+        if model and MODEL_VALUE_RE.fullmatch(model):
             args += ["--model", model]
         effort = self.service.preference(self.room.id, "effort")
-        if effort:
+        if effort and MODEL_VALUE_RE.fullmatch(effort):
             args += ["--effort", effort]
         return args
 
@@ -1484,6 +1486,12 @@ class ClaudeService:
         if not isinstance(text, str) or len(text) > MAX_BODY or not text.strip():
             raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_message",
                                "a queued message needs short text")
+        if text.lstrip().startswith("/"):
+            # The same refusal as a direct send: the queue later hands this
+            # text to the CLI as a prompt, where a slash command would run.
+            raise AdapterError(HTTPStatus.BAD_REQUEST, "is_command",
+                               "that looks like a command; send it through the command "
+                               "endpoint so it is never delivered as chat text")
         try:
             # A short editing window, then this adapter sends it once, when the
             # conversation is free. It is the same reservation a direct send
@@ -1619,7 +1627,10 @@ class ClaudeService:
             if key == "effort" and argument not in ("low", "medium", "high", "xhigh", "max"):
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_effort",
                                    "effort is one of low, medium, high, xhigh, max")
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", argument):
+            # Leading alphanumeric: the value is its own argv element after
+            # --model/--effort, and one starting with '-' would be read by the
+            # CLI as another option.
+            if not MODEL_VALUE_RE.fullmatch(argument):
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_model",
                                    "that is not a model name this adapter will pass on")
             self.set_preference(room.id, key, argument)

@@ -77,6 +77,9 @@ DEFAULT_REGISTRY = "~/.codex/projects/registry.json"
 DEFAULT_SIDECAR = str(HERE / "ux46_rivet_gateway.mjs")
 
 MAX_BODY = 64 * 1024
+# /model and /effort values the adapter will patch onto a gateway session.
+MODEL_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
+EFFORT_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}")
 # Stored attachment bytes are served as an inert document: if a browser is
 # ever pointed at one directly it may not run script, load anything, submit a
 # form or be framed, whatever MIME label the uploader supplied.
@@ -2128,6 +2131,15 @@ class RivetService:
                 return {"command": {"name": name, "state": COMPLETED,
                         "native": self.room_state(current)["native"],
                         "message": str(current.entry.get("model" if name == "/model" else "thinkingLevel") or "Not reported")}}
+            # A conservative shape for a value the gateway stores on the
+            # session: a model id ("provider/model-name") or an effort level.
+            # Anything else is refused here, before it is journaled or sent.
+            if name != "/compact" and not (MODEL_VALUE_RE if name == "/model"
+                                           else EFFORT_VALUE_RE).fullmatch(args):
+                raise AdapterError(400, "bad_model" if name == "/model" else "bad_effort",
+                                   "that is not a model name this adapter will pass on"
+                                   if name == "/model" else
+                                   "that is not an effort level this adapter will pass on")
             if not CLIENT_ID_RE.match(client_id):
                 raise AdapterError(400, "bad_client_id", "A command needs a stable client id.")
             with self._command_lock:

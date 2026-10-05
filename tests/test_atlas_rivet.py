@@ -1580,6 +1580,19 @@ class NewCommandTest(RivetAdapterTest):
         self.assertEqual(len(self.harness.calls("sessions.compact")), 1)
         self.assertEqual(self.harness.calls("chat.send"), [])
 
+    def test_malformed_model_and_effort_values_are_refused_before_the_gateway(self):
+        for i, text in enumerate(("/model -rf", "/model a b", "/model " + "x" * 200,
+                                  "/model ../../x\u202e", "/effort --high", "/effort hi/gh")):
+            status, payload = self.command(self.main_room, text, f"client-badval-{i}")
+            self.assertEqual(status, 400, text)
+            self.assertIn(payload["error"], ("bad_model", "bad_effort"), text)
+        self.assertEqual(self.harness.calls("sessions.patch"), [])
+        status, payload = self.command(self.main_room, "/model openai/gpt-5.6-sol",
+                                       "client-goodval-1")
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(self.harness.calls("sessions.patch")[0]["params"]["model"],
+                         "openai/gpt-5.6-sol")
+
     def test_help_status_refresh_do_not_send_or_create(self) -> None:
         for text in ("/help", "/status", "/refresh"):
             status, payload = self.command(self.main_room, text, "client-stats1111")

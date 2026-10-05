@@ -861,6 +861,14 @@ class Commands(AdapterCase):
         self.assertEqual(argv[argv.index("--model") + 1], "opus")
         self.assertEqual(argv[argv.index("--effort") + 1], "high")
 
+    def test_a_model_value_that_could_read_as_an_option_is_refused(self):
+        for value in ("-x", "--dangerously-skip-permissions", ".hidden", "_x"):
+            status, payload = self.post(f"/api/room/{self.linked_room()}/command",
+                                        {"command": f"/model {value}"})
+            self.assertEqual(status, 400, value)
+            self.assertEqual(payload["error"], "bad_model", value)
+        self.assertEqual(self.service.preference(self.linked_room(), "model"), "")
+
     def test_an_effort_the_cli_does_not_take_is_refused_here(self):
         status, payload = self.post(f"/api/room/{self.linked_room()}/command",
                                     {"command": "/effort enormous"})
@@ -896,6 +904,17 @@ class Boundary(AdapterCase):
                               {"client_id": "client-pppppppp", "body": "hi"},
                               csrf="not-the-token")
         self.assertEqual(status, 403)
+        self.assertEqual(self.cli_calls(), [])
+
+    def test_a_slash_command_cannot_be_queued_as_chat_text(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        for text in ("/add-dir /", "  /model opus"):
+            status, payload = self.post(f"/api/room/{self.linked_room()}/pending",
+                                        {"client_id": "queued-cmd-0001", "body": text})
+            self.assertEqual(status, 400, text)
+            self.assertEqual(payload["error"], "is_command")
+        self.assertEqual(self.service.journal.queue_list(self.linked_room()), [])
+        time.sleep(0.5)
         self.assertEqual(self.cli_calls(), [])
 
     def test_a_request_addressed_to_another_host_is_refused(self):
