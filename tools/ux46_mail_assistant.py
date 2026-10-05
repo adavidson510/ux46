@@ -10,7 +10,7 @@ import time
 import uuid
 from zoneinfo import ZoneInfo
 from urllib.error import HTTPError
-from email.utils import make_msgid
+from email.utils import getaddresses, make_msgid
 from constellation_store import Conflict, encoded, identifier, text
 from ux46_email import EmailStore
 from ux46_mail_provider import MailProvider, addresses
@@ -18,6 +18,21 @@ from ux46_synthesis import synthesize, shape, STRING
 
 SCHEMA=shape({'summary':STRING,'items':{'type':'array','items':shape({'source':{'type':'integer'},'summary':STRING,'reply':STRING})}})
 DRAFT_SCHEMA=shape({'body':STRING,'note':STRING})
+
+def mailbox_set(value):
+    """Bare addresses, case-folded, for comparing who a header points at."""
+    return {a.strip().lower() for _,a in getaddresses([value or '']) if a.strip()}
+
+
+def recipient_check(to,sender):
+    # A Reply-To that differs from From sends the reply somewhere the reader of
+    # the thread did not see write to them. That is often legitimate (lists,
+    # help desks) but is also how a spoofed or injected thread redirects a reply,
+    # so the draft records it and the review shows it beside To.
+    differs=mailbox_set(to)!=mailbox_set(sender)
+    return {'reply_to_differs':differs,'thread_from':sender,
+            'recipient_note':('This reply goes to '+to+', not the sender '+sender+' (the message set a different Reply-To). Check the recipient before sending.') if differs else ''}
+
 
 class MailAssistant:
     def __init__(self,directory,provider=None,runner=None):
@@ -135,6 +150,7 @@ class MailAssistant:
           'in_reply_to':last['message_id'],'references':(last['references']+' '+last['message_id']).strip(),
           'message_id':make_msgid(domain=thread['email'].rsplit('@',1)[-1]),'revision':1,'state':'draft',
           'updated':time.time(),'usage':usage or {},'edited':False}
+        d.update(recipient_check(to,last.get('from','')))
         self.put('mail_drafts',d['id'],d);return d
 
     def prepare_draft(self,account,ident):
@@ -207,6 +223,8 @@ class MailAssistant:
             if '\r' in subject or '\n' in subject:raise ValueError('Invalid subject')
             d.update(to=addresses(args['to']),cc=addresses(args['cc']) if args.get('cc') else '',subject=subject,
                 body=text(args['body'],12000,'Draft'),revision=d['revision']+1,updated=time.time(),state='draft',edited=True)
+            # Drafts from before the flag existed have no thread_from; they keep no flag.
+            if 'thread_from' in d:d.update(recipient_check(d['to'],d['thread_from']))
             d['review_hash']=hashlib.sha256(encoded([d[k] for k in ('from','to','cc','subject','body','source_revision','revision')])).hexdigest()
             db.execute('UPDATE mail_drafts SET body=? WHERE id=?',(encoded(d).decode(),d['id']))
         return d

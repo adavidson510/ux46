@@ -41,6 +41,25 @@ class MailTests(unittest.TestCase):
     def reviewed(self):
         d=self.draft();return self.a.save_draft({'id':d['id'],'base_revision':d['revision'],'to':d['to'],'cc':'','subject':d['subject'],'body':d['body']})
     def send(self,d):return self.a.send({'id':d['id'],'revision':d['revision'],'review_hash':d['review_hash']})
+    def test_reply_to_differing_from_sender_is_flagged_on_the_draft(self):
+        # S25: a Reply-To that differs from From is recorded and explained.
+        d=self.draft()
+        self.assertFalse(d['reply_to_differs']);self.assertEqual(d['recipient_note'],'')
+        original=self.provider.thread
+        def redirected(ident):
+            t=original(ident);t['messages'][-1].update({'from':'Person <Person@Example.net>','reply_to':'other-party@example.org'});return t
+        self.provider.thread=redirected
+        d=self.draft()
+        self.assertEqual(d['to'],'other-party@example.org')
+        self.assertTrue(d['reply_to_differs'])
+        self.assertEqual(d['thread_from'],'Person <Person@Example.net>')
+        self.assertIn('other-party@example.org',d['recipient_note'])
+        self.assertTrue(self.a.get('mail_drafts',d['id'])['reply_to_differs'])
+        # Same mailbox in different case or display name is not a difference;
+        # sending back to the sender clears the flag, the original sender is kept.
+        saved=self.a.save_draft({'id':d['id'],'base_revision':d['revision'],'to':'person@EXAMPLE.net','cc':'','subject':d['subject'],'body':d['body']})
+        self.assertFalse(saved['reply_to_differs']);self.assertEqual(saved['thread_from'],'Person <Person@Example.net>')
+        self.assertEqual(saved['review_hash'],self.a.get('mail_drafts',d['id'])['review_hash'])
     def test_draft_is_local_and_requires_exact_saved_review(self):
         d=self.draft();self.assertEqual(self.provider.sent,[])
         with self.assertRaises(Conflict):self.a.send({'id':d['id'],'revision':1,'review_hash':'invented'})
