@@ -1304,6 +1304,20 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         decision = service.auth.check(host, self.headers, client_ip)
         if not decision.ok:
             raise ApiError(HTTPStatus.FORBIDDEN, "denied", decision.reason or "denied")
+        # Host alone does not stop another site: a page elsewhere can still
+        # make the browser GET http://127.0.0.1:<port>/... with our Host, and
+        # some GET routes have effects. Browsers label such requests, so any
+        # verb from another site (or a sibling subdomain) is refused here.
+        # Absent (curl, older browsers), "none" (a bookmark or typed URL) and
+        # "same-origin" pass; Origin, when sent, must be exactly ours.
+        fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().casefold()
+        if fetch_site in ("cross-site", "same-site"):
+            raise ApiError(HTTPStatus.FORBIDDEN, "cross_site",
+                           "this console only answers its own pages")
+        origin = self.headers.get("Origin")
+        if origin is not None and origin.strip().rstrip("/").casefold() != service.auth.origin_for(host).casefold():
+            raise ApiError(HTTPStatus.FORBIDDEN, "bad_origin",
+                           "a request must come from this console's own page")
         return decision
 
     def _check_mutation(self, decision: AuthDecision) -> None:

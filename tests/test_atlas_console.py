@@ -234,6 +234,30 @@ class SecurityTests(unittest.TestCase):
             body={"body": "x" * (console.MAX_BODY + 10), "base_version": 0})
         self.assertEqual(status, 413)
 
+    def test_other_sites_are_refused_on_every_verb(self):
+        # A page elsewhere can make the browser send our own Host; the
+        # browser's Sec-Fetch-Site and Origin labels are what give it away.
+        own = f"http://127.0.0.1:{self.h.port}"
+        for path in ("/", "/api/bootstrap", "/api/events?after=0&timeout=0"):
+            for site in ("cross-site", "same-site", "Cross-Site"):
+                status, payload = self.h.call("GET", path, headers={"Sec-Fetch-Site": site})
+                self.assertEqual(status, 403, (path, site))
+                self.assertEqual(payload["error"], "cross_site")
+            for origin in ("https://elsewhere.example", "null", f"http://localhost:{self.h.port}"):
+                status, payload = self.h.call("GET", path, headers={"Origin": origin})
+                self.assertEqual(status, 403, (path, origin))
+                self.assertEqual(payload["error"], "bad_origin")
+            # A bookmark or typed URL ("none"), the page itself, and clients
+            # that send no fetch metadata at all are still served.
+            for headers in ({}, {"Sec-Fetch-Site": "none"},
+                            {"Sec-Fetch-Site": "same-origin", "Origin": own}):
+                self.assertEqual(self.h.call("GET", path, headers=headers)[0], 200, (path, headers))
+        status, payload = self.h.call(
+            "PUT", "/api/room/fixture/console-work/draft", body={"body": "x", "base_version": 0},
+            headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(status, 403)
+        self.assertEqual(payload["error"], "cross_site")
+
     def test_events_timeout_must_be_finite(self):
         for value in ("nan", "inf", "-inf", "NaN", "soon"):
             status, payload = self.h.call("GET", f"/api/events?after=0&timeout={value}")
@@ -306,6 +330,17 @@ class PrivateOriginTests(unittest.TestCase):
                                           identity="user@example.com")
             self.assertEqual(status, 403, f"{method} {path} leaked on a spoofed host")
             self.assertEqual(payload["error"], "denied")
+
+    def test_public_origin_pages_pass_the_fetch_site_check(self):
+        public = "https://workspace.example.com"
+        status, payload = self.h.call("GET", "/api/bootstrap", host=self.public, identity="user@example.com",
+                                      headers={"Sec-Fetch-Site": "same-origin", "Origin": public})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["mode"], "private-network")
+        for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": f"http://127.0.0.1:{self.h.port}"}):
+            status, _ = self.h.call("GET", "/api/bootstrap", host=self.public,
+                                    identity="user@example.com", headers=headers)
+            self.assertEqual(status, 403, headers)
 
     def test_mutations_still_need_origin_and_csrf_at_the_public_host(self):
         status, payload = self.h.call(
