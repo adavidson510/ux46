@@ -1332,6 +1332,51 @@ class AttachmentTest(HermesAdapterTest):
         self.assertEqual(status, 404)
         self.assertEqual(refused["error"], "file_unknown")
 
+    def test_only_a_previewable_file_is_served_inline(self) -> None:
+        # An uploaded HTML or script file has no preview: /preview refuses it
+        # instead of rendering browser-supplied markup inline.
+        for name, data, mime in (("x.html", b"<script>alert(1)</script>", "text/html"),
+                                 ("x.js", b"alert(1)", "application/javascript")):
+            _, payload = self.harness.upload(self.linked_room, name, data, mime)
+            record = payload["file"]
+            self.assertIsNone(record["preview_url"])
+            status, raw, _headers = self._raw_get(f"/api/atlas/files/{record['id']}/preview")
+            self.assertEqual(status, 404, name)
+            self.assertNotIn(b"alert", raw)
+            status, _raw, headers = self._raw_get(record["download_url"])
+            self.assertEqual(status, 200)
+            self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+            self.assertIn("sandbox", headers["Content-Security-Policy"])
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+
+    def test_an_image_preview_is_inline_quoted_and_inert(self) -> None:
+        _, payload = self.harness.upload(
+            self.linked_room, 'sh"oté.png', self.PNG, "image/png")
+        record = payload["file"]
+        self.assertIsNotNone(record["preview_url"])
+        status, raw, headers = self._raw_get(record["preview_url"])
+        self.assertEqual(status, 200)
+        self.assertEqual(raw, self.PNG)
+        disposition = headers["Content-Disposition"]
+        self.assertTrue(disposition.startswith("inline; filename=\""))
+        self.assertIn("filename*=UTF-8''", disposition)
+        self.assertEqual(disposition.count('"'), 2)
+        self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+
+    def test_a_file_is_scoped_to_the_room_named_on_download(self) -> None:
+        _, payload = self.harness.upload(
+            self.linked_room, "shot.png", self.PNG, "image/png")
+        file_id = payload["file"]["id"]
+        other = self.room_for(S_OPEN)
+        for kind in ("preview", "download"):
+            status, _raw, _headers = self._raw_get(
+                f"/api/atlas/files/{file_id}/{kind}?room={other}")
+            self.assertEqual(status, 404, kind)
+            status, _raw, _headers = self._raw_get(
+                f"/api/atlas/files/{file_id}/{kind}?room={self.linked_room}")
+            self.assertEqual(status, 200, kind)
+
     def _raw_get(self, path: str) -> tuple[int, bytes, dict]:
         conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
         conn.request("GET", path)

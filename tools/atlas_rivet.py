@@ -77,6 +77,10 @@ DEFAULT_REGISTRY = "~/.codex/projects/registry.json"
 DEFAULT_SIDECAR = str(HERE / "ux46_rivet_gateway.mjs")
 
 MAX_BODY = 64 * 1024
+# Stored attachment bytes are served as an inert document: if a browser is
+# ever pointed at one directly it may not run script, load anything, submit a
+# form or be framed, whatever MIME label the uploader supplied.
+FILE_CSP = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
 EVENT_LIMIT = 500
 CATALOG_TTL = 10.0
 HISTORY_SCAN_CAP = 1000
@@ -2897,10 +2901,12 @@ class RivetHandler(BaseHTTPRequestHandler):
                 # Inline, so the console can show it as a thumbnail.
                 return self._send(HTTPStatus.OK, data, record["mime"], (
                     ("Content-Disposition",
-                     "inline; " + files.content_disposition(record["name"])[12:]),))
+                     "inline; " + files.content_disposition(record["name"])[12:]),
+                    ("Content-Security-Policy", FILE_CSP)))
             return self._send(HTTPStatus.OK, data, record["mime"],
                               (("Content-Disposition",
-                                files.content_disposition(record["name"])),))
+                                files.content_disposition(record["name"])),
+                               ("Content-Security-Policy", FILE_CSP)))
 
         submission_match = re.fullmatch(r"/api/submissions/([A-Za-z0-9_-]{8,64})", path)
         if method == "GET" and submission_match:

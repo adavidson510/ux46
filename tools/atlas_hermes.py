@@ -95,6 +95,10 @@ DEFAULT_AGENT_NAME = "Pane"
 DEFAULT_SOURCE = "ux46"
 
 MAX_BODY = 64 * 1024
+# Stored attachment bytes are served as an inert document: if a browser is
+# ever pointed at one directly it may not run script, load anything, submit a
+# form or be framed, whatever MIME label the uploader supplied.
+FILE_CSP = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
 CATALOG_TTL = 10.0
 HISTORY_PAGE_CAP = 200
 SEARCH_SCAN_CAP = 2000
@@ -2895,17 +2899,24 @@ class HermesHandler(BaseHTTPRequestHandler):
             # Only bytes this adapter's own managed store holds. There is no
             # path here that serves an arbitrary local file.
             try:
-                record, data = service.files.open_download(media.group(1))
+                record, data = service.files.open_download(media.group(1),
+                                                           room=get("room") or None)
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.NOT_FOUND, "file_unknown", str(exc)) from exc
+            disposition = files.content_disposition(record["name"])
             if media.group(2) == "preview":
-                header = ("Content-Disposition",
-                          f'inline; filename="{files._safe_name(record["name"])}"')
+                # Inline only for what the store itself judged previewable
+                # (verified raster images); anything else is download-only, so
+                # an uploaded HTML or script file is never rendered here.
+                if record.get("preview_url") is None:
+                    raise AdapterError(HTTPStatus.NOT_FOUND, "preview_unavailable",
+                                       "this attachment is download-only")
+                header = ("Content-Disposition", "inline; " + disposition[12:])
             else:
-                header = ("Content-Disposition", files.content_disposition(record["name"]))
+                header = ("Content-Disposition", disposition)
             return self._send(HTTPStatus.OK, data,
                               str(record.get("mime") or "application/octet-stream"),
-                              (header,))
+                              (header, ("Content-Security-Policy", FILE_CSP)))
 
         submission = re.fullmatch(r"/api/submissions/([A-Za-z0-9_-]{8,64})", path)
         if submission and method == "GET":

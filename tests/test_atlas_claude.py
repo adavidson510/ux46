@@ -903,6 +903,29 @@ class Boundary(AdapterCase):
         self.assertEqual(status, 403)
         self.assertEqual(payload["error"], "bad_host")
 
+    def _raw(self, path):
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=30)
+        try:
+            connection.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+            response = connection.getresponse()
+            return response.status, response.read(), dict(response.getheaders())
+        finally:
+            connection.close()
+
+    def test_every_answer_carries_the_browser_hardening_headers(self):
+        record = self.service.files.upload(self.linked_room(), "x.html",
+                                           b"<script>alert(1)</script>", "text/html")
+        for path in ("/api/workspace", f"/api/atlas/files/{record['id']}/download"):
+            status, _raw, headers = self._raw(path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff", path)
+            self.assertEqual(headers["X-Frame-Options"], "DENY", path)
+        csp = headers["Content-Security-Policy"]
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("sandbox", csp)
+        status, _raw, _headers = self._raw(f"/api/atlas/files/{record['id']}/preview")
+        self.assertEqual(status, 404)
+
     def test_reading_needs_no_token(self):
         status, _ = self.ask("GET", "/api/workspace", csrf="")
         self.assertEqual(status, 200)
