@@ -143,5 +143,35 @@ class AtlasFileStoreTests(unittest.TestCase):
         self.assertIn("filename*=UTF-8''", header)
 
 
+class SkillCopyParityTests(unittest.TestCase):
+    """The ux46-canvas skill ships copies of shared tools so it runs standalone.
+
+    A drifted copy silently keeps fixed bugs (a double descriptor close, an
+    unrestricted download type) alive in the skill. Each copy must match its
+    tools/ source byte for byte, except upload.py's one import line, which
+    names the skill-local ``room`` module instead of ``ux46_room``.
+    """
+
+    COPIES = {
+        "atlas_desktops.py": ("atlas_desktops.py", {}),
+        "atlas_files.py": ("atlas_files.py", {}),
+        "board.py": ("ux46_boards.py", {}),
+        "room.py": ("ux46_room.py", {}),
+        "upload.py": ("ux46_upload.py",
+                      {"from ux46_room import reference": "from room import reference"}),
+    }
+
+    def test_skill_copies_of_shared_modules_match_their_tools_sources(self) -> None:
+        scripts = REPO_ROOT / "skills" / "ux46-canvas" / "scripts"
+        for copy, (source, rewrites) in self.COPIES.items():
+            with self.subTest(copy):
+                expected = (REPO_ROOT / "tools" / source).read_text(encoding="utf-8")
+                for original, replacement in rewrites.items():
+                    self.assertIn(original, expected)
+                    expected = expected.replace(original, replacement)
+                self.assertEqual((scripts / copy).read_text(encoding="utf-8"), expected,
+                                 f"skills copy {copy} drifted from tools/{source}")
+
+
 if __name__ == "__main__":
     unittest.main()
