@@ -363,8 +363,8 @@ class Harness:
         except ValueError:
             return response.status, {"raw": raw.decode("utf-8", "replace")}
 
-    def get(self, path: str) -> tuple[int, dict]:
-        return self.request("GET", path)
+    def get(self, path: str, headers: dict | None = None) -> tuple[int, dict]:
+        return self.request("GET", path, headers=headers)
 
     def post(self, path: str, body: dict | None = None, **kwargs) -> tuple[int, dict]:
         return self.request("POST", path, body or {}, **kwargs)
@@ -799,6 +799,38 @@ class QueueTest(RivetAdapterTest):
         time.sleep(0.8)
         self.assertEqual(self.harness.calls("chat.send"), [])
 
+    def test_an_unexpected_send_failure_marks_the_item_and_keeps_the_queue(self) -> None:
+        # One item blows up inside the transport with something no Gateway*
+        # handler expects; the loop must record it uncertain (it may have
+        # gone out) and still deliver the next item.
+        real_call = self.harness.transport.call
+        blown: list[str] = []
+
+        def flaky(method, params=None, timeout=20.0):
+            if method == "chat.send" and not blown:
+                blown.append(params["idempotencyKey"])
+                raise RuntimeError("synthetic transport fault")
+            return real_call(method, params, timeout=timeout)
+
+        self.harness.transport.call = flaky
+        self.harness.service.config.quiet = True
+        for client_id in ("client-eeee5555", "client-ffff6666"):
+            self.harness.post(f"/api/room/{self.main_room}/pending",
+                              {"client_id": client_id, "body": client_id})
+        self.harness.post(f"/api/room/{self.main_room}/continue")
+        journal = self.harness.service.journal
+        deadline = time.time() + 10
+        while time.time() < deadline and not (
+                blown and self.harness.calls("chat.send")):
+            time.sleep(0.2)
+        time.sleep(0.3)
+        failed_id = blown[0].split(":", 1)[1]
+        other = ({"client-eeee5555", "client-ffff6666"} - {failed_id}).pop()
+        self.assertEqual(journal.queue_get(failed_id)["status"], agent3.UNCERTAIN)
+        self.assertEqual(journal.submission(failed_id)["status"], agent3.UNCERTAIN)
+        self.assertEqual(journal.queue_get(other)["status"], agent3.ACCEPTED)
+        self.assertTrue(self.harness.service._worker.is_alive())
+
     def test_a_stale_cancel_is_refused(self) -> None:
         self.harness.post(f"/api/room/{self.main_room}/pending",
                           {"client_id": "client-cccc3333", "body": "hold"})
@@ -807,6 +839,36 @@ class QueueTest(RivetAdapterTest):
             {"version": 99})
         self.assertEqual(status, 409)
         self.assertEqual(payload["error"], "queue_stale")
+
+
+def assert_stalled_client_is_dropped(test, server, port) -> None:
+    """A client that stops mid-request loses its handler thread on timeout."""
+    import socket as _socket
+    test.assertGreater(server.RequestHandlerClass.timeout, 30)
+    server.RequestHandlerClass.timeout = 0.5
+    with _socket.create_connection(("127.0.0.1", port), timeout=10) as stalled:
+        stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        started = time.time()
+        test.assertEqual(stalled.recv(1024), b"")  # closed by the server
+        test.assertLess(time.time() - started, 8)
+
+
+class CliTransportTest(unittest.TestCase):
+    def test_an_argv_too_large_for_exec_is_a_definite_gateway_error(self) -> None:
+        # The CLI carries params in one argv element; past the kernel's
+        # per-argument limit exec fails with E2BIG before anything is sent.
+        transport = agent3.CliTransport(["/bin/true"])
+        with self.assertRaises(agent3.GatewayError) as caught:
+            transport.call("chat.send", {"message": "\u6f22" * 60000})
+        self.assertNotIsInstance(caught.exception, agent3.GatewayUncertain)
+        self.assertEqual(caught.exception.code, "cli_exec_failed")
+        self.assertIn("too large", str(caught.exception))
+
+    def test_an_unstartable_cli_is_a_gateway_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            transport = agent3.CliTransport([tmp])  # a directory: EACCES
+            with self.assertRaises(agent3.GatewayError):
+                transport.call("agent.identity.get", {})
 
 
 class BoundaryTest(RivetAdapterTest):
@@ -848,6 +910,72 @@ class BoundaryTest(RivetAdapterTest):
         conn.close()
         self.assertEqual(response.status, 403)
         self.assertEqual(payload["error"], "bad_csrf")
+
+    def test_a_request_under_a_foreign_host_is_refused_before_any_route(self) -> None:
+        # DNS rebinding: the page's own name arrives in Host. The token route
+        # is refused as well, or the page could read the CSRF token.
+        evil = f"rebind.attacker.example:{self.harness.port}"
+        for path in ("/api/bootstrap", "/api/rooms", f"/api/room/{self.main_room}/history",
+                     "/", "/index.html"):
+            status, payload = self.harness.get(path, headers={"Host": evil})
+            self.assertEqual(status, 403, path)
+            self.assertEqual(payload["error"], "bad_host", path)
+        status, payload = self.harness.post(
+            f"/api/room/{self.main_room}/submit",
+            {"client_id": "rebind-0001", "body": "hello"},
+            headers={"Host": evil, "Origin": f"http://{evil}"})
+        self.assertEqual((status, payload["error"]), (403, "bad_host"))
+        # A loopback name on another port is not this adapter either.
+        status, payload = self.harness.get("/api/bootstrap",
+                                           headers={"Host": "127.0.0.1:1"})
+        self.assertEqual((status, payload["error"]), (403, "bad_host"))
+        self.assertEqual(self.harness.calls("chat.send"), [])
+
+    def test_a_stalled_client_is_dropped(self) -> None:
+        assert_stalled_client_is_dropped(self, self.harness.server, self.harness.port)
+
+    def test_a_request_without_a_host_is_refused(self) -> None:
+        conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
+        conn.putrequest("GET", "/api/bootstrap", skip_host=True)
+        conn.endheaders()
+        response = conn.getresponse()
+        payload = json.loads(response.read())
+        conn.close()
+        self.assertEqual((response.status, payload["error"]), (403, "bad_host"))
+
+    def test_loopback_names_and_configured_hosts_are_answered(self) -> None:
+        port = self.harness.port
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"):
+            status, _payload = self.harness.get("/api/workspace", headers={"Host": host})
+            self.assertEqual(status, 200, host)
+        self.harness.service.allowed_hosts.add("agent3.internal")
+        status, _payload = self.harness.get("/api/workspace",
+                                            headers={"Host": f"agent3.internal:{port}"})
+        self.assertEqual(status, 200)
+
+    def test_a_present_foreign_origin_is_refused_without_a_configured_origin(self) -> None:
+        self.assertEqual(self.harness.service.config.browser_origin, "")
+        status, payload = self.harness.post(
+            f"/api/room/{self.main_room}/continue", {},
+            headers={"Origin": "http://evil.example"})
+        self.assertEqual((status, payload["error"]), (403, "bad_origin"))
+        # The console's RemoteConsole sends its own loopback address as
+        # Origin; that, and no Origin at all, still pass.
+        status, _payload = self.harness.post(
+            f"/api/room/{self.main_room}/continue", {},
+            headers={"Origin": f"http://127.0.0.1:{self.harness.port}"})
+        self.assertEqual(status, 200)
+        status, _payload = self.harness.post(f"/api/room/{self.main_room}/continue", {})
+        self.assertEqual(status, 200)
+
+    def test_a_configured_browser_origin_is_enforced_on_mutations(self) -> None:
+        self.harness.service.config.browser_origin = "https://ux46.example"
+        status, payload = self.harness.post(f"/api/room/{self.main_room}/continue", {},
+                                            headers={"Origin": "https://evil.example"})
+        self.assertEqual((status, payload["error"]), (403, "bad_origin"))
+        status, _payload = self.harness.post(f"/api/room/{self.main_room}/continue", {},
+                                             headers={"Origin": "https://ux46.example"})
+        self.assertEqual(status, 200)
 
     def test_a_proxy_path_prefix_is_stripped(self) -> None:
         self.harness.service.config.path_prefix = "/api/agents/agent3"
@@ -1451,6 +1579,19 @@ class NewCommandTest(RivetAdapterTest):
         self.assertEqual(patches[1]["params"]["thinkingLevel"], "high")
         self.assertEqual(len(self.harness.calls("sessions.compact")), 1)
         self.assertEqual(self.harness.calls("chat.send"), [])
+
+    def test_malformed_model_and_effort_values_are_refused_before_the_gateway(self):
+        for i, text in enumerate(("/model -rf", "/model a b", "/model " + "x" * 200,
+                                  "/model ../../x\u202e", "/effort --high", "/effort hi/gh")):
+            status, payload = self.command(self.main_room, text, f"client-badval-{i}")
+            self.assertEqual(status, 400, text)
+            self.assertIn(payload["error"], ("bad_model", "bad_effort"), text)
+        self.assertEqual(self.harness.calls("sessions.patch"), [])
+        status, payload = self.command(self.main_room, "/model openai/gpt-5.6-sol",
+                                       "client-goodval-1")
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(self.harness.calls("sessions.patch")[0]["params"]["model"],
+                         "openai/gpt-5.6-sol")
 
     def test_help_status_refresh_do_not_send_or_create(self) -> None:
         for text in ("/help", "/status", "/refresh"):

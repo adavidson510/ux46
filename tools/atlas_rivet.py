@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import atlas_creation as creation
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -76,6 +77,13 @@ DEFAULT_REGISTRY = "~/.codex/projects/registry.json"
 DEFAULT_SIDECAR = str(HERE / "ux46_rivet_gateway.mjs")
 
 MAX_BODY = 64 * 1024
+# /model and /effort values the adapter will patch onto a gateway session.
+MODEL_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}")
+EFFORT_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}")
+# Stored attachment bytes are served as an inert document: if a browser is
+# ever pointed at one directly it may not run script, load anything, submit a
+# form or be framed, whatever MIME label the uploader supplied.
+FILE_CSP = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
 EVENT_LIMIT = 500
 CATALOG_TTL = 10.0
 HISTORY_SCAN_CAP = 1000
@@ -540,6 +548,19 @@ class CliTransport(Transport):
                 "the openclaw CLI did not return in time; this adapter will not "
                 "repeat the call",
             ) from exc
+        except OSError as exc:
+            # The CLI takes its params as one argv element, so a long message
+            # or inline attachment can exceed the kernel's per-argument limit
+            # (E2BIG). exec failed before the child ran: nothing reached the
+            # gateway, so this is a definite refusal, never an uncertain send.
+            self._detail = str(exc)[:400]
+            raise GatewayError(
+                "cli_exec_failed",
+                "the openclaw CLI could not be started for this call"
+                + (" (the message is too large for the CLI transport; the "
+                   "persistent bridge has no such limit)"
+                   if getattr(exc, "errno", None) == errno.E2BIG else
+                   f" ({exc.strerror or exc})")) from exc
         if proc.returncode != 0:
             detail = (proc.stderr or proc.stdout or "").strip()[:400]
             self._detail = detail
@@ -1478,6 +1499,12 @@ class RivetService:
         self.events = Events()
         self.csrf_token = secrets.token_urlsafe(32)
         self.started_at = time.time()
+        # The names this port answers under. The socket is loopback-only, but a
+        # browser page whose DNS name was rebound to 127.0.0.1 reaches it too;
+        # such a request carries its own name in `Host` and is refused.
+        self.allowed_hosts = {"127.0.0.1", "localhost", "::1"} | {
+            str(name).strip().casefold()
+            for name in (getattr(config, "allow_host", None) or [])}
         registry = Path(config.registry).expanduser()
         projects, links, warnings = read_projects(registry)
         if config.unfiled_project in projects:
@@ -2104,6 +2131,15 @@ class RivetService:
                 return {"command": {"name": name, "state": COMPLETED,
                         "native": self.room_state(current)["native"],
                         "message": str(current.entry.get("model" if name == "/model" else "thinkingLevel") or "Not reported")}}
+            # A conservative shape for a value the gateway stores on the
+            # session: a model id ("provider/model-name") or an effort level.
+            # Anything else is refused here, before it is journaled or sent.
+            if name != "/compact" and not (MODEL_VALUE_RE if name == "/model"
+                                           else EFFORT_VALUE_RE).fullmatch(args):
+                raise AdapterError(400, "bad_model" if name == "/model" else "bad_effort",
+                                   "that is not a model name this adapter will pass on"
+                                   if name == "/model" else
+                                   "that is not an effort level this adapter will pass on")
             if not CLIENT_ID_RE.match(client_id):
                 raise AdapterError(400, "bad_client_id", "A command needs a stable client id.")
             with self._command_lock:
@@ -2474,33 +2510,61 @@ class RivetService:
         while not self._stop.is_set():
             self._queue_wake.wait(timeout=2.0)
             self._queue_wake.clear()
-            attached = self.journal.attached()
-            for item in self.journal.queue_ready():
-                if self._stop.is_set():
-                    return
-                if item["room"] not in attached:
+            try:
+                self._queue_pass()
+            except Exception:  # noqa: BLE001 - the queue thread must outlive any one pass
+                if not self.config.quiet:
+                    traceback.print_exc()
+
+    def _queue_pass(self) -> None:
+        attached = self.journal.attached()
+        for item in self.journal.queue_ready():
+            if self._stop.is_set():
+                return
+            if item["room"] not in attached:
+                continue
+            room = self.catalog.room(item["room"])
+            if room is None:
+                self.journal.queue_mark(item["client_id"], PENDING,
+                                        "the gateway no longer lists that session")
+                continue
+            self.journal.queue_mark(item["client_id"], DISPATCHING)
+            with self._send_lock:
+                try:
+                    result = self.dispatch(room, item["client_id"], item["body"],
+                                           item["attachments"])
+                except AdapterError as exc:
+                    self.journal.queue_mark(item["client_id"], FAILED, exc.message)
+                    self.events.publish({"type": "queued_message", "room": room.id,
+                                         "client_id": item["client_id"],
+                                         "state": FAILED})
                     continue
-                room = self.catalog.room(item["room"])
-                if room is None:
-                    self.journal.queue_mark(item["client_id"], PENDING,
-                                            "the gateway no longer lists that session")
+                except Exception as exc:  # noqa: BLE001 - report, never kill the loop
+                    self._queue_unexpected(room, item["client_id"], exc)
                     continue
-                self.journal.queue_mark(item["client_id"], DISPATCHING)
-                with self._send_lock:
-                    try:
-                        result = self.dispatch(room, item["client_id"], item["body"],
-                                               item["attachments"])
-                    except AdapterError as exc:
-                        self.journal.queue_mark(item["client_id"], FAILED, exc.message)
-                        self.events.publish({"type": "queued_message", "room": room.id,
-                                             "client_id": item["client_id"],
-                                             "state": FAILED})
-                        continue
-                status = result["submission"]["status"]
-                self.journal.queue_mark(item["client_id"], status,
-                                        result["submission"].get("detail", ""))
-                self.events.publish({"type": "queued_message", "room": room.id,
-                                     "client_id": item["client_id"], "state": status})
+            status = result["submission"]["status"]
+            self.journal.queue_mark(item["client_id"], status,
+                                    result["submission"].get("detail", ""))
+            self.events.publish({"type": "queued_message", "room": room.id,
+                                 "client_id": item["client_id"], "state": status})
+
+    def _queue_unexpected(self, room: Room, client_id: str, exc: Exception) -> None:
+        """Record an unexpected dispatch failure as unknown, never as unsent.
+
+        The call may or may not have reached the gateway, so the item is
+        marked uncertain (and its journaled submission too, if one was still
+        open) and is never resent automatically.
+        """
+
+        if not self.config.quiet:
+            traceback.print_exception(type(exc), exc, exc.__traceback__)
+        detail = f"the adapter failed while sending this message: {str(exc)[:200]}"
+        submission = self.journal.submission(client_id)
+        if submission and submission.get("status") in (PENDING, DISPATCHING):
+            self.journal.settle(client_id, UNCERTAIN, detail=detail)
+        self.journal.queue_mark(client_id, UNCERTAIN, detail)
+        self.events.publish({"type": "queued_message", "room": room.id,
+                             "client_id": client_id, "state": UNCERTAIN})
 
     # -- bootstrap ---------------------------------------------------------
     def bootstrap(self, identity: str) -> dict:
@@ -2568,6 +2632,12 @@ class RivetService:
 class RivetHandler(BaseHTTPRequestHandler):
     server_version = "Ux46Rivet/1.0"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     protocol_version = "HTTP/1.1"
     service: RivetService
 
@@ -2672,15 +2742,62 @@ class RivetHandler(BaseHTTPRequestHandler):
         raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_upload",
                            "name a file part in that upload")
 
+    # -- request gate ------------------------------------------------------
+    def _allowed_ports(self) -> set[int] | None:
+        """The ports a `Host` may name, or None when the port is not checked.
+
+        On TCP this is the configured and the bound port. Under
+        ux46_host_socket the listener is an account-private Unix socket: the
+        OS permission check admits the caller, and the port in `Host` is only
+        the console's label for the forward, so the name is checked alone.
+        """
+
+        address = getattr(self.server, "server_address", None)
+        if not isinstance(address, tuple):
+            return None
+        return {int(port) for port in (self.service.config.port, address[1]) if port}
+
+    def _check_host(self) -> None:
+        """This port answers loopback only, under a name it recognises.
+
+        Runs before every route, /api/bootstrap included: that route hands
+        out the CSRF token, so a DNS-rebound page that could read it could
+        then drive the agent. A missing `Host` is refused too.
+        """
+
+        client = self.client_address[0] if self.client_address else ""
+        if client not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            raise AdapterError(HTTPStatus.FORBIDDEN, "denied",
+                               "this adapter answers loopback only")
+        host = (self.headers.get("Host") or "").strip().casefold()
+        match = re.fullmatch(r"(\[[0-9a-f:.]+\]|[^:\[\]]+)(?::([0-9]{1,5}))?", host)
+        allowed = self.service.allowed_hosts
+        if match and match.group(1).strip("[]") in allowed:
+            ports = self._allowed_ports()
+            port = match.group(2)
+            if ports is None or port is None or int(port) in ports:
+                return
+        raise AdapterError(HTTPStatus.FORBIDDEN, "bad_host",
+                           "this adapter is not served under that name")
+
     def _check_mutation(self) -> None:
         token = self.headers.get("X-Atlas-CSRF", "")
         if not secrets.compare_digest(token, self.service.csrf_token):
             raise AdapterError(HTTPStatus.FORBIDDEN, "bad_csrf",
                                "stale page — reload it to get this adapter's token")
         allowed = self.service.config.browser_origin
+        origin = (self.headers.get("Origin") or "").rstrip("/")
         if allowed:
-            origin = (self.headers.get("Origin") or "").rstrip("/")
             if origin.casefold() != allowed.rstrip("/").casefold():
+                raise AdapterError(HTTPStatus.FORBIDDEN, "bad_origin",
+                                   "a change must come from the console's own page")
+        elif origin:
+            # No fronting origin configured: a caller without a browser (the
+            # console's RemoteConsole, curl) may omit Origin, but one that is
+            # present must be this adapter's own address. A foreign page's
+            # Origin is refused even if it somehow holds the token.
+            host = (self.headers.get("Host") or "").strip()
+            if origin.casefold() != f"http://{host}".casefold():
                 raise AdapterError(HTTPStatus.FORBIDDEN, "bad_origin",
                                    "a change must come from the console's own page")
 
@@ -2704,6 +2821,13 @@ class RivetHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
             parsed = urlparse(self.path)
             path = parsed.path
@@ -2795,10 +2919,12 @@ class RivetHandler(BaseHTTPRequestHandler):
                 # Inline, so the console can show it as a thumbnail.
                 return self._send(HTTPStatus.OK, data, record["mime"], (
                     ("Content-Disposition",
-                     "inline; " + files.content_disposition(record["name"])[12:]),))
+                     "inline; " + files.content_disposition(record["name"])[12:]),
+                    ("Content-Security-Policy", FILE_CSP)))
             return self._send(HTTPStatus.OK, data, record["mime"],
                               (("Content-Disposition",
-                                files.content_disposition(record["name"])),))
+                                files.content_disposition(record["name"])),
+                               ("Content-Security-Policy", FILE_CSP)))
 
         submission_match = re.fullmatch(r"/api/submissions/([A-Za-z0-9_-]{8,64})", path)
         if method == "GET" and submission_match:
@@ -3003,6 +3129,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--browser-origin", default="",
                         help="require this exact Origin on mutations; the fronting proxy "
                              "normally owns that check")
+    parser.add_argument("--allow-host", action="append", default=[],
+                        help="an extra Host name this adapter answers under")
     parser.add_argument("--identity-header", default="X-Forwarded-User",
                         help="header the fronting proxy uses to name the person")
     parser.add_argument("--path-prefix", default="",
