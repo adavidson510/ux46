@@ -4,8 +4,11 @@ Open a conversation and choose **Listen** beside its model control. New progress
 messages and final answers play aloud in order on this device. Tool activity,
 reasoning and your own messages are skipped. Existing history is not replayed.
 Text stays in the conversation. On desktop, the controls dock beside **Listen**;
-click **Listening** to reveal the current response. On a phone, expand
-**Response being read** in the player.
+click **Listening** to reveal the current response. On a phone, the controls
+stay tucked into **Listening** so they do not cover the conversation. Tap it
+for mute, volume, skip, stop and **Response being read**. Use × or tap outside
+to hide the controls while the audio continues. **Listening !** means playback
+needs attention; tap it to see the retry action.
 
 Listening stays with the conversation you chose. You can move around UX46
 without changing that feed. Choose Listen in another conversation to switch.

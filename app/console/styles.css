@@ -1823,6 +1823,18 @@ body.nav-dragging .navgrip{cursor:grabbing;}
    same controls and reader state without the rest of the workspace. */
 .listen-dock{display:inline-flex;align-items:center;gap:4px;position:relative;}
 .listen-dock[hidden]{display:none;}
+.listen-close{display:none;}
+/* On phones the Listening button is the dock. Controls appear only on request,
+   never as a persistent card over the conversation or message box. */
+@media(max-width:899px){
+ .listen-dock>.listen-feed:not(.controls-open){display:none;}
+ .listen-dock>.listen-feed{left:8px;right:8px;bottom:calc(96px + env(safe-area-inset-bottom,0px));max-width:none;max-height:45dvh;overflow:auto;box-sizing:border-box;padding:10px;gap:8px;}
+ .listen-dock>.listen-feed>strong{flex:1 1 calc(100% - 52px);font-size:12px;}
+ .listen-dock>.listen-feed>.listen-close{display:block;flex:0 0 36px;min-height:36px;font-size:20px;line-height:1;}
+ .listen-dock>.listen-feed button:not(.listen-close){min-width:44px;min-height:44px;}
+ .listen-dock>.listen-feed>.listen-popout{display:none;}
+ .listen-dock>.listen-feed input{flex:1;min-width:64px;max-width:110px;}
+}
 @media(min-width:900px){
  .listen-dock>.listen-feed{position:static;max-width:none;flex-wrap:nowrap;gap:4px;border-radius:8px;padding:3px;box-shadow:none;background:transparent;}
  .listen-dock>.listen-feed>strong,.listen-dock>.listen-feed>.listen-feed-status{display:none;}

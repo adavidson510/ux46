@@ -7,13 +7,24 @@
   const button=(label,fn)=>{const b=make('button',label,'ghost');b.type='button';b.onclick=fn;return b;};
   const satellite=typeof LISTEN_WINDOW!=='undefined' && LISTEN_WINDOW;
   let feed=null,releaseLock=null,generation=0,popup=null,handoff='',detached=false,returning=false;
+  const phone=window.matchMedia('(max-width:899px)');
+  let controlsOpen=false;
   const parent=satellite?window.opener:null;
   const channel=new URLSearchParams(location.search).get('handoff');
-  const toggle=button('Listen',()=>{if(detached&&popup&&!popup.closed){popup.focus();return;}if(feed&&feed.agent===agentId()&&feed.room===state.room){words.open=!words.open;return;}void start();});
+  const toggle=button('Listen',()=>{if(detached&&popup&&!popup.closed){popup.focus();return;}if(feed&&phone.matches){showControls(!controlsOpen);return;}if(feed&&feed.agent===agentId()&&feed.room===state.room){words.open=!words.open;return;}void start();});
   toggle.id='btnListenFeed';toggle.title='Read new replies aloud on this device';toggle.setAttribute('aria-pressed','false');
   toggle.prepend(replyIcon('listen'));
   const dock=make('div',undefined,'listen-dock');document.querySelector('#btnModel').before(dock);dock.append(toggle);
   const bar=make('section',undefined,'listen-feed');bar.hidden=true;bar.setAttribute('aria-label','Live listening');
+  bar.id='listenFeedControls';
+  toggle.setAttribute('aria-controls',bar.id);
+  toggle.setAttribute('aria-expanded','false');
+  const close=button('×',()=>{showControls(false);toggle.focus();});
+  close.classList.add('listen-close');close.setAttribute('aria-label','Hide listening controls');
+  function showControls(open){controlsOpen=open;bar.classList.toggle('controls-open',open);toggle.setAttribute('aria-expanded',String(open));}
+  document.addEventListener('pointerdown',event=>{if(phone.matches&&controlsOpen&&!dock.contains(event.target))showControls(false);});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&controlsOpen){showControls(false);toggle.focus();}});
+  phone.addEventListener('change',()=>showControls(false));
   const label=make('strong'),status=make('span','','listen-feed-status');status.setAttribute('role','status');
   const mute=button('Mute',()=>{if(!feed)return;feed.muted=!feed.muted;if(feed.muted)feed.audio.pause();else {clearSpeech();void pump(feed);}paint();});
   const retry=button('Play / retry',()=>{if(!feed)return;feed.error='';feed.muted=false;clearSpeech();void pump(feed);void poll();});retry.hidden=true;
@@ -22,9 +33,10 @@
   const volume=make('input');volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value='1';volume.setAttribute('aria-label','Listening volume');volume.oninput=()=>{if(feed)feed.audio.volume=Number(volume.value);};
   const words=make('details'),summary=make('summary','Response being read'),text=make('div','','listen-feed-text');words.append(summary,text);
   const pop=button(satellite?'Dock back':'↗',()=>satellite?dockBack():popOut());
+  pop.classList.add('listen-popout');
   pop.title=pop.getAttribute('aria-label')|| (satellite?'Dock back':'Pop out listening');pop.setAttribute('aria-label',satellite?'Dock back':'Pop out listening');
   const end=button('■',()=>{stop();if(satellite)window.close();});end.title='Stop listening';end.setAttribute('aria-label','Stop listening');
-  bar.append(label,mute,volume,retry,skip,end,pop,status,words);dock.append(bar);
+  bar.append(label,close,mute,volume,retry,skip,end,pop,status,words);dock.append(bar);
   if(satellite){words.open=true;document.body.append(bar);dock.hidden=true;}
   function snapshot(){
     if(!feed)return null;
@@ -69,7 +81,7 @@
     if(detached&&popup?.closed){detached=false;popup=null;}
     if(satellite)pop.disabled=!parent||parent.closed;
     const here=feed&&feed.agent===agentId()&&feed.room===state.room;
-    toggle.textContent=detached?'Listening ↗':here?'Listening':'Listen';toggle.prepend(replyIcon('listen'));toggle.setAttribute('aria-pressed',String(Boolean(here||detached)));
+    toggle.textContent=detached?'Listening ↗':feed&&phone.matches?(feed.error?'Listening !':'Listening'):here?'Listening':'Listen';toggle.prepend(replyIcon('listen'));toggle.setAttribute('aria-pressed',String(Boolean(here||detached||feed&&phone.matches)));
     if(!feed)return;
     label.textContent='Listening · '+feed.title;mute.textContent=feed.muted?'Unmute':'Mute';mute.setAttribute('aria-pressed',String(feed.muted));
     status.textContent=feed.error||feed.connectionNote||((!feed.initialized?'Starting from the latest response…':feed.muted?'Muted':feed.preparing?'Preparing voice…':feed.current?'Reading':'Waiting for new replies')+(feed.queue.length?' · '+feed.queue.length+' waiting':'')+(feed.partial?' · '+feed.partial:''));
@@ -78,6 +90,7 @@
   }
   function stop(transferring=false){
     ++generation;
+    showControls(false);
     if(satellite&&!transferring&&parent&&!parent.closed)parent.postMessage({type:"ux46-listen-stopped",channel},location.origin);
     if(feed){feed.audio.pause();feed.audio.removeAttribute('src');feed.audio.load();feed.audio.remove();feed=null;}
     if(releaseLock){releaseLock();releaseLock=null;}paint();

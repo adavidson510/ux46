@@ -46,7 +46,7 @@ test('mute holds playback, local one-off pauses feed, retry keeps the failed ite
  f.fail(false);await page.getByRole('button',{name:'Play / retry',exact:true}).click();await expect.poll(()=>f.writes().length).toBe(2);
  await page.getByRole('button',{name:'Mute',exact:true}).click();expect(await page.locator('audio').evaluate(a=>a.paused)).toBe(true);
  await page.getByRole('button',{name:'Unmute',exact:true}).click();await page.evaluate(()=>UX46ListenFeed.pause());await expect(page.getByRole('button',{name:'Unmute',exact:true})).toBeVisible();
- await page.setViewportSize({width:390,height:844});await page.evaluate(()=>applyShell());const box=await page.locator('.listen-feed').boundingBox();expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x+box.width).toBeLessThanOrEqual(390);
+ await page.setViewportSize({width:390,height:844});await page.evaluate(()=>applyShell());await expect(page.locator('.listen-feed')).toBeHidden();await page.locator('#btnListenFeed').click();const box=await page.locator('.listen-feed').boundingBox();expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x+box.width).toBeLessThanOrEqual(390);
  await page.screenshot({path:test.info().outputPath('listen-feed-phone.png')});await page.getByRole('button',{name:'Stop listening'}).click();
 });
 test('only one window listens and stopping during synthesis discards late audio',async({context,page})=>{
@@ -107,4 +107,34 @@ test('blocked popup keeps playback here and closing a satellite returns its feed
  await expect(pop.locator('.listen-feed')).toBeVisible();await expect(page.locator('audio')).toHaveCount(0);
  await pop.close();await expect(page.locator('audio')).toHaveCount(1);
  await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('phone listening stays docked while reading and typing; controls dismiss without stopping audio',async({context,page})=>{
+ await page.setViewportSize({width:390,height:844});
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ f.set([message('old','Earlier'),message('a','A complete progress update')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
+ await expect(page.locator('.listen-feed')).toBeHidden();
+ await page.evaluate(()=>{window.readingAudio=document.querySelector('audio');});
+ await page.locator('#draft').fill('Keep working while I listen');
+ await page.screenshot({path:test.info().outputPath('phone-listening-docked.png')});
+ await page.locator('#btnListenFeed').click();
+ await expect(page.locator('.listen-feed')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Pop out listening'})).toBeHidden();
+ await expect(page.locator('#btnListenFeed')).toHaveAttribute('aria-expanded','true');
+ await page.screenshot({path:test.info().outputPath('phone-listening-expanded.png')});
+ await page.getByRole('button',{name:'Hide listening controls'}).click();
+ await expect(page.locator('.listen-feed')).toBeHidden();
+ await page.locator('#btnListenFeed').click();
+ await page.locator('#draft').click();
+ await expect(page.locator('.listen-feed')).toBeHidden();
+ expect(await page.evaluate(()=>document.querySelector('audio')===window.readingAudio&&!window.readingAudio.paused)).toBe(true);
+ await expect(page.locator('#draft')).toHaveValue('Keep working while I listen');
+ await page.evaluate(()=>{state.room='other/room';window.dispatchEvent(new Event('ux46-room'));});
+ await page.locator('#btnListenFeed').click();
+ await expect(page.locator('.listen-feed strong')).toHaveText('Listening · AT feed');
+ await page.getByRole('button',{name:'Stop listening',exact:true}).click();
+ await expect(page.locator('audio')).toHaveCount(0);
+ expect(f.writes()).toHaveLength(1);
 });
