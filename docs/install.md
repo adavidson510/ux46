@@ -97,7 +97,7 @@ diagnostics, `ux46 run` is still available; Control+C stops that foreground run.
 | :--- | :--- | :--- |
 | `~/ux46` | Source: the interface, tools, docs, and skills | Let your AI edit your copy |
 | `~/.ux46` | Private settings, registry, workspace stores and source recovery points | Back it up; keep it out of public contributions |
-| `~/.ux46.install` | Resumable installer, optional private Python and independent repair launcher | Keep it with this installation; it is not a temporary download to delete |
+| `~/.ux46.install` | Resumable installer, optional private Python and independent repair launcher | Keep it with this installation; it is not a temporary download to delete. It must stay private to you: the installer refuses one owned by someone else or writable by others |
 | Your project's `sessions/` folder | Portable Session Vault records | Keep useful project context; treat it as private |
 | Provider-managed storage | Native conversations and authentication | Leave ownership with Codex or Claude |
 

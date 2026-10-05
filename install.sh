@@ -29,6 +29,14 @@ scrub_uv_environment() {
   done
   UV_NO_CONFIG=1; export UV_NO_CONFIG
 }
+# True for a real (non-link) file or folder owned by this user that neither its
+# group nor other users can write. Installer control files must pass before they
+# are read or run: a shared parent folder could otherwise hold a pre-planted one.
+private_path() {
+  [ -e "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] || return 1
+  mode=$(LC_ALL=C ls -ld "$1") || return 1
+  case "$mode" in ?????w*|????????w*) return 1;; esac
+}
 main() {
   release='v0.2.0-alpha.39'
   archive_sha='5b3ab8e7b1f2708f83a3fe0e02f727948c5ac77a1fcf240e802e996cd744bf1c'
@@ -72,7 +80,10 @@ main() {
   trap cleanup EXIT HUP INT TERM
   printf '%s\n' "$release" "$archive_sha" "$install_dir" "$state_dir" "$bin_dir" > "$staging/intent"
   if [ -e "$transaction" ] || [ -L "$transaction" ]; then
-    if [ -L "$transaction" ] || [ -L "$transaction/intent" ] || ! cmp -s "$staging/intent" "$transaction/intent"; then
+    if ! private_path "$transaction" || [ ! -d "$transaction" ] || ! private_path "$transaction/intent" || [ ! -f "$transaction/intent" ]; then
+      echo "Installer transaction $transaction is not a private folder owned by you. Nothing was read or replaced." >&2; exit 2
+    fi
+    if ! cmp -s "$staging/intent" "$transaction/intent"; then
       echo "An unrelated or different installation transaction exists at $transaction. Nothing was replaced." >&2; exit 2
     fi
   else
@@ -97,7 +108,10 @@ main() {
   printf '%s\n' "$$" > "$transaction/active/pid"
   locked=1
   python=''
-  if [ -f "$transaction/python" ] && [ ! -L "$transaction/python" ]; then
+  if [ -e "$transaction/python" ] || [ -L "$transaction/python" ]; then
+    if ! private_path "$transaction/python" || [ ! -f "$transaction/python" ]; then
+      echo "Saved Python choice $transaction/python is not a private file owned by you. It was not run." >&2; exit 2
+    fi
     saved_python=$(cat "$transaction/python")
     if "$saved_python" -c 'import sys; sys.exit(sys.version_info < (3,10))' >/dev/null 2>&1; then python=$saved_python; fi
   fi

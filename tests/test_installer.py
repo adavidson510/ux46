@@ -178,6 +178,41 @@ chmod 700 "$UV_UNMANAGED_INSTALL/uv"
         self.assertRegex(script,r"uv_installer_sha='[0-9a-f]{64}'")
         self.assertRegex(script,r"uv_python='3\.12\.[0-9]+'")
 
+    def test_shared_or_foreign_transaction_files_are_never_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);first,source,state,binaries=self.attempt(root,corrupt_download=True)
+            self.assertNotEqual(first.returncode,0)
+            transaction=Path(str(state)+'.install')
+            evil=root/'evil';marker=root/'evil-ran'
+            evil.write_text('#!/bin/sh\necho ran >> '+str(marker)+'\n');evil.chmod(0o755)
+            (transaction/'python').write_text(str(evil)+'\n')
+            cases=[('group-writable transaction',transaction,0o770),('world-writable transaction',transaction,0o707),
+                   ('group-writable intent',transaction/'intent',0o620),('world-writable python',transaction/'python',0o606)]
+            for label,path,mode in cases:
+                with self.subTest(label):
+                    original=path.stat().st_mode & 0o777
+                    path.chmod(mode)
+                    try:result,*_=self.attempt(root)
+                    finally:path.chmod(original)
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIn('owned by you',result.stderr)
+                    self.assertFalse(marker.exists())
+                    self.assertFalse(source.exists())
+            if os.getuid()==0:
+                with self.subTest('foreign owner'):
+                    os.chown(transaction/'python',65534,65534)
+                    result,*_=self.attempt(root)
+                    self.assertNotEqual(result.returncode,0);self.assertFalse(marker.exists())
+                    os.chown(transaction,65534,65534)
+                    result,*_=self.attempt(root)
+                    self.assertNotEqual(result.returncode,0);self.assertIn('not a private folder',result.stderr)
+                    os.chown(transaction,0,0);os.chown(transaction/'python',0,0)
+            # A private, owned saved choice is still honoured on resume.
+            (transaction/'python').write_text(sys.executable+'\n')
+            again,*_=self.attempt(root)
+            self.assertEqual(again.returncode,0,again.stderr)
+            self.assertFalse(marker.exists())
+
     def test_failed_setup_resumes_owned_paths_and_keeps_user_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);first,source,state,binaries=self.attempt(root,fail_setup=True)

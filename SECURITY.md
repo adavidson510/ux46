@@ -51,6 +51,11 @@ redaction and rejection. They are not usable accounts.
   SHA-256 before extracting it. It rejects unsafe archive paths and links.
   The checksum protects integrity relative to the installer; it is not an
   independent signature against compromise of the publishing account itself.
+- The resumable installer folder (`~/.ux46.install`, or `$UX46_HOME.install`) must
+  be a real folder owned by you that neither your group nor other users can write,
+  and so must its saved `intent` and `python` files. Otherwise the installer stops
+  before reading or running anything from it, so a pre-planted folder in a shared
+  location cannot choose the program it runs.
 - If Python is missing, an explicitly versioned Astral uv installer can obtain a
   private Python runtime. The uv installer script must match a pinned SHA-256
   before it runs, and it installs an exact CPython patch release that uv checks
