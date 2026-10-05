@@ -1884,7 +1884,13 @@ def route_state_dir() -> Path:
 
 
 def route_state_path(identity: str, principal: str | None) -> Path:
+    # The identity can come from a record's frontmatter ``session`` field, so
+    # both halves must be single safe path components before they name a file
+    # under the route-state directory; anything else is refused, not cleaned.
     project, _, session = identity.partition("/")
+    for label, value in (("project", project), ("session", session)):
+        if not SAFE_COMPONENT.fullmatch(value):
+            raise VaultError(f"Unsafe {label} in route-state identity: {identity!r}")
     owner = principal or "default"
     return route_state_dir() / f"{project}__{session}__{owner}.json"
 
