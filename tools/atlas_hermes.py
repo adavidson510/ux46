@@ -2094,7 +2094,9 @@ class HermesService:
     def check_sendable(record: dict) -> None:
         """Refuse before sending what the native runtime would refuse mid-turn."""
         size = int(record.get("size") or 0)
-        mime = str(record.get("mime") or "")
+        # The declared type: open_download() narrows "mime" for HTTP serving
+        # only, and the runtime must still see an image as an image (S06).
+        mime = str(record.get("declared_mime") or record.get("mime") or "")
         if size <= 0:
             raise AdapterError(
                 HTTPStatus.BAD_REQUEST, "attachment_empty",
@@ -2124,7 +2126,10 @@ class HermesService:
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.NOT_FOUND, "file_unknown", str(exc)) from exc
             self.check_sendable(record)
-            mime = str(record.get("mime") or "application/octet-stream")
+            # Agent delivery uses the declared type (image.attach_bytes vs
+            # file.attach); record["mime"] is narrowed for HTTP serving only (S06).
+            mime = str(record.get("declared_mime") or record.get("mime")
+                       or "application/octet-stream")
             encoded = base64.b64encode(data).decode("ascii")
             if mime.startswith("image/"):
                 result = self.gateway.call("image.attach_bytes", {

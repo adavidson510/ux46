@@ -1342,10 +1342,15 @@ class ClaudeService:
                 record, data = self.files.open_download(file_id, room=room.id)
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "file_unknown", str(exc)) from exc
+            # Deliberately the narrowed record["mime"], not declared_mime: it
+            # becomes the image block's media_type, and only the raster types
+            # the store serves (png/jpeg/gif/webp...) are images Claude reads.
+            # The message names the declared type so the refusal makes sense.
             if not str(record["mime"]).startswith("image/"):
                 raise AdapterError(
                     HTTPStatus.BAD_REQUEST, "unsupported_attachment",
-                    f"{record['name']} is {record['mime']}; this adapter can only send "
+                    f"{record['name']} is {record.get('declared_mime') or record['mime']}; "
+                    "this adapter can only send "
                     "images to Claude Code, as native image blocks")
             if len(data) > MAX_ATTACH_BYTES:
                 raise AdapterError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "too_large",

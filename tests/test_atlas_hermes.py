@@ -1336,6 +1336,21 @@ class AttachmentTest(HermesAdapterTest):
                       self.harness.calls("prompt.submit")[0]["params"]["text"])
         self.harness.finish_turn()
 
+    def test_the_runtime_gets_the_declared_type_not_the_served_one(self) -> None:
+        # S06: serving narrows text/x-python to octet-stream; the runtime's
+        # attach hook must still be told what the file is.
+        self.harness.post(f"/api/room/{self.linked_room}/continue")
+        _, payload = self.harness.upload(
+            self.linked_room, "tool.py", b"print('hi')\n", "text/x-python")
+        status, _sent = self.harness.post(f"/api/room/{self.linked_room}/submit", {
+            "client_id": "withmime0001", "body": "read this",
+            "attachments": [{"file_id": payload["file"]["id"]}]})
+        self.assertEqual(status, 200)
+        attach = self.harness.calls("file.attach")
+        self.assertTrue(attach[0]["params"]["data_url"].startswith(
+            "data:text/x-python;base64,"))
+        self.harness.finish_turn()
+
     def test_an_image_uses_the_byte_upload_hook(self) -> None:
         self.harness.post(f"/api/room/{self.linked_room}/continue")
         _, payload = self.harness.upload(

@@ -1249,6 +1249,22 @@ class UploadTest(RivetAdapterTest):
         # The exact managed id is journaled against the accepted run.
         self.assertEqual(sent["submission"]["attachments"], [{"file_id": file_id}])
 
+    def test_an_agent_gets_the_declared_type_not_the_served_one(self) -> None:
+        # S06: HTTP serving narrows text/x-python to octet-stream, but the
+        # gateway attachment must still say what the file is.
+        _status, payload = self.harness.upload(
+            self.main_room, "tool.py", b"print('hi')\n", "text/x-python")
+        file_id = payload["file"]["id"]
+        _status, _raw, headers = self.harness.raw_get(payload["file"]["download_url"])
+        self.assertEqual(headers["Content-Type"].split(";")[0], "application/octet-stream")
+        status, _sent = self.harness.post(
+            f"/api/room/{self.main_room}/submit",
+            {"client_id": "client-mime0001", "body": "read",
+             "attachments": [{"file_id": file_id}]})
+        self.assertEqual(status, 200)
+        attachments = self.harness.calls("chat.send")[0]["params"]["attachments"]
+        self.assertEqual(attachments[0]["mimeType"], "text/x-python")
+
     def test_a_generic_file_is_sent_too_because_the_gateway_accepts_one(self) -> None:
         _status, payload = self.harness.upload(
             self.main_room, "notes.pdf", PDF_BYTES, "application/pdf")

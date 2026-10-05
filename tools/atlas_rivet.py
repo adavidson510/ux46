@@ -2435,7 +2435,9 @@ class RivetService:
         """Refuse before sending what the gateway would refuse mid-turn."""
 
         size = int(record.get("size") or 0)
-        mime = str(record.get("mime") or "")
+        # The declared type: open_download() narrows "mime" for HTTP serving
+        # only, and the gateway must still see an image as an image (S06).
+        mime = str(record.get("declared_mime") or record.get("mime") or "")
         if size <= 0:
             raise AdapterError(HTTPStatus.BAD_REQUEST, "attachment_empty",
                                f"{record.get('name')} is empty, and the gateway "
@@ -2478,7 +2480,9 @@ class RivetService:
                     "those attachments do not fit one gateway frame; every file is "
                     "still stored here")
             out.append({
-                "mimeType": record["mime"],
+                # Agent delivery carries the declared type; the narrowed
+                # record["mime"] is only for serving bytes over HTTP (S06).
+                "mimeType": record.get("declared_mime") or record["mime"],
                 "fileName": record["name"],
                 # The managed bytes, verbatim. Nothing is re-encoded or resized.
                 "content": base64.b64encode(data).decode("ascii"),
