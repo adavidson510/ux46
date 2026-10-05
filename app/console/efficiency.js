@@ -72,7 +72,7 @@
       }
       if (!ctx.room) { body.replaceChildren(note("Open a conversation first.")); return; }
       if (mode === "chapter") {
-        const preview = await ctx.api("/api/room/" + ctx.room + "/chapter-preview");
+        const preview = await ctx.api("/api/room/" + String(ctx.room).split("/").map(encodeURIComponent).join("/") + "/chapter-preview");
         if (gen !== generation) return;
         const entry = preview.chapter || preview;
         const brief = entry.brief || "";
@@ -125,9 +125,9 @@
       // Read each source independently: unavailable receipts must not hide a
       // useful account status, and a failed account read is never healthy quota.
       const [receipt, account, roomRead] = await Promise.allSettled([
-        ctx.api("/api/room/" + ctx.room + "/usage?day=" + day),
+        ctx.api("/api/room/" + String(ctx.room).split("/").map(encodeURIComponent).join("/") + "/usage?day=" + day),
         ctx.api("/api/account-usage"),
-        ctx.api("/api/room/" + ctx.room),
+        ctx.api("/api/room/" + String(ctx.room).split("/").map(encodeURIComponent).join("/")),
       ]);
       if (gen !== generation) return;
       const limits = account.status === "fulfilled" ? account.value : null;

@@ -488,7 +488,7 @@
     send.disabled=true;
     const save=btn('Save and review',async()=>{try{saved=await call('assistant-action',{action:'save',id:saved.id,base_revision:saved.revision,to:to.value,cc:cc.value,subject:subject.value,body:body.value});status.textContent='Saved. Check the account, recipients and message above, then Send.';send.disabled=false;await refresh();}catch(e){status.textContent=e.message;}});save.disabled=frozen;
     for(const x of [to,cc,subject,body])x.addEventListener('input',()=>{send.disabled=true;status.textContent='Edits need saving before Send.';});
-    modal.append(h('h2',{text:'Review reply'}),h('p',{text:'From: '+d.from}),field('To',to),field('Cc',cc),field('Subject',subject),field('Reply',body),h('p',{class:'ws-sub',text:d.note||''}),h('p',{class:'ws-sub',text:'Outgoing attachments: none. Incoming attachments '+(d.incoming_attachments.length?'not read: '+d.incoming_attachments.join(', '):'none.')}),h('p',{text:'Status: '+d.state}),status,h('div',{class:'ws-actions'},[save,send,close]));
+    modal.append(h('h2',{text:'Review reply'}),h('p',{text:'From: '+d.from}),...(d.reply_to_differs?[h('p',{class:'ws-warning',text:d.recipient_note||'Replies go to a different address than the sender.'})]:[]),field('To',to),field('Cc',cc),field('Subject',subject),field('Reply',body),h('p',{class:'ws-sub',text:d.note||''}),h('p',{class:'ws-sub',text:'Outgoing attachments: none. Incoming attachments '+(d.incoming_attachments.length?'not read: '+d.incoming_attachments.join(', '):'none.')}),h('p',{text:'Status: '+d.state}),status,h('div',{class:'ws-actions'},[save,send,close]));
     document.body.append(modal);modal.showModal();
   }
   function draw(){
