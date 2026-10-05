@@ -52,7 +52,19 @@ redaction and rejection. They are not usable accounts.
   The checksum protects integrity relative to the installer; it is not an
   independent signature against compromise of the publishing account itself.
 - If Python is missing, an explicitly versioned Astral uv installer can obtain a
-  private Python runtime. Use `--no-python-download` to disallow this download.
+  private Python runtime. The uv installer script must match a pinned SHA-256
+  before it runs, and it installs an exact CPython patch release that uv checks
+  against its built-in checksums. uv runs from the installer's private temporary
+  folder with configuration discovery off (`--no-config`, `UV_NO_CONFIG=1`), so
+  a `uv.toml`, `pyproject.toml` or `.python-version` in the folder you ran the
+  command from, or in your user or system uv settings, cannot choose the files.
+  Variables that redirect uv or installer downloads, Python choice or install
+  locations (for example `UV_DOWNLOAD_URL`, `UV_PYTHON_INSTALL_MIRROR`,
+  `UV_PYTHON_DOWNLOADS_JSON_URL`, `UV_PYTHON`, `INSTALLER_DOWNLOAD_URL`) are
+  cleared for those steps; proxy and certificate settings such as `HTTPS_PROXY`,
+  `SSL_CERT_FILE` and `UV_NATIVE_TLS` are kept. The uv binary archive itself is
+  fetched from GitHub over HTTPS by that script without a separate checksum.
+  Use `--no-python-download` to disallow this download.
 - Provider CLIs keep their own authentication. UX46 setup never reads auth files,
   asks for secrets or changes the account used by an installed CLI. Normal native
   runtime operations remain subject to that provider and the human's choices.

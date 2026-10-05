@@ -5,9 +5,39 @@
 # Captured output installs without prompting or starting a foreground server.
 # Release values are set by the maintainer after packaging the tested source.
 set -eu
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum < "$1"
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$1"
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r < "$1"
+  else echo 'No SHA-256 tool (sha256sum, shasum or openssl) was found.' >&2; return 1
+  fi | sed 's/[^0-9a-f].*//'
+}
+# Clears uv and installer variables that change download sources, configuration
+# discovery, Python selection or install locations. Network settings users rely
+# on (HTTPS_PROXY, NO_PROXY, SSL_CERT_FILE, SSL_CERT_DIR, UV_NATIVE_TLS and
+# timeouts) are kept. Call it only in a subshell.
+scrub_uv_environment() {
+  for name in UV_DOWNLOAD_URL UV_INSTALLER_GHE_BASE_URL UV_INSTALLER_GITHUB_BASE_URL \
+    UV_GITHUB_TOKEN UV_INSTALL_DIR UV_UNMANAGED_INSTALL CARGO_DIST_FORCE_INSTALL_DIR \
+    INSTALLER_DOWNLOAD_URL INSTALLER_BASE_URL INSTALLER_GHE_BASE_URL INSTALLER_GITHUB_BASE_URL \
+    UV_CONFIG_FILE UV_PYTHON_DOWNLOADS_JSON_URL UV_PYTHON_INSTALL_MIRROR UV_PYPY_INSTALL_MIRROR \
+    UV_PYTHON_DOWNLOADS UV_PYTHON UV_PYTHON_PREFERENCE UV_MANAGED_PYTHON UV_NO_MANAGED_PYTHON \
+    UV_PYTHON_INSTALL_DIR UV_PYTHON_BIN_DIR UV_PYTHON_CACHE_DIR UV_PYTHON_INSTALL_REGISTRY \
+    UV_PYTHON_INSTALL_BIN UV_CACHE_DIR UV_INSECURE_HOST UV_PROJECT UV_WORKING_DIRECTORY UV_DIRECTORY \
+    UV_OFFLINE UV_NO_CACHE UV_PREVIEW UV_PREVIEW_FEATURES; do
+    unset "$name"
+  done
+  UV_NO_CONFIG=1; export UV_NO_CONFIG
+}
 main() {
   release='v0.2.0-alpha.39'
   archive_sha='5b3ab8e7b1f2708f83a3fe0e02f727948c5ac77a1fcf240e802e996cd744bf1c'
+  # Private Python bootstrap pins: the exact uv installer script (its sha256 is
+  # checked before it runs) and an exact CPython patch release. uv verifies the
+  # Python archive against the checksum built into that uv release.
+  uv_installer_url='https://astral.sh/uv/0.10.12/install.sh'
+  uv_installer_sha='2dbc8204431a43a30f5396f3bb94d3f4505a2aabd4d35a9f75d5d9d6cfa81528'
+  uv_python='3.12.13'
   agent=''; start=auto; bootstrap_python=1; interactive=0
   if [ -t 1 ]; then interactive=1; fi
   printf '%s\n' 'UX46: install here, or give this same curl command to your AI.' \
@@ -32,6 +62,7 @@ main() {
   done
   umask 077
   staging=$(mktemp -d "${TMPDIR:-/tmp}/ux46-install.XXXXXXXX")
+  staging=$(cd "$staging" && pwd -P)
   transaction="${state_dir}.install"
   locked=0
   cleanup() {
@@ -78,11 +109,19 @@ main() {
   if [ -z "$python" ]; then
     if [ "$bootstrap_python" -eq 0 ]; then echo 'Python 3.10+ is required. Install it or allow the private Python download.' >&2; exit 2; fi
     printf '%s\n' runtime-preparing > "$transaction/phase"
-    echo 'Installing a private Python 3.12 with Astral uv. System Python and shell profiles stay unchanged.'
-    curl --proto '=https' --tlsv1.2 -fsSL https://astral.sh/uv/0.10.12/install.sh -o "$staging/uv-install.sh"
-    UV_UNMANAGED_INSTALL="$transaction/runtime/uv" sh "$staging/uv-install.sh"
-    UV_PYTHON_INSTALL_DIR="$transaction/runtime/python" UV_PYTHON_BIN_DIR="$transaction/runtime/bin" "$transaction/runtime/uv/uv" python install 3.12
-    python=$(UV_PYTHON_INSTALL_DIR="$transaction/runtime/python" "$transaction/runtime/uv/uv" python find --managed-python 3.12)
+    echo "Installing a private Python ${uv_python} with Astral uv. System Python and shell profiles stay unchanged."
+    curl --proto '=https' --tlsv1.2 -fsSL "$uv_installer_url" -o "$staging/uv-install.sh"
+    if [ "$(sha256_of "$staging/uv-install.sh")" != "$uv_installer_sha" ]; then
+      echo 'The uv installer did not match its pinned checksum; it was not run. Install Python 3.10+ or retry later.' >&2; exit 2
+    fi
+    # Run uv from the private staging folder with a scrubbed environment so the
+    # current folder's uv.toml/pyproject.toml/.python-version, user or system uv
+    # configuration and download-redirecting variables cannot choose the files.
+    ( scrub_uv_environment; cd "$staging"
+      UV_UNMANAGED_INSTALL="$transaction/runtime/uv" UV_NO_MODIFY_PATH=1 sh "$staging/uv-install.sh"
+      UV_PYTHON_INSTALL_DIR="$transaction/runtime/python" UV_PYTHON_BIN_DIR="$transaction/runtime/bin" "$transaction/runtime/uv/uv" --no-config python install "$uv_python" )
+    python=$( scrub_uv_environment; cd "$staging"
+      UV_PYTHON_INSTALL_DIR="$transaction/runtime/python" "$transaction/runtime/uv/uv" --no-config python find --managed-python --no-python-downloads "$uv_python" )
   fi
   printf '%s\n' "$python" > "$transaction/python"
   if [ ! -f "$transaction/source.tar.gz" ]; then
@@ -103,7 +142,8 @@ main() {
       case "$choice" in 1) agent=codex;; 2) agent=claude;; *) agent=none;; esac
     else agent=none; fi
   fi
-  "$python" - "$transaction" "$archive_sha" "$release" "$install_dir" "$bin_dir" "$state_dir" "$agent" <<'PYINSTALL'
+  # -I: isolated mode; the current folder and PYTHON* variables cannot inject modules.
+  "$python" -I - "$transaction" "$archive_sha" "$release" "$install_dir" "$bin_dir" "$state_dir" "$agent" <<'PYINSTALL'
 import hashlib,json,os,shlex,sys,tarfile,tempfile,shutil,subprocess,uuid
 from pathlib import Path,PurePosixPath
 transaction,expected,release,destination,binaries,state,agent=sys.argv[1:]
