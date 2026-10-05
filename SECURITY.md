@@ -88,7 +88,13 @@ application's isolation boundary. Review your intended tools and project paths.
 ## Before contributing or releasing
 
 Run `python3 scripts/check_public.py`, inspect the staged diff, and scan the full
-history with a secret scanner. Do not post secrets in issues, CI output or
+history with a secret scanner. The guard refuses runtime and credential file names
+(`.env` and `.env.*` other than examples, `.netrc`, `.npmrc`, SSH private key names,
+`.p12`/`.pfx`, `connection.json`, `installation.json`) and common token formats
+(private key blocks, GitHub, AWS, OpenAI-style, Stripe live, Slack, Google API,
+Tailscale keys, JWTs and passwords in URLs); it is a guard, not a complete detector.
+Tests that need sample tokens assemble them at runtime instead of storing them.
+CI pins its GitHub Actions to full commit SHAs and does not keep the checkout token. Do not post secrets in issues, CI output or
 screenshots. If a real secret is discovered, revoke it with its provider and
 remove the exposure; deleting the latest file alone does not clean Git history.
 Report vulnerabilities privately through GitHub's security advisory facility

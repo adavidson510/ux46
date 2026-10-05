@@ -9,16 +9,36 @@ import re
 import subprocess
 import sys
 ROOT=Path(__file__).resolve().parents[1]
-DENIED_NAMES={'.env','auth.json','credentials.json','google_token.json','registry.json','agents.json','config.json'}
-# Reviewed documentation artwork is allowed by exact path, not an entire upload folder.
+DENIED_NAMES={'.env','auth.json','credentials.json','google_token.json','registry.json','agents.json','config.json',
+              '.netrc','.npmrc','.pypirc','connection.json','installation.json'}
+# Example environment files are documentation; any other .env.* is treated as real.
+ENV_TEMPLATES={'.env.example','.env.sample','.env.template'}
+DENIED_PREFIXES=('id_rsa','id_ed25519','id_ecdsa','id_dsa')
+DENIED_SUFFIXES={'.db','.sqlite','.sqlite3','.pem','.key','.log','.p12','.pfx'}
 DOC_ART={'docs/assets/ux46-workspace-2.png'}
 DENIED_DIRS={'sessions','artifacts','state','credentials','.ux46','node_modules','__pycache__'}
 PATTERNS=[re.compile(x) for x in (
-    r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
+    r'-----BEGIN (?:(?:ENCRYPTED|DSA|PGP|OPENSSH|EC|RSA) )?PRIVATE KEY(?: BLOCK)?-----',
     r'gh[pousr]_[A-Za-z0-9]{30,}', r'github_pat_[A-Za-z0-9_]{40,}',
     r'AKIA[A-Z0-9]{16}', r'sk-[A-Za-z0-9_-]{30,}',
+    r'\b[sr]k_live_[0-9A-Za-z]{16,}',                 # Stripe live secret / restricted keys
+    r'\bxox[abposr]-[0-9A-Za-z-]{10,}',               # Slack tokens
+    r'\bAIza[0-9A-Za-z_-]{35}',                       # Google API keys
+    r'\btskey-[A-Za-z0-9]+-[A-Za-z0-9_-]{10,}',       # Tailscale auth/API/client keys
+    r'\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.', # JSON Web Tokens
     r'https?://[^/\s:@]+:[^/\s@]+@',
 )]
+
+
+def denied_path(name):
+    p=Path(name)
+    return bool(set(p.parts)&DENIED_DIRS or p.name in DENIED_NAMES or p.suffix in DENIED_SUFFIXES
+        or name.endswith('.origins.json') or p.name.startswith(DENIED_PREFIXES)
+        or (p.name.startswith('.env.') and p.name not in ENV_TEMPLATES))
+
+
+def credential_text(text):
+    return any(rx.search(text) for rx in PATTERNS)
 
 def check():
     git=(ROOT/'.git').exists()
@@ -29,7 +49,7 @@ def check():
     bad=[];count=0
     for name in filter(None,paths):
         p=Path(name);count+=1
-        if set(p.parts)&DENIED_DIRS or p.name in DENIED_NAMES or p.suffix in {'.db','.sqlite','.sqlite3','.pem','.key','.log'} or name.endswith('.origins.json'):
+        if denied_path(name):
             bad.append((name,'private/runtime path'));continue
         source=ROOT/p
         if source.is_symlink():bad.append((name,'symlink'));continue
@@ -39,7 +59,7 @@ def check():
             if not ((p.parts[:3]==('app','console','brand') and p.suffix=='.png') or name in DOC_ART):
                 bad.append((name,'unexpected binary'))
             continue
-        if any(rx.search(text) for rx in PATTERNS):bad.append((name,'credential pattern'))
+        if credential_text(text):bad.append((name,'credential pattern'))
     for name,reason in bad:print(name+': '+reason)
     print(f'Checked {count} source files; {len(bad)} publication issues')
     return bool(bad) or count==0
