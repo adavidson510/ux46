@@ -365,5 +365,40 @@ class StewardshipTransferTests(OwnershipHarness, unittest.TestCase):
             self.assertIsNone(payload["ownership"]["offer"])
 
 
+class ReceiptPathTests(unittest.TestCase):
+    def test_last_receipt_must_name_a_file_inside_the_scope_receipt_directory(self) -> None:
+        # last_receipt is read back from a state file, so a forged value must
+        # not make verification read a planted file elsewhere on disk.
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            project = base / "alpha"
+            scope = ownership.parse_scope("alpha/review")
+            receipts = scope.receipt_dir(project)
+            receipts.mkdir(parents=True)
+            forged = {"schema": ownership.RECEIPT_SCHEMA, "identity": scope.identity}
+            planted = base / "planted.json"
+            planted.write_text(json.dumps(forged), encoding="utf-8")
+            other = scope.receipt_dir(project).parent / "builder"
+            other.mkdir()
+            (other / "000001-accept.json").write_text(json.dumps(forged), encoding="utf-8")
+            (receipts / "link.json").symlink_to(planted)
+            (receipts / "000001-accept.json").write_text(json.dumps(forged), encoding="utf-8")
+
+            for relative in ("../planted.json", str(planted),
+                             "ownership/receipts/sessions/review/../../../../planted.json",
+                             "ownership/receipts/sessions/builder/000001-accept.json",
+                             "ownership/receipts/sessions/review/link.json",
+                             "ownership/receipts/sessions/review"):
+                with self.subTest(relative):
+                    with self.assertRaisesRegex(ownership.OwnershipError,
+                                                "outside the receipt directory"):
+                        ownership.load_receipt(project, relative, scope)
+            self.assertEqual(
+                ownership.load_receipt(
+                    project, "ownership/receipts/sessions/review/000001-accept.json", scope),
+                forged,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
