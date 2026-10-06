@@ -77,7 +77,12 @@ test('desktop player hands its reply, queue and position to a real window and do
  expect(f.writes()).toHaveLength(1);
  await pop.getByRole('button',{name:'Mute',exact:true}).click();
  await pop.screenshot({path:test.info().outputPath('listen-window.png')});
- await pop.getByRole('button',{name:'Dock back',exact:true}).click();
+ // Docking intentionally closes this page during the click. Chromium can
+ // report that closure before Playwright finishes acknowledging the click.
+ // Require the close and then verify the transferred state in the parent.
+ await Promise.all([pop.waitForEvent('close'),pop.getByRole('button',{name:'Dock back',exact:true}).click().catch(error=>{
+  if(!pop.isClosed()||!String(error.message).includes('has been closed'))throw error;
+ })]);
  await expect(page.locator('audio')).toHaveCount(1);await expect(page.getByRole('button',{name:'Unmute',exact:true})).toBeVisible();
  await expect(page.locator('.listen-feed-status')).toContainText('1 waiting');
  await page.getByRole('button',{name:'Unmute',exact:true}).click();
