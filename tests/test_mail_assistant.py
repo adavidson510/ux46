@@ -87,6 +87,21 @@ class MailTests(unittest.TestCase):
         self.a.mail.upsert('first',{'id':'m1','thread':'t1','stamp':time.time(),'subject':'Action required','sender':'person@example.net','recipient':self.provider.email,'snippet':'Please respond','labels':['INBOX','UNREAD']})
         self.a.put('mail_assistant','filing-policy',{'enabled':True,'archive_routine':True,'mark_read':True})
         MailFiling(self.a).tick();self.assertIn('INBOX',self.provider.labels['m1']);self.assertIn('UNREAD',self.provider.labels['m1'])
+    def test_sender_words_and_our_own_labels_cannot_authorize_archiving(self):
+        for labels in (['INBOX','UNREAD'],['INBOX','UNREAD','UX46/Newsletters & Marketing']):
+            self.provider.labels['m1']=labels[:]
+            self.a.mail.upsert('first',{'id':'m1','thread':'t1','stamp':time.time(),'subject':'Your receipt',
+                'sender':'shop@example.net','recipient':self.provider.email,'snippet':'unsubscribe', 'labels':labels})
+            self.a.put('mail_assistant','filing-policy',{'enabled':True,'archive_routine':True,'mark_read':True})
+            MailFiling(self.a).tick()
+            self.assertIn('INBOX',self.provider.labels['m1']);self.assertIn('UNREAD',self.provider.labels['m1'])
+    def test_provider_category_can_authorize_routine_filing(self):
+        self.provider.labels['m1']=['INBOX','UNREAD','CATEGORY_PROMOTIONS']
+        self.a.mail.upsert('first',{'id':'m1','thread':'t1','stamp':time.time(),'subject':'News',
+            'sender':'shop@example.net','recipient':self.provider.email,'snippet':'', 'labels':self.provider.labels['m1']})
+        self.a.put('mail_assistant','filing-policy',{'enabled':True,'archive_routine':True,'mark_read':True})
+        MailFiling(self.a).tick()
+        self.assertNotIn('INBOX',self.provider.labels['m1']);self.assertNotIn('UNREAD',self.provider.labels['m1'])
     def test_filing_leaves_new_unindexed_reply_untouched(self):
         self.a.mail.upsert('first',{'id':'m1','thread':'t1','stamp':time.time(),'subject':'Your receipt','sender':'shop@example.net','recipient':self.provider.email,'snippet':'Thank you for your purchase','labels':['INBOX','UNREAD']})
         self.a.put('mail_assistant','filing-policy',{'enabled':True,'archive_routine':True,'mark_read':True})

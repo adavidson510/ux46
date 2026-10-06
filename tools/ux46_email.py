@@ -104,6 +104,9 @@ class EmailStore(Store):
         marketing=any(l in labels for l in ('UX46/Newsletters & Marketing','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'))
         if marketing:category='newsletters'
         need='';reason='Categorized by deterministic rules';project='';required=False
+        # A sender can choose every word in a message. Those words may help
+        # categorize it, but cannot authorize removing it from the inbox.
+        auto_archive_eligible=bool(set(message['labels']) & {'CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'})
         if 'INBOX' in labels:
             if 'UX46/Reply Needed' in labels:need='reply';reason='Inbox reply label; current message still needs review'
             elif 'UX46/Action Needed' in labels:need='decide';reason='Inbox action label; current message still needs review'
@@ -126,6 +129,7 @@ class EmailStore(Store):
         if chosen:
             rule=chosen[0];category=rule['category'];project=rule['project']
             need='' if rule['need']=='quiet' else rule['need'];required=bool(visible)
+            auto_archive_eligible=rule['need']=='quiet'
             reason='Your '+rule['field']+' rule: '+rule['value']
             if len({(r['need'],r['project'],r['category']) for r in chosen})>1:
                 need=need or 'read';reason='Conflicting rules need your review';required=True
@@ -135,7 +139,8 @@ class EmailStore(Store):
             reason += ' · Sender/spam warning';required=required or bool(need)
         if 'SENT' in labels or 'TRASH' in labels:
             need=''
-        return dict(category=category,need=need,reason=reason,project=project,required=required)
+        return dict(category=category,need=need,reason=reason,project=project,required=required,
+                    auto_archive_eligible=auto_archive_eligible and not need and not message['warnings'])
 
     def view(self,account='',category='',lane='needs',limit=100,project=''):
         rules=self.rules()
