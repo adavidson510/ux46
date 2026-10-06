@@ -910,7 +910,9 @@ class CliTransportTest(unittest.TestCase):
         # per-argument limit exec fails with E2BIG before anything is sent.
         transport = agent3.CliTransport(["/bin/true"])
         with self.assertRaises(agent3.GatewayError) as caught:
-            transport.call("chat.send", {"message": "\u6f22" * 60000})
+            # macOS permits a larger argument than Linux's per-argument cap.
+            # Exceed the total advertised limit so both kernels refuse exec.
+            transport.call("chat.send", {"message": "x" * (os.sysconf('SC_ARG_MAX') + 1)})
         self.assertNotIsInstance(caught.exception, agent3.GatewayUncertain)
         self.assertEqual(caught.exception.code, "cli_exec_failed")
         self.assertIn("too large", str(caught.exception))

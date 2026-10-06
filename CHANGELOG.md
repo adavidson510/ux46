@@ -5,6 +5,15 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.40 · October 5, 2026
+
+- **Security and reliability fixes from the October review.** Tightens local adapter access, browser-origin checks, file downloads, queued-message cancellation, shared-store paths and installer verification. See [review #44](https://github.com/adavidson510/ux46/pull/44) and [tracking #8](https://github.com/adavidson510/ux46/issues/8).
+- **Remote SSH connections use a private socket.** Existing `local_port` settings remain accepted but no longer open a local TCP port. Agents still run on their own hosts.
+- **Safer downloads and attribution.** HTML, JavaScript, SVG and XML attachments download as binary files; agents retain their original declared type. Agent-written handoffs and memory claims are labelled as agent reports. Email drafts identify replies addressed somewhere other than the original sender.
+- **After updating:** restart the updated UX46 service and adapters when their active turns have finished, then refresh browser pages. Merging source or refreshing a page alone does not activate backend fixes. Existing installs and remote hosts need their own update.
+- **Checked:** 113 browser journeys; targeted security regression checks; an actual Mac installer run using the private Python bootstrap; and a read-only connection to a configured remote agent through the new socket transport. No test message was sent to an agent or email recipient. Live native model execution was not exercised by these checks.
+- **Still open:** local process/agent identity and authorization design, plus the separate follow-up backlog in issues #36–#43. This release does not claim to isolate an unrestricted agent from the OS account it runs under.
+
 ## v0.2.0-alpha.39 · October 5, 2026
 
 - **One conversation picker on phones.** The current name and open-conversation count share one button. Tap it to search or switch conversations, rename a tab, or close one. The second dropdown is gone.
