@@ -94,7 +94,7 @@ class MailFiling:
             if not messages:continue
             for message in messages:
                 classification=self.a.mail.classify(item['account'],message,rules)
-                if message['warnings'] or classification['need'] or classification['category'] not in ('newsletters','receipts'):
+                if not classification['auto_archive_eligible'] or classification['category'] not in ('newsletters','receipts'):
                     quiet=False
             if re.search(r'action required|reply required|please respond|please confirm|approval needed|payment failed|past due',item['subject']+' '+item['snippet'],re.I):quiet=False
             handled=quiet and policy.get('archive_routine',False)

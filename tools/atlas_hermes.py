@@ -1803,7 +1803,7 @@ class HermesService:
         self.journal.detach(room.id)
         with self._lock:
             self._tails.pop(room.id, None)
-            self._approvals.pop(room.id, None)
+            self._approvals = {k: v for k, v in self._approvals.items() if v['room'] != room.id}
         self.catalog.refresh(force=True)
         self.events.publish({"type": "ownership", "room": room.id})
         return {
@@ -1881,8 +1881,7 @@ class HermesService:
     # -- approvals ---------------------------------------------------------
     def approvals_for(self, room: Room) -> list[dict]:
         with self._lock:
-            record = self._approvals.get(room.id)
-        return [record] if record else []
+            return [dict(record) for record in self._approvals.values() if record['room'] == room.id]
 
     def all_approvals(self) -> list[dict]:
         with self._lock:
@@ -1902,35 +1901,36 @@ class HermesService:
             raise AdapterError(HTTPStatus.CONFLICT, "approval_unknown",
                                "that request is not the one this runtime is waiting on; "
                                "nothing was answered")
+        # The installed Hermes approval.respond accepts a session, not a
+        # request ID. Adding an ignored request_id would give false assurance:
+        # another native request could arrive before that answer is applied.
+        # sudo/secret also require their own credential flows, never a generic
+        # accept. Keep these visible but let the native UI handle them.
+        if match['native_event'] != 'clarify.request':
+            raise AdapterError(HTTPStatus.CONFLICT, 'native_approval_required',
+                               'Answer this request in Hermes. Its current protocol cannot bind '
+                               'a UX46 approval to this exact request; nothing was approved.')
         room = self.catalog.room(match["room"])
         if room is None:
             raise AdapterError(HTTPStatus.CONFLICT, "unknown_room",
                                "that request's conversation is no longer listed")
         ephemeral = self.require_owned(room)
-        if match["kind"] == "user_input":
-            answers = body.get("answers")
-            if not isinstance(answers, dict) or not answers:
-                raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_approval",
-                                   "that request needs an answer, not a choice")
-            text = "\n".join(str(value) for value in answers.values())
-            method, params = "clarify.respond", {"session_id": ephemeral,
-                                                 "request_id": match.get("request_id", ""),
-                                                 "answer": text}
-        else:
-            choice = {"accept": "once", "decline": "deny"}.get(decision)
-            if choice is None:
-                raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_approval",
-                                   "answer a command request with accept or decline")
-            # `all: false` on purpose: accepting answers this one request and
-            # never widens the session's standing permissions.
-            method, params = "approval.respond", {"session_id": ephemeral,
-                                                  "choice": choice, "all": False}
+        if not match.get('request_id') or ephemeral != match.get('native_session_id'):
+            raise AdapterError(HTTPStatus.CONFLICT, 'approval_unknown',
+                               'This request no longer identifies the current native session.')
+        answers = body.get("answers")
+        if not isinstance(answers, dict) or not answers:
+            raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_approval",
+                               "that request needs an answer, not a choice")
+        text = "\n".join(str(value) for value in answers.values())
+        method, params = "clarify.respond", {"session_id": ephemeral,
+                                             "request_id": match["request_id"], "answer": text}
         try:
             result = self.gateway.call(method, params, timeout=25.0)
         except NativeError as exc:
             raise AdapterError(HTTPStatus.BAD_GATEWAY, exc.code, exc.message) from exc
         with self._lock:
-            self._approvals.pop(match["room"], None)
+            self._approvals.pop(key, None)
         self.events.publish({"type": "approval", "room": match["room"]})
         return {"answered": True, "key": key, "decision": decision,
                 "method": method, "native": result,
@@ -2005,7 +2005,9 @@ class HermesService:
             extra = {"lifecycle": True}
         elif event in ("sudo.expire", "secret.expire"):
             with self._lock:
-                self._approvals.pop(room.id, None)
+                self._approvals = {k: v for k, v in self._approvals.items()
+                    if not (v['room'] == room.id and v['request_id'] == str(payload.get('request_id') or '')
+                            and v['native_event'] == event.replace('.expire', '.request'))}
             self.events.publish({"type": "approval", "room": room.id})
         elif event == "session.info":
             extra = {"lifecycle": True}
@@ -2043,8 +2045,12 @@ class HermesService:
             }]
         record = {
             "key": key, "kind": kind, "room": room.id,
+            "answer_supported": event == 'clarify.request' and bool(request_id),
+            "answer_notice": ('' if event == 'clarify.request' and request_id else
+                'Answer in Hermes. This request cannot be safely approved from UX46 yet.'),
             "request_id": request_id,
             "native_event": event,
+            "native_session_id": session_id,
             "thread_id": room.session_id,
             "turn_id": self._tail(room.id).turn_id,
             "params": params,
@@ -2052,7 +2058,7 @@ class HermesService:
             "at": time.time(),
         }
         with self._lock:
-            self._approvals[room.id] = record
+            self._approvals[key] = record
 
     # -- sending -----------------------------------------------------------
     def checked_attachments(self, room: Room, raw) -> list[dict]:

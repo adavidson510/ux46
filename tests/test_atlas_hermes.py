@@ -1172,16 +1172,28 @@ class ApprovalTest(HermesAdapterTest):
         _, detail = self.harness.get(f"/api/room/{self.linked_room}")
         self.assertEqual(len(detail["approvals"]), 1)
 
-    def test_answering_is_explicit_and_widens_no_permission(self) -> None:
+    def test_unbound_native_command_approval_is_refused(self) -> None:
         approval = self.waiting()
         status, payload = self.harness.post("/api/approvals/answer", {
             "key": approval["key"], "kind": approval["kind"], "decision": "accept"})
-        self.assertEqual(status, 200)
-        self.assertFalse(payload["permissions_changed"])
-        calls = self.harness.calls("approval.respond")
-        self.assertEqual(calls[0]["params"],
-                         {"session_id": "eph0001", "choice": "once", "all": False})
-        self.assertEqual(self.harness.get("/api/approvals")[1]["approvals"], [])
+        self.assertEqual(status, 409)
+        self.assertEqual(payload['error'],'native_approval_required')
+        self.assertEqual(self.harness.calls("approval.respond"), [])
+        self.assertEqual(len(self.harness.get("/api/approvals")[1]["approvals"]), 1)
+
+    def test_parallel_approvals_are_retained_and_never_misanswered(self):
+        first=self.waiting()
+        service=self.harness.service
+        service.on_native_event('approval.request','eph0001',{'request_id':'req-2','command':'second command'})
+        service.on_native_event('sudo.request','eph0001',{'request_id':'sudo-1'})
+        approvals=self.harness.get('/api/approvals')[1]['approvals']
+        self.assertEqual(len(approvals),3)
+        for item in approvals:
+            status,_=self.harness.post('/api/approvals/answer',{'key':item['key'],'decision':'accept'})
+            self.assertEqual(status,409)
+        self.assertEqual(self.harness.calls('approval.respond'),[])
+        service.on_native_event('sudo.expire','eph0001',{'request_id':'sudo-1'})
+        self.assertEqual(len(self.harness.get('/api/approvals')[1]['approvals']),2)
 
     def test_a_request_that_is_not_pending_is_never_answered(self) -> None:
         self.waiting()
