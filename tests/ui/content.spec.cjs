@@ -2,8 +2,8 @@ const {test,expect}=require('@playwright/test');
 const fs=require('node:fs'),path=require('node:path');
 const root=process.env.UX46_TEST_UI_ROOT||path.resolve(__dirname,'../..');
 async function fixture(context){
- let saved={id:'article-test-01',agent:'keel',room:'example/article',kind:'markdown',revision:1,title:'Draft 2',payload:{text:'# Original\n\nA sentence to edit.'},at:1,history:[{revision:1,at:1}]};
- const chart={id:'chart-test-01',agent:'keel',room:'example/article',kind:'chart',revision:1,title:'Comparison fixture',payload:{chart:{type:'bar',labels:['Monday','Tuesday'],values:[1,3],unit:'points'},source:'Synthetic fixture',snapshot:true},at:1,history:[]};
+ let saved={id:'article-test-01',agent:'assistant',room:'example/article',kind:'markdown',revision:1,title:'Draft 2',payload:{text:'# Original\n\nA sentence to edit.'},at:1,history:[{revision:1,at:1}]};
+ const chart={id:'chart-test-01',agent:'assistant',room:'example/article',kind:'chart',revision:1,title:'Comparison fixture',payload:{chart:{type:'bar',labels:['Monday','Tuesday'],values:[1,3],unit:'points'},source:'Synthetic fixture',snapshot:true},at:1,history:[]};
  let fail=false;const calls=[];
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url());if(u.origin!=='https://fixture.test')return route.abort();
@@ -26,7 +26,7 @@ async function fixture(context){
   if(name==='app.js')body=body.replace('\nboot();','\n/* fixture boot */');
   return route.fulfill({body,contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html'});
  });
- async function main(page){await page.goto('https://fixture.test/');await page.evaluate(()=>{state.csrf='fixture';state.agent='keel';state.room='example/article';state.agents=[{id:'keel',kind:'local'}];state.ui.dock='board';applyShell();});await page.evaluate(()=>UX46Content.open({agent:'keel',room:'example/article',id:'article-test-01'}));}
+ async function main(page){await page.goto('https://fixture.test/');await page.evaluate(()=>{state.csrf='fixture';state.agent='assistant';state.room='example/article';state.agents=[{id:'assistant',kind:'local'}];state.ui.dock='board';applyShell();});await page.evaluate(()=>UX46Content.open({agent:'assistant',room:'example/article',id:'article-test-01'}));}
  return {main,calls,saved:()=>saved,fail:v=>{fail=v;},chart};
 }
 test('Canvas save persists; popout shares identity and never opens a native session',async({context,page})=>{
@@ -44,10 +44,10 @@ test('Canvas save persists; popout shares identity and never opens a native sess
 });
 test('conflicting and failed saves retain text; dirty polling never moves the editor',async({context,page})=>{
  const f=await fixture(context);await f.main(page);
- const second=await context.newPage();await second.goto('https://fixture.test/?content=article-test-01&agent=keel&room=example%2Farticle');
+ const second=await context.newPage();await second.goto('https://fixture.test/?content=article-test-01&agent=assistant&room=example%2Farticle');
  await expect(second.getByLabel('Markdown source',{exact:true})).toBeVisible();
  await second.getByLabel('Markdown source',{exact:true}).fill('Second window unsaved');
- await second.evaluate(()=>UX46Content.open({agent:'keel',room:'example/article',id:'article-test-01'}));
+ await second.evaluate(()=>UX46Content.open({agent:'assistant',room:'example/article',id:'article-test-01'}));
  await expect(second.getByLabel('Markdown source',{exact:true})).toHaveValue('Second window unsaved');
  await page.getByLabel('Markdown source',{exact:true}).fill('First window saved');await page.getByRole('button',{name:'Save',exact:true}).click();
  await expect(page.locator('.content-status')).toHaveText('Saved · revision 2');
@@ -63,7 +63,7 @@ test('conflicting and failed saves retain text; dirty polling never moves the ed
 });
 test('chart uses the same popout; blocked popup fallback and mobile remain usable',async({context,page})=>{
  await fixture(context);await page.setViewportSize({width:390,height:844});
- await page.goto('https://fixture.test/?content=chart-test-01&agent=keel&room=example%2Farticle');
+ await page.goto('https://fixture.test/?content=chart-test-01&agent=assistant&room=example%2Farticle');
  await expect(page.getByRole('heading',{name:'Comparison fixture'})).toBeVisible();await expect(page.locator('.content-body')).toContainText('Snapshot · Synthetic fixture');
  await expect(page.getByRole('img',{name:/Monday 1 points/})).toBeVisible();
  await expect(page.getByRole('button',{name:'Save',exact:true})).toHaveCount(0);
@@ -73,7 +73,7 @@ test('chart uses the same popout; blocked popup fallback and mobile remain usabl
  await page.screenshot({path:test.info().outputPath('chart-popout-phone.png')});
 });
 test('Markdown HTML is displayed as text, without script execution',async({context,page})=>{
- await fixture(context);await page.goto('https://fixture.test/?content=article-test-01&agent=keel&room=example%2Farticle');
+ await fixture(context);await page.goto('https://fixture.test/?content=article-test-01&agent=assistant&room=example%2Farticle');
  await page.getByLabel('Markdown source',{exact:true}).fill('<img src=x onerror="window.bad=true"><script>window.bad=true</script>');
  await page.getByRole('button',{name:'Preview',exact:true}).click();expect(await page.evaluate(()=>window.bad)).toBeUndefined();await expect(page.locator('.content-preview img')).toHaveCount(0);
 });

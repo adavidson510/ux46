@@ -14,7 +14,7 @@ async function setup(page){
 }
 test('concierge shows its own focus, persists changes and starts explicitly',async({page})=>{
  const writes=await setup(page);await expect(page.locator('.concierge-strip')).toBeVisible();await page.getByRole('button',{name:'Watching & focus'}).click();
- await page.getByRole('textbox',{name:'Your focus'}).fill('GlucaPet slice 8; AT major changes only');await page.getByRole('button',{name:'Save focus',exact:true}).click();await expect(page.getByRole('dialog',{name:'Assistant settings'}).getByRole('status')).toContainText('Focus saved');expect(writes[0].action).toBe('focus');expect(writes[0].update_mode).toBe('quiet');
+ await page.getByRole('textbox',{name:'Your focus'}).fill('Demo app slice 8; AT major changes only');await page.getByRole('button',{name:'Save focus',exact:true}).click();await expect(page.getByRole('dialog',{name:'Assistant settings'}).getByRole('status')).toContainText('Focus saved');expect(writes[0].action).toBe('focus');expect(writes[0].update_mode).toBe('quiet');
  await page.getByRole('button',{name:'Start watching',exact:true}).click();await expect(page.locator('.concierge-strip')).toContainText('Watching 1 rooms');expect(writes[1].action).toBe('start');
  await page.screenshot({path:test.info().outputPath('concierge-desktop.png')});
  await page.evaluate(()=>{state.room='p/work';window.dispatchEvent(new Event('ux46-room'));});await expect(page.locator('.concierge-strip')).toBeHidden();
@@ -36,7 +36,7 @@ test('automatic source packets stay inspectable without filling the conversation
 
 test('assistant name is distinct from the connection selector and persists',async({page})=>{
  const writes=await setup(page);await page.getByRole('button',{name:'Watching & focus'}).click();
- await page.getByRole('textbox',{name:'Assistant name'}).fill('Keel');await page.getByRole('button',{name:'Save name',exact:true}).click();
- await expect(page.locator('#btnConcierge')).toContainText('Keel');await expect(page.locator('#btnConcierge')).toContainText('Your assistant');
- await expect(page.locator('#btnConcierge .concierge-voice-mark')).toBeVisible();expect(writes[0]).toMatchObject({action:'identity',name:'Keel'});
+ await page.getByRole('textbox',{name:'Assistant name'}).fill('Assistant');await page.getByRole('button',{name:'Save name',exact:true}).click();
+ await expect(page.locator('#btnConcierge')).toContainText('Assistant');await expect(page.locator('#btnConcierge')).toContainText('Your assistant');
+ await expect(page.locator('#btnConcierge .concierge-voice-mark')).toBeVisible();expect(writes[0]).toMatchObject({action:'identity',name:'Assistant'});
 });

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""UX46 adapter for the existing Agent3 OpenClaw gateway.
+"""UX46 adapter for the existing OpenClaw gateway.
 
 This is a *reading and sending* surface over a gateway that is already running
 and already authenticated. It starts nothing, configures nothing and owns
-nothing on the agent side: Agent3 keeps its own process, its own login, its own
+nothing on the agent side: OpenClaw keeps its own process, its own login, its own
 sessions and its own other clients.
 
 Run it beside that gateway, on the same machine, as the account that owns it:
@@ -135,9 +135,9 @@ ALLOWED_METHODS = frozenset({
 })
 
 CAPABILITY = "openclaw-gateway"
-CAPABILITY_SHORT = "Agent3 · OpenClaw gateway"
+CAPABILITY_SHORT = "OpenClaw gateway"
 CAPABILITY_LABEL = (
-    "the Agent3 OpenClaw gateway on this machine — readable, and sendable "
+    "the OpenClaw gateway on this machine — readable, and sendable "
     "through the gateway's own session"
 )
 
@@ -152,7 +152,7 @@ UNCERTAIN = "uncertain"
 CANCELLED = "cancelled"
 
 # The slash commands this adapter can complete without forwarding command text
-# into a Agent3 conversation.  Their implementation maps only to the gateway
+# into an OpenClaw conversation.  Their implementation maps only to the gateway
 # calls listed in ``ALLOWED_METHODS`` or to this adapter's own bridge.
 COMMANDS_SUPPORTED = ("/new", "/help", "/status", "/refresh", "/model", "/effort", "/compact")
 COMMAND_HELP = (
@@ -160,7 +160,7 @@ COMMAND_HELP = (
     {"name": "/effort", "usage": "/effort [level]", "description": "read or set native thinking effort for this session"},
     {"name": "/compact", "usage": "/compact", "description": "run the gateway’s native compaction for this session"},
     {"name": "/new", "usage": "/new [title]",
-     "description": "start a fresh Agent3 conversation on this gateway and open it here; "
+     "description": "start a fresh OpenClaw conversation on this gateway and open it here; "
                     "the conversation you are in is left exactly as it is. A linked "
                     "project is retained for the new conversation"},
     {"name": "/help", "usage": "/help",
@@ -170,7 +170,7 @@ COMMAND_HELP = (
      "description": "read the current gateway session state without starting a turn"},
     {"name": "/refresh", "usage": "/refresh",
      "description": "reconnect this UX46 adapter's gateway bridge and refresh its "
-                    "session catalog; it does not restart Agent3 or replay a request"},
+                    "session catalog; it does not restart OpenClaw or replay a request"},
 )
 # Named so the refusal can say what would be needed, not just that it is missing.
 COMMAND_UNSUPPORTED = {
@@ -231,7 +231,7 @@ CAPABILITIES = {
     "approvals": False,
     "voice": False,
     "notes": [
-        "Attach and Release move only this UX46 view. Agent3's gateway, its other "
+        "Attach and Release move only this UX46 view. OpenClaw's gateway, its other "
         "clients and any run in flight are untouched by either.",
         "Send is idempotent on the client id: a repeat of a known id reports the "
         "journaled outcome and calls the gateway zero more times.",
@@ -1663,7 +1663,7 @@ class RivetService:
         # the composer. Here those words mean only whether this UX46 view is
         # following the session. They are not a claim of exclusive ownership —
         # `scope`, `exclusive` and `adapter_state` say what is really true, and
-        # Agent3's gateway and every other client are unaffected either way.
+        # OpenClaw's gateway and every other client are unaffected either way.
         payload["ownership"] = {
             "state": "atlas_owned" if attached else "idle",
             "atlas_owned": attached,
@@ -1671,7 +1671,7 @@ class RivetService:
             "scope": "ux46_view",
             "exclusive": False,
             "adapter_state": "attached" if attached else "detached",
-            "detail": ("this UX46 view is following the session; Agent3's gateway and its "
+            "detail": ("this UX46 view is following the session; OpenClaw's gateway and its "
                        "other clients are unaffected either way"),
             "also_open_as": [],
         }
@@ -1950,7 +1950,7 @@ class RivetService:
             "attached": {**record, "streaming": streaming},
             "continued": {**record, "streaming": streaming},
             "scope": "ux46_view",
-            "message": ("This UX46 view now follows Agent3's session. Nothing was started, "
+            "message": ("This UX46 view now follows OpenClaw's session. Nothing was started, "
                         "taken over or reconfigured on the gateway."
                         + ("" if streaming else
                            " The live stream could not be subscribed, so history is polled.")),
@@ -1984,12 +1984,12 @@ class RivetService:
             "release_state": "detached" if was_attached else "not_attached",
             "gateway_untouched": True,
             "native_work_continues": True,
-            "message": ("This UX46 view stopped following the session. Agent3's gateway "
+            "message": ("This UX46 view stopped following the session. OpenClaw's gateway "
                         "kept running, no run was aborted, and every other client kept "
                         "its connection."
                         if was_attached else
                         "This view was not following that session, so nothing changed. "
-                        "Agent3's gateway was not touched."),
+                        "OpenClaw's gateway was not touched."),
         }
 
     def stop_turn(self, room: Room) -> dict:
@@ -2213,7 +2213,7 @@ class RivetService:
         if name != "/new":
             reason = COMMAND_UNSUPPORTED.get(name, "No native operation is exposed by this adapter.")
             return {"command": {"name": name, "state": "unsupported", "message":
-                    f"{name} is not available through Agent3's gateway connection: {reason}. It was not sent as a message.",
+                    f"{name} is not available through OpenClaw's gateway connection: {reason}. It was not sent as a message.",
                     "supported": list(COMMANDS_SUPPORTED), "sent_as_text": False}}
         if len(args) > 120:
             raise AdapterError(400, "bad_title", "Use a conversation name of 120 characters or fewer.")
@@ -2257,7 +2257,7 @@ class RivetService:
             result = self.transport.call("sessions.create", {
                 "key": destination,
                 "agentId": self.config.agent_id,
-                "label": title or "New Agent3 conversation",
+                "label": title or "New OpenClaw conversation",
                 # No task, no message, no parent, no fork, no worktree and no
                 # command hooks: a fresh context, no model run, nothing touched.
             }, timeout=float(self.config.command_timeout))
@@ -2367,7 +2367,7 @@ class RivetService:
         if created is None:
             return self._reconcile_new(room, record)
         attached = self.attach(created)
-        message = "Started a new Agent3 conversation."
+        message = "Started a new OpenClaw conversation."
         if recovered:
             message = ("That new conversation was already started, so UX46 opened the "
                        "same one rather than making another.")
@@ -3125,7 +3125,7 @@ class RivetServer(ThreadingHTTPServer):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="UX46 adapter over the existing Agent3 OpenClaw gateway")
+        description="UX46 adapter over the existing OpenClaw gateway")
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind address (loopback only by design)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)

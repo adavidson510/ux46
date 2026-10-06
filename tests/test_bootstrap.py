@@ -164,8 +164,8 @@ class ColdResumeTests(BootstrapHarness, unittest.TestCase):
             base = Path(temporary)
             _, _, config = self.build_world(base)
 
-            code, payload, _ = self.resume(config, "alpha/review", "--principal", "pane-workspace")
-            self.assertEqual(payload["principal"], "pane-workspace")
+            code, payload, _ = self.resume(config, "alpha/review", "--principal", "writer-workspace")
+            self.assertEqual(payload["principal"], "writer-workspace")
             self.assertEqual(payload["principal_source"], "argument")
 
             code, payload, _ = self.resume(

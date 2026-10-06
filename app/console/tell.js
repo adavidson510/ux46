@@ -46,9 +46,8 @@
     return (found && found.label) || id.replace(/-/g, " ");
   }
   function authorLabel(value) {
-    const names = {"local-workspace": "Local", "cp-workspace": "CP", "pane-workspace": "Pane",
-      "agent3-workspace": "Agent3", "cairn-workspace": "Cairn", "cc-workspace": "CC", "agent2-orbit": "Agent2"};
-    return names[value] || value;
+    // Report the supplied identity; installations choose their own agent names.
+    return value || "Unknown author";
   }
   function tellIcon(kind, tiled = false) {
     const paths = {
@@ -379,7 +378,7 @@
     const explanations = {"daily-review": "Recent project notes. These summaries are background, not a to-do list.", "working-better": "Small changes that could save you time or effort.", "bigger-picture": "How your projects might help each other.", "invention-watch": "Ideas that might be worth exploring—not claims of novelty or patentability."};
     const failures = (payload.posts || []).filter(isReviewFailure);
     const available = (payload.posts || []).filter(post => !isReviewFailure(post));
-    const automatic=post=>post.author === "Keel · daily review";
+    const automatic=post=>post.kind === "daily-review" || / · daily review$/i.test(String(post.author || ""));
     const posts = tell.board === "working-better" ? available.filter(p=>!automatic(p)) : available;
     const archived = tell.board === "working-better" ? available.filter(automatic) : [];
     const section = node("section", {class: "tell-posts", id: "tell-board-panel", role: "tabpanel",

@@ -1,6 +1,6 @@
 """Focused checks for the UX46 native Hermes adapter.
 
-Nothing here touches the real Hermes install, the real Pane persona, the
+Nothing here touches the real Hermes install, any installed persona, the
 messaging gateway that is already running, or a model. Every test drives
 ``tools/atlas_hermes.py`` against:
 
@@ -216,7 +216,7 @@ for line in sys.stdin:
 '''
 
 DEFAULT_SESSIONS = [
-    {"id": S_LINKED, "title": "Pane build notes", "preview": "let us start",
+    {"id": S_LINKED, "title": "Writer build notes", "preview": "let us start",
      "started_at": NOW - 8000, "message_count": 6, "source": "cli"},
     {"id": S_DISCORD, "title": "", "preview": "hello from a channel",
      "started_at": NOW - 6000, "message_count": 4, "source": "discord"},
@@ -275,7 +275,7 @@ def build_state_db(path: Path) -> None:
         [
             # Cleanly ended: nothing is writing to it, so it is attachable.
             (S_LINKED, "cli", NOW - 8000, NOW - 7000, "cli_close", 6,
-             "Pane build notes", "/Users/example/Projects/project-atlas", None, None, None),
+             "Writer build notes", "/Users/example/Projects/project-atlas", None, None, None),
             # Routed by the messaging gateway that is already running.
             (S_DISCORD, "discord", NOW - 6000, None, None, 4, None, None,
              DISCORD_KEY, None, None),
@@ -344,7 +344,7 @@ class Harness:
         self.home.mkdir()
         build_state_db(self.home / "state.db")
         (self.home / "SOUL.md").write_text(
-            "# Hermes Agent Persona\n\nYou are Pane for User: a Hermes instance.\n",
+            "# Hermes Agent Persona\n\nYou are Writer for User: a Hermes instance.\n",
             encoding="utf-8")
         # A credential file that must never be opened. Its presence is the test.
         (self.home / "auth.json").write_text(
@@ -355,8 +355,8 @@ class Harness:
         # not be read as a Hermes link.
         atlas = base / "Projects" / "atlas" / "sessions"
         atlas.mkdir(parents=True)
-        (atlas / "pane-notes.origins.json").write_text(json.dumps({
-            "schema_version": 1, "project": "atlas", "session": "pane-notes",
+        (atlas / "writer-notes.origins.json").write_text(json.dumps({
+            "schema_version": 1, "project": "atlas", "session": "writer-notes",
             "origins": [{"runtime": "hermes", "node": "user-mac",
                          "session_id": S_LINKED, "captured": "2026-09-07",
                          "primary": True}],
@@ -386,7 +386,7 @@ class Harness:
         self.config = Namespace(
             host="127.0.0.1", port=0, hermes_home=str(self.home),
             hermes_repo=str(base), python=sys.executable,
-            agent_name="Pane", source="ux46", registry=str(registry),
+            agent_name="Writer", source="ux46", registry=str(registry),
             unfiled_project="unfiled", node="user-mac",
             state_dir=str(base / "state"), session_limit=400,
             include_derived=False, new_cwd=str(base), send_timeout=4.0,
@@ -494,7 +494,7 @@ class HermesAdapterTest(unittest.TestCase):
         self.addCleanup(self.harness.close)
 
     # The linked conversation keeps its real project and its record's own name.
-    linked_room = "atlas/pane-notes"
+    linked_room = "atlas/writer-notes"
 
     def room_for(self, session_id: str) -> str:
         room = self.harness.service.catalog.room_for_session(session_id)
@@ -511,10 +511,10 @@ class BootstrapTest(HermesAdapterTest):
         self.assertEqual(status, 200)
         agent = payload["agent"]
         self.assertEqual(agent["runtime"], "hermes")
-        self.assertEqual(agent["name"], "Pane")
+        self.assertEqual(agent["name"], "Writer")
         # The name is confirmed against Hermes's own persona file, not asserted.
         self.assertTrue(agent["identity_confirmed"])
-        self.assertEqual(agent["identity_declared"], "Pane")
+        self.assertEqual(agent["identity_declared"], "Writer")
         self.assertTrue(agent["identity_source"].endswith("SOUL.md"))
         self.assertEqual(payload["adapter"]["name"], "ux46-hermes")
         self.assertEqual(payload["adapter"]["transport"], "native")
@@ -1055,7 +1055,7 @@ class StreamingTest(HermesAdapterTest):
 class NewConversationTest(HermesAdapterTest):
     def test_new_creates_a_real_session_and_leaves_the_source_alone(self) -> None:
         status, payload = self.harness.post(f"/api/room/{self.linked_room}/command", {
-            "command": "/new pane scratch", "client_id": "newcommand01"})
+            "command": "/new writer scratch", "client_id": "newcommand01"})
         self.assertEqual(status, 200)
         command = payload["command"]
         self.assertEqual(command["state"], "completed")
@@ -1068,9 +1068,9 @@ class NewConversationTest(HermesAdapterTest):
 
         creates = self.harness.calls("session.create")
         self.assertEqual(len(creates), 1)
-        self.assertEqual(creates[0]["params"]["title"], "pane scratch")
+        self.assertEqual(creates[0]["params"]["title"], "writer scratch")
         self.assertEqual(creates[0]["params"]["source"], "ux46")
-        # The literal text "/new" is never sent to Pane.
+        # The literal text "/new" is never sent to Writer.
         self.assertEqual(self.harness.calls("prompt.submit"), [])
         # The source conversation was not released.
         self.assertEqual(self.harness.calls("session.close"), [])

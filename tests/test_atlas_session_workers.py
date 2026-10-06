@@ -520,7 +520,7 @@ class AdapterBoundaryTests(unittest.TestCase):
         adapter = workers.adapter_for("codex", ["/bin/true"])
         self.assertEqual(adapter.agent, "codex")
         self.assertEqual(workers.adapter_for("", ["/bin/true"]).agent, "codex")
-        for name in ("claude", "claude-code", "gemini", "pane", "hermes"):
+        for name in ("claude", "claude-code", "gemini", "custom-assistant", "hermes"):
             with self.assertRaises(native.NativeError) as caught:
                 workers.adapter_for(name, ["/bin/true"])
             self.assertEqual(caught.exception.code, "agent_unsupported")

@@ -1,8 +1,8 @@
 ---
 name: tell-discovery
-description: Read or preserve a specific cross-project observation when it helps current work or Aaron asks. Not a recurring check-in or a reason to start work.
+description: Read or preserve a specific cross-project observation when it helps current work or the human asks. Not a recurring check-in or a reason to start work.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # Deliberate Signals
@@ -10,9 +10,9 @@ metadata:
 Signals is an archive and a place for a useful, specific cross-project
 observation. Tell's addressed messaging remains separate. Do not perform routine
 check-ins, produce general portfolio roundups, or wake another model to find
-something to contribute. Aaron's installation has paused those automatic paths.
+something to contribute. Automatic participation is opt-in; do not infer it from installed scripts.
 
-When Aaron asks about a finding, read its original evidence and replies once.
+When the human asks about a finding, read its original evidence and replies once.
 Explain what, if anything, it changes in the current work. A citation to a room
 does not establish relevance or assign that room a task. A useful observation
 may become chosen work; after actual use, a reusable lesson belongs in

@@ -46,8 +46,7 @@ function notify(message, error = false) {
 }
 
 function projectColor(id) {
-  const colors = { orbit: "#a75cff", "demo-pet": "#72d26b", nightwatch: "#4f94ff", general: "#93a2b6" };
-  return colors[id] || `hsl(${[...String(id)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360} 62% 63%)`;
+  return `hsl(${[...String(id)].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360} 62% 63%)`;
 }
 
 function sessionById(identity) {
@@ -526,7 +525,7 @@ function renderAttention() {
 
 function attentionItem(item) {
   const shell = el("article", "attention-item");
-  const title = el("h3", "", item.need_from_aaron);
+  const title = el("h3", "", item.need_from_human);
   title.append(el("span", "lifecycle", item.lifecycle_state));
   shell.append(title);
   shell.append(el("p", "", `${projectName(item.project_id)} / ${sessionById(item.session_id)?.title || item.session_id}`));
@@ -542,7 +541,7 @@ function attentionItem(item) {
 function attentionDetail(item) {
   const detail = el("div", "attention-detail");
   const fields = [
-    ["Need from User", item.need_from_aaron], ["Why User", item.why_aaron], ["Paused", item.paused],
+    ["What needs you", item.need_from_human], ["Why you", item.why_human], ["Paused", item.paused],
     ["Still continuing", item.still_continuing], ["If no action", item.if_no_action], ["Recommendation", item.recommendation || "No recommendation"],
     ["After response", item.after_response],
   ];

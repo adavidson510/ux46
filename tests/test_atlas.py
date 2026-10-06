@@ -51,19 +51,19 @@ class AtlasCliTests(unittest.TestCase):
     def test_index_search_and_cross_source_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
-            orbit_home = base / "projects" / "orbit"
+            sample_home = base / "projects" / "sample"
             atlas_home = base / "projects" / "project-atlas"
-            orbit_source = base / "sources" / "orbit"
+            sample_source = base / "sources" / "sample"
             atlas_source = base / "sources" / "atlas"
-            orbit_source.mkdir(parents=True)
+            sample_source.mkdir(parents=True)
             atlas_source.mkdir(parents=True)
             payload = b"same exact mockup bytes"
-            (orbit_source / "ORBIT-v3-mobile-mockup.png").write_bytes(payload)
-            (orbit_source / ".env.production").write_text("DO_NOT_INDEX=yes")
+            (sample_source / "SAMPLE-v3-mobile-mockup.png").write_bytes(payload)
+            (sample_source / ".env.production").write_text("DO_NOT_INDEX=yes")
             (atlas_source / "review-copy.png").write_bytes(payload)
             self.make_project(
-                orbit_home, "orbit", orbit_source,
-                ["ORBIT v3", "UX mockups", "truth chrome"],
+                sample_home, "sample", sample_source,
+                ["SAMPLE v3", "UX mockups", "truth chrome"],
             )
             self.make_project(
                 atlas_home, "project-atlas", atlas_source,
@@ -75,7 +75,7 @@ class AtlasCliTests(unittest.TestCase):
                 "node_id": "test-node",
                 "nodes": [{"id": "test-node"}],
                 "projects": [
-                    {"id": "orbit", "name": "ORBIT", "root": str(orbit_home), "aliases": []},
+                    {"id": "sample", "name": "SAMPLE", "root": str(sample_home), "aliases": []},
                     {"id": "project-atlas", "name": "Project Atlas", "root": str(atlas_home), "aliases": ["atlas"]},
                 ],
             }), encoding="utf-8")
@@ -86,16 +86,16 @@ class AtlasCliTests(unittest.TestCase):
             summary = json.loads(built.stdout)
             self.assertEqual(summary["hashed_files"], summary["files"])
             indexed_paths = [json.loads(line)["path"] for line in index.read_text().splitlines()]
-            self.assertNotIn(str(orbit_source / ".env.production"), indexed_paths)
+            self.assertNotIn(str(sample_source / ".env.production"), indexed_paths)
 
             searched = self.run_atlas(
-                registry, index, "search", "ORBIT v3 mockup",
+                registry, index, "search", "SAMPLE v3 mockup",
                 "--no-sessions", "--json",
             )
             self.assertEqual(searched.returncode, 0, searched.stderr)
             results = json.loads(searched.stdout)
-            self.assertEqual(results[0]["name"], "ORBIT-v3-mobile-mockup.png")
-            self.assertEqual(results[0]["projects"], ["orbit"])
+            self.assertEqual(results[0]["name"], "SAMPLE-v3-mobile-mockup.png")
+            self.assertEqual(results[0]["projects"], ["sample"])
 
             duplicates = self.run_atlas(registry, index, "duplicates", "--json")
             self.assertEqual(duplicates.returncode, 0, duplicates.stderr)

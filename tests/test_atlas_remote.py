@@ -555,7 +555,7 @@ class ClientScopingTests(unittest.TestCase):
             + "const out = [];\n"
             "for (const id of ['', 'agent2']) {\n"
             "  state.agent = id;\n"
-            "  out.push([agentId(), apiUrl('/api/room/orbit/build/draft'),\n"
+            "  out.push([agentId(), apiUrl('/api/room/sample/build/draft'),\n"
             "            agentKey('atlas.room'), isRemoteAgent()]);\n"
             "}\n"
             "console.log(JSON.stringify(out));\n"
@@ -564,9 +564,9 @@ class ClientScopingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         local, far = json.loads(result.stdout)
         # The local agent keeps the exact paths and keys it has always used.
-        self.assertEqual(local, ["local", "/api/room/orbit/build/draft", "atlas.room", False])
+        self.assertEqual(local, ["local", "/api/room/sample/build/draft", "atlas.room", False])
         # A remote agent gets its own namespace on both sides.
-        self.assertEqual(far, ["agent2", "/api/agents/agent2/api/room/orbit/build/draft",
+        self.assertEqual(far, ["agent2", "/api/agents/agent2/api/room/sample/build/draft",
                                "atlas.room@agent2", True])
         # And the path the client would build is one the proxy accepts.
         remote.check_allowed("PUT", far[1].split("/api/agents/agent2", 1)[1])

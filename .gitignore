@@ -28,6 +28,7 @@ config.local.json
 registry.json
 agents.json
 config.json
+private-markers.txt
 
 playwright-report/
 test-results/

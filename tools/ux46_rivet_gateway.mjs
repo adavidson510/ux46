@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * A persistent OpenClaw Gateway connection for the UX46 Agent3 adapter.
+ * A persistent OpenClaw Gateway connection for the UX46 OpenClaw adapter.
  *
  * This runs on the machine that already hosts the gateway, beside the running
  * `openclaw` install, and speaks newline-delimited JSON on stdin/stdout to its
@@ -56,7 +56,7 @@ function parseArgs(argv) {
     probe: false,
     url: "",
     openclawRoot: "",
-    clientDisplayName: "UX46 Agent3 adapter",
+    clientDisplayName: "UX46 OpenClaw adapter",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];

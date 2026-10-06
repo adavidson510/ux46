@@ -752,9 +752,9 @@ test('a blocked goal and a working or finished reply are shown separately',async
 
 test('waiting commands use compact rows with optional details on desktop and phone',async({page})=>{
   await commandQueueFixture(page);
-  await page.evaluate(()=>{state.detail.project_name='GlucaPet';return sendCommand('/goal resume',false);});
+  await page.evaluate(()=>{state.detail.project_name='Demo app';return sendCommand('/goal resume',false);});
   await page.evaluate(()=>sendCommand('/effort high',false));
-  await expect(page.locator('#commandQueue summary').first()).toHaveText('GlucaPet · /goal resume · queued');
+  await expect(page.locator('#commandQueue summary').first()).toHaveText('Demo app · /goal resume · queued');
   await expect(page.locator('#commandQueue details').first()).not.toHaveAttribute('open','');
   expect((await page.locator('#commandQueue').boundingBox()).height).toBeLessThan(100);
   await page.screenshot({path:test.info().outputPath('compact-queue-desktop.png')});
@@ -815,7 +815,7 @@ for (const format of ['native ID', 'room descriptor']) {
     await page.route('**/api/agents/cp/api/room/fixture/new-cp', route => route.fulfill({json: detail(room, {title:'Code Review', runtime:'claude'})}));
     await page.route('**/api/agents/cp/api/room/fixture/new-cp/history?**', route => route.fulfill({json: history([])}));
     await page.evaluate(() => {
-      state.agents = [{id:'local',label:'Keel'}, {id:'cp',label:'CP'}];
+      state.agents = [{id:'local',label:'Assistant'}, {id:'cp',label:'CP'}];
       document.querySelector('#draft').value = '';
       openNewConversation(null, 'cp');
     });

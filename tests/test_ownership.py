@@ -187,7 +187,7 @@ class StewardshipTransferTests(OwnershipHarness, unittest.TestCase):
 
             impostor = self.own(
                 registry, "offer", "alpha/review", "--principal", "cc-workspace",
-                "--to", "pane-workspace",
+                "--to", "writer-workspace",
             )
             self.assertEqual(impostor.returncode, 1)
             self.assertIn("Only the current steward may offer", impostor.stderr)
@@ -204,7 +204,7 @@ class StewardshipTransferTests(OwnershipHarness, unittest.TestCase):
                 "--to", "cc-workspace",
             )
             wrong_target = self.own(
-                registry, "accept", "alpha/review", "--principal", "pane-workspace"
+                registry, "accept", "alpha/review", "--principal", "writer-workspace"
             )
             self.assertEqual(wrong_target.returncode, 1)
             self.assertIn("Only 'cc-workspace' may accept", wrong_target.stderr)
@@ -213,7 +213,7 @@ class StewardshipTransferTests(OwnershipHarness, unittest.TestCase):
             # A second open offer is refused rather than silently replacing the first.
             again = self.own(
                 registry, "offer", "alpha/review", "--principal", "local-workspace",
-                "--to", "pane-workspace",
+                "--to", "writer-workspace",
             )
             self.assertEqual(again.returncode, 1)
             self.assertIn("already has an open offer", again.stderr)
@@ -264,7 +264,7 @@ class StewardshipTransferTests(OwnershipHarness, unittest.TestCase):
             )
             self.assertEqual(stranger.returncode, 0, stranger.stderr)
             refused = self.own(
-                registry, "cancel", "alpha/review", "--principal", "pane-workspace"
+                registry, "cancel", "alpha/review", "--principal", "writer-workspace"
             )
             self.assertEqual(refused.returncode, 1)
             self.assertIn("may cancel this offer", refused.stderr)

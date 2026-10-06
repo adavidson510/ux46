@@ -9,7 +9,7 @@ from urllib.parse import quote
 from constellation_store import Store, Conflict, encoded, identifier, text
 
 CATEGORIES = ('legal','receipts','subscriptions','customers','security','infrastructure','newsletters','other')
-PANE_CATEGORIES = {'UX46/Taxes & Legal':'legal','UX46/Receipts':'receipts',
+LABEL_CATEGORIES = {'UX46/Taxes & Legal':'legal','UX46/Receipts':'receipts',
     'UX46/Bills & Finance':'subscriptions','UX46/Customers & Leads':'customers',
     'UX46/Security Alerts':'security','UX46/AI & Infrastructure':'infrastructure',
     'UX46/Domains & Accounts':'infrastructure','UX46/Newsletters & Marketing':'newsletters'}
@@ -99,8 +99,9 @@ class EmailStore(Store):
 
     def classify(self,account,message,rules):
         # Preserve historical labels while new filing uses UX46 names.
+        # Compatibility for labels written by early installations; explicit aliases win.
         labels=[self.label_aliases.get(x,('UX46/'+x[5:]) if x.startswith('Pane/') else x) for x in message['labels']];subject=message['subject'].casefold();words=(subject+' '+message['snippet']).casefold()
-        category=next((v for k,v in PANE_CATEGORIES.items() if k in labels),'other')
+        category=next((v for k,v in LABEL_CATEGORIES.items() if k in labels),'other')
         marketing=any(l in labels for l in ('UX46/Newsletters & Marketing','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'))
         if marketing:category='newsletters'
         need='';reason='Categorized by deterministic rules';project='';required=False
