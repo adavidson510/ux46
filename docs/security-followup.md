@@ -2,42 +2,39 @@
 
 The initial review is shipped in alpha.40 through PR #44. Issues #36–#43 track a different class of work: the distinction between a browser session, a native coding agent and content imported from elsewhere.
 
-## Decision being made
+## Product decision · October 5, 2026
 
-UX46 should keep direct conversation and explicitly requested cross-room coordination useful. Reading a room update is not permission to send email, change settings or start new work. A model prompt saying "do not use tools" is not an access boundary.
+UX46 is an access layer around the native agents the owner chooses. Preserve their configured capabilities and useful cross-room coordination. Fix defects UX46 adds; do not make separate OS accounts, credential services or agent sandboxes mandatory. Stronger separation is an optional deployment choice, not a prerequisite for using the application.
 
-The proposed default is to preserve powerful coding rooms while isolating automatic update processing and the service that can send email. Full isolation of every coding room is a different product choice: its filesystem, credentials and network access must be constrained too. This choice is pending owner direction; the proposal below is not an implemented boundary.
+A trusted full-power agent using the owner's tools is expected behavior. An unrelated website triggering those tools through UX46 is a defect. Incoming reports must retain their source and must not be misrepresented as the owner's instructions. This distinction does not justify disabling an assistant's authorized work.
 
-## #36: separate transport access from authority
+The previous proposal to require protected update and email services is withdrawn. The following directions narrow the remaining review; they are not claims that every issue is implemented or closed.
 
-There are three distinct concerns:
+## #36: document trust and protect the access boundary
 
-1. Other local OS accounts must not acquire owner access from `/api/bootstrap`. Bind backend adapters to owner-only Unix sockets, or require a protected installation credential. The browser front remains accessible through a separately authenticated entry point. Local launch/open and independent recovery must use that entry point too.
-2. Browser and agent requests need separate server-derived principals. JSON fields, free-text reporter names, a loopback address and a CSRF token cannot assert that a human authorized something. The access gateway must strip client-supplied identity/role headers and inject only an authenticated identity over the protected backend transport.
-3. An unrestricted process under the service owner's OS account can read its credentials or modify its code/state. Another 0600 file or bearer token does not isolate that process. Strong protection from these agents requires a separate service account/host with agent-inaccessible credentials, or genuinely constrained agents. Administrator/root access to that service host remains outside the boundary.
+The default is a single-owner local application. Native agents retain the filesystem, network and computer-use access the owner grants them. A loopback address, CSRF token, JSON reporter field or browser click cannot prove that a human personally performed an action. An extra bearer token does not isolate a same-account agent that can read it or operate an authenticated browser.
 
-Rollout must include browser login, command-line reads, private front-door access, local and SSH adapters, voice/media requests, recovery, reconnects, and explicit refusal of an old unprotected path. Do not silently migrate some routes and leave a bootstrap bypass elsewhere. Existing installations require migration; a source merge alone changes none of their running services.
+Review actual UX46 ingress defects: cross-site requests, untrusted identity headers, remote exposure and unintended access by other OS accounts. Fix those without claiming protection against an unrestricted process trusted with the same OS account. Preserve local launch, command-line tools, private remote access, voice/media and recovery. Do not require a new login ceremony solely to relabel an already trusted local caller.
 
-## #37: sending email
+For owners who want stronger isolation, document separate accounts/hosts and credentials inaccessible to the agents. Explain the remaining computer-use and administrative access routes. Optional isolation should have its own migration checks; it is not a gate for ordinary correctness fixes.
 
-Keep drafting and sending separate. A sender service owns the Gmail sending credential; coding rooms can request drafts, not obtain that credential. The existing review screen supplies the human action. It binds a one-time authorization to the exact account, recipients, body, saved revision and source-thread revision. Consume it atomically before dispatch, preserve unknown-send outcomes, and never replay an uncertain send.
+## #37: make email Send reliable
 
-A nonce from an unauthenticated loopback endpoint would not establish human intent. This depends on #36's authenticated browser principal and, for protection from powerful same-account agents, a real process/account boundary. Do not add a second routine confirmation after the existing Send button. A changed Reply-To recipient warrants an explicit exception review.
+Keep drafting and sending distinguishable. The existing Send action should dispatch the exact reviewed account, recipients, body and saved draft/source revision. Prevent duplicate submissions, consume dispatch intent atomically, preserve unknown-send outcomes and never replay an uncertain send. Do not add a second routine confirmation after Send.
 
-Morning briefs may summarize several threads, but an outgoing draft must be generated from its own thread. Content copied from a multi-thread summary must never become the body of a reply.
+These are workflow and delivery guarantees, not proof that a human clicked. A trusted agent may have browser or direct tool access under the owner's chosen permissions. Attribute actions honestly where provenance is available; a review hash proves freshness, not human identity. A separately protected sender is optional, not required for these improvements.
+
+Morning briefs may summarize several threads, but an outgoing draft must use its own thread. Do not accidentally copy another thread's private material into a reply. Show a changed Reply-To recipient clearly in the existing review flow.
 
 ## #38: suggestions and memory
 
-Store the source revision/digest selected by the human. Changed evidence becomes a visible proposal, not silently substituted text in another room's input. Agent-routed observations may appear as agent suggestions; they must not be attributed to the human or automatically injected as their instructions. Automatic checkpoint injection should remain off. An explicit request to discuss a suggestion can supply its quoted data to that room.
+Preserve source identity, revision/digest and attribution. Changed evidence must not silently replace the evidence previously assessed. An agent's suggestion must not become a human instruction through a reporter field. Keep deliberately requested room handoffs useful. Automatic suggestion routing remains opt-in; its content is a report within the configured workflow, not new authority by itself.
 
 ## #39: automatic assistant updates
 
-Keep two paths:
+Distinguish human requests from automatic project reports in storage, display and handoff metadata. Preserve source room, time, delivery ID and coverage; suppress duplicate delivery and never blindly replay an unknown dispatch. Do not describe an automatic report as something the human just said.
 
-- **Human conversation:** the ordinary assistant room can use its authorized read and coordination tools when asked.
-- **Automatic reports:** collect changes deterministically, optionally summarize in an isolated tool-free process, and render/speak the resulting update as an attributed report. Do not submit it as a user turn to the tool-enabled assistant. Filtering the wording in a second model is not a substitute for removing that dispatch path.
-
-The update store must retain source room, time, delivery ID and coverage. Display/listening must work without mutating native history. Unknown deliveries must not be replayed. Referencing an update during a later human turn is an explicit read; the update itself never authorizes a handoff or send.
+Keep the assistant's conversational and coordination capabilities. A deterministic report feed or tool-free summarizer can be an optional delivery path when it improves latency, cost or owner preference. It is not a mandatory replacement for a tool-enabled assistant. The owner chooses what monitoring and actions are authorized; the contents of a received report do not expand that scope.
 
 ## #40: Hermes approvals
 
