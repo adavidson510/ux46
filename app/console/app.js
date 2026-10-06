@@ -161,9 +161,9 @@ function isRemoteAgent() { return agentId() !== DEFAULT_AGENT; }
 function apiUrl(path) {
   return isRemoteAgent() ? "/api/agents/" + agentId() + path : path;
 }
-/* Two agents can hold identically named orbit rooms. Every stored reference to
+/* Two agents can hold identically named project rooms. Every stored reference to
    a room — drafts, tabs, outbox, uploads — is therefore namespaced by agent so
-   one agent's `orbit/build` can never be read as the other's. */
+   one agent's `example/build` can never be read as the other's. */
 function agentKey(key) { return isRemoteAgent() ? key + "@" + agentId() : key; }
 function agentLabel(id) {
   const found = (state.agents || []).find((a) => a.id === (id || agentId()));
@@ -7590,7 +7590,7 @@ function updateNeedsCount() {
    progress, no summary, no model call, and a reachable agent is never drawn as
    an agent doing work.
 
-   Nothing is answered for. An agent that does not report attention — the Agent3
+   Nothing is answered for. An agent that does not report attention — the OpenClaw
    adapter reads no checkpoint and says so — is shown as not reporting, never
    as reporting zero. An unreachable agent says it is unreachable. Neither is
    allowed to delay or replace what the other agents already returned.

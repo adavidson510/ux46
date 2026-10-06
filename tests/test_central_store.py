@@ -23,7 +23,7 @@ keywords: central store publication, attributed replica
 checkpoint_schema: 1
 checkpoint_at: "2026-08-20T10:00:00Z"
 checkpoint_node: user-mac
-checkpoint_reporter: cp-workspace
+checkpoint_reporter: reviewer-workspace
 checkpoint_state: working
 checkpoint_need: none
 checkpoint_next: "Publish the bounded slice"
@@ -95,7 +95,7 @@ class CentralStoreHarness:
     def publish(self, registry: Path, store: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         return self.run_store(
             registry, "publish", "alpha/review",
-            "--store-root", str(store), "--principal", "cp-workspace", "--json", *extra,
+            "--store-root", str(store), "--principal", "reviewer-workspace", "--json", *extra,
         )
 
     def room(self, store: Path) -> Path:
@@ -274,23 +274,23 @@ class CentralStorePublishTests(CentralStoreHarness, unittest.TestCase):
                                capture_output=True, text=True)
 
             result = self.publish(
-                registry, store, "--node", "user-mac", "--reporter", "cp-workspace",
+                registry, store, "--node", "user-mac", "--reporter", "reviewer-workspace",
                 "--classification", "restricted",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             receipt = json.loads(result.stdout)
 
-            self.assertEqual(receipt["incoming"]["attribution"], "user-mac/cp-workspace")
+            self.assertEqual(receipt["incoming"]["attribution"], "user-mac/reviewer-workspace")
             self.assertEqual(
                 receipt["incoming"]["path"],
-                "collectives/workspace/projects/alpha/incoming/user-mac/cp-workspace/"
+                "collectives/workspace/projects/alpha/incoming/user-mac/reviewer-workspace/"
                 f"rooms/review/{receipt['publish_id']}.json",
             )
 
             manifest = json.loads((store / receipt["incoming"]["path"]).read_text(encoding="utf-8"))
             self.assertEqual(manifest["node"], "user-mac")
-            self.assertEqual(manifest["principal"], "cp-workspace")
-            self.assertEqual(manifest["reporter"], "cp-workspace")
+            self.assertEqual(manifest["principal"], "reviewer-workspace")
+            self.assertEqual(manifest["reporter"], "reviewer-workspace")
             self.assertEqual(manifest["classification"], "restricted")
             self.assertEqual(manifest["checkpoint_at"], "2026-08-20T10:00:00Z")
             self.assertEqual(
@@ -319,7 +319,7 @@ class CentralStoreRejectionTests(CentralStoreHarness, unittest.TestCase):
 
             result = self.run_store(
                 registry, "publish", "alpha/..",
-                "--store-root", str(store), "--principal", "cp-workspace",
+                "--store-root", str(store), "--principal", "reviewer-workspace",
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("path separator or traversal", result.stderr)
@@ -332,14 +332,14 @@ class CentralStoreRejectionTests(CentralStoreHarness, unittest.TestCase):
 
             upper = self.run_store(
                 registry, "publish", "Alpha/review",
-                "--store-root", str(store), "--principal", "cp-workspace",
+                "--store-root", str(store), "--principal", "reviewer-workspace",
             )
             self.assertEqual(upper.returncode, 1)
             self.assertIn("must be lowercase", upper.stderr)
 
             reserved = self.run_store(
                 registry, "publish", "alpha/aux",
-                "--store-root", str(store), "--principal", "cp-workspace",
+                "--store-root", str(store), "--principal", "reviewer-workspace",
             )
             self.assertEqual(reserved.returncode, 1)
             self.assertIn("Windows reserved name", reserved.stderr)
@@ -436,8 +436,8 @@ class CentralStorePullTests(CentralStoreHarness, unittest.TestCase):
 
             self.assertEqual(receipt["record_sha256"], published["current"]["record_sha256"])
             self.assertEqual(receipt["node"], "user-mac")
-            self.assertEqual(receipt["principal"], "cp-workspace")
-            self.assertEqual(receipt["reporter"], "cp-workspace")
+            self.assertEqual(receipt["principal"], "reviewer-workspace")
+            self.assertEqual(receipt["reporter"], "reviewer-workspace")
             self.assertEqual(receipt["checkpoint_at"], "2026-08-20T10:00:00Z")
             self.assertTrue(all(item["verified"] for item in receipt["items"]))
             self.assertEqual(len(receipt["items"]), 2)
@@ -556,8 +556,8 @@ class CentralStoreCatalogTests(CentralStoreHarness, unittest.TestCase):
             self.assertEqual(entry["identity"], "alpha/review")
             self.assertEqual(entry["state"], "current")
             self.assertEqual(entry["node"], "user-mac")
-            self.assertEqual(entry["principal"], "cp-workspace")
-            self.assertEqual(entry["reporter"], "cp-workspace")
+            self.assertEqual(entry["principal"], "reviewer-workspace")
+            self.assertEqual(entry["reporter"], "reviewer-workspace")
             self.assertEqual(entry["classification"], "internal")
             self.assertEqual(entry["record_sha256"], published["current"]["record_sha256"])
             self.assertEqual(entry["origins_sha256"], published["items"][1]["sha256"])

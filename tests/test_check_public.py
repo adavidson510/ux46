@@ -5,7 +5,12 @@ never contains a literal the guard would flag.
 """
 from pathlib import Path
 import importlib.util
+import contextlib
+import io
+import subprocess
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('check_public',ROOT/'scripts/check_public.py')
@@ -64,6 +69,54 @@ class RepositoryTests(unittest.TestCase):
         import contextlib,io
         with contextlib.redirect_stdout(io.StringIO()) as out:failed=check_public.check()
         self.assertFalse(failed,out.getvalue())
+
+
+class PrivateMarkerTests(unittest.TestCase):
+    def test_list_is_optional_but_explicit_missing_or_public_file_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'markers.txt'
+            with self.assertRaises(ValueError):check_public.load_markers(str(path))
+            path.write_text('# private literals\n\nSynthetic Contact\n')
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):check_public.load_markers(str(path))
+            path.chmod(0o600)
+            self.assertEqual(check_public.load_markers(str(path)),['synthetic contact'])
+            link=Path(tmp)/'link';link.symlink_to(path)
+            with self.assertRaises(ValueError):check_public.load_markers(str(link))
+
+    def test_staged_tree_and_commit_messages_not_clean_worktree_are_checked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            def git(*args):return subprocess.check_output(['git',*args],cwd=root,stderr=subprocess.DEVNULL)
+            git('init');git('config','user.name','Example');git('config','user.email','example@example.com')
+            source=root/'example.txt';source.write_text('Synthetic Contact')
+            git('add','example.txt');source.write_text('Clean working copy')
+            with patch.object(check_public,'ROOT',root),contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(check_public.check(markers=['synthetic contact']))
+            self.assertNotIn('Synthetic Contact',out.getvalue())
+            git('add','example.txt')
+            message=root/'message';message.write_text('Mention Synthetic Contact')
+            with patch.object(check_public,'ROOT',root),contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(check_public.check(markers=['synthetic contact'],message_file=message))
+            self.assertNotIn('Synthetic Contact',out.getvalue())
+            git('commit','-m','Mention Synthetic Contact')
+            with patch.object(check_public,'ROOT',root),contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(check_public.check(markers=['synthetic contact'],commits='HEAD'))
+                self.assertFalse(check_public.check(markers=[]))
+
+    def test_paths_and_image_metadata_are_checked_without_echoing_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            (root/'Synthetic Contact.txt').write_text('example')
+            image=root/'app/console/brand/icon.png';image.parent.mkdir(parents=True)
+            image.write_bytes(b'\x89PNG\x00Synthetic Contact')
+            with patch.object(check_public,'ROOT',root),contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(check_public.check(markers=['synthetic contact']))
+            self.assertNotIn('Synthetic Contact',out.getvalue())
+            self.assertIn('[redacted path]',out.getvalue())
+
+    def test_private_list_cannot_be_published(self):
+        self.assertTrue(check_public.denied_path('private-markers.txt'))
 
 
 if __name__=='__main__':unittest.main()

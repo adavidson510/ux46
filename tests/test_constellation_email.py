@@ -33,7 +33,7 @@ class KnowledgeTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.store=Store(self.root/'knowledge.db')
         self.owner=Principal('local',('*',),True)
-        self.peer=Principal('pane',('demo-platform',),True)
+        self.peer=Principal('writer',('demo-platform',),True)
 
     def test_review_counter_counts_distinct_applied_uses(self):
         for name in ('first','second','interest','not-applicable'):
@@ -167,7 +167,7 @@ class MailTests(unittest.TestCase):
     def test_legal_visibility_wins_over_quiet_and_warning_survives(self):
         for rid,need in [('quiet','quiet'),('visible','read')]:
             self.store.save_rule({'base_revision':0,'rule':{'id':rid,'field':'recipient','value':'legal@example.com',
-                'account':'first','need':need,'category':'legal','project':'orbit'}})
+                'account':'first','need':need,'category':'legal','project':'sample'}})
         self.store.upsert('first',self.msg(labels=['SPAM'],warnings=['Spam warning']))
         item=self.store.view('first')['items'][0]
         self.assertTrue(item['required']);self.assertEqual(item['need'],'read');self.assertEqual(item['warnings'],['Spam warning'])
@@ -186,15 +186,15 @@ class MailTests(unittest.TestCase):
         self.assertEqual(self.store.view()['counts']['filed'],0)
 
     def test_graphics_count_received_mail_and_keep_unmapped(self):
-        self.store.save_rule({'base_revision':0,'rule':{'id':'orbit','field':'recipient','value':'legal@example.com','need':'read','category':'legal','project':'Orbit'}})
+        self.store.save_rule({'base_revision':0,'rule':{'id':'sample','field':'recipient','value':'legal@example.com','need':'read','category':'legal','project':'Sample'}})
         self.store.upsert('first',self.msg())
         self.store.upsert('second',self.msg(id='b',recipient='unknown@example.com',subject='Subscription renewal',labels=[]))
         self.store.upsert('second',self.msg(id='sent',labels=['SENT']))
         view=self.store.view(lane='all')
         self.assertEqual(view['account_mix'],{'first':1,'second':1})
-        self.assertEqual(view['project_mix'],{'Orbit':1,'Unmapped':1})
+        self.assertEqual(view['project_mix'],{'Sample':1,'Unmapped':1})
         self.assertEqual(view['subscriptions'],[{'sender_domain':'example.com','messages':1}])
-        self.assertTrue(all(i['project']=='Orbit' for i in self.store.view(project='Orbit',lane='all')['items']))
+        self.assertTrue(all(i['project']=='Sample' for i in self.store.view(project='Sample',lane='all')['items']))
 
     def test_rule_revision_prevents_lost_edits(self):
         p={'base_revision':0,'rule':{'id':'legal','field':'recipient','value':'legal@example.com','need':'read','category':'legal'}}

@@ -2,7 +2,7 @@
 name: ux46-work
 description: Assess relevant Signals or Constellation suggestions in this room, record a chosen small experiment and its observed outcome, and publish the current result with actual check evidence.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Work that produces evidence
@@ -64,7 +64,7 @@ useful work, not maintain a second ledger.
 
 Room citations do not assign work. Automatic citation-based routing is disabled.
 Use only deliberately chosen suggestions in the current scope. Assess relevance
-and record results as part of normal work; Aaron should not fill out assessment
+and record results as part of normal work; the human should not fill out assessment
 or experiment forms. Covered and not-applicable suggestions belong in Reviewed.
 Do not invent an experiment, wake a model, or revive a withdrawn task to process
 an old suggestion. Use Constellation feedback for an applied lesson; keep its

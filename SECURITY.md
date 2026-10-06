@@ -87,6 +87,15 @@ application's isolation boundary. Review your intended tools and project paths.
 
 ## Before contributing or releasing
 
+Personal information needs a separate review from secrets. Inspect examples,
+fixtures, image pixels/metadata, filenames, commit messages and author metadata
+for details learned from a private installation. Public branding and intentional
+attribution are different from private setup details. See CONTRIBUTING.md for
+the optional local private-marker list and Git hooks. CI cannot check an owner's
+private list, and these checks do not promise complete PII detection. Removing a
+detail from the current source does not remove historical copies; avoid rewriting
+shared history without a separately reviewed recovery plan.
+
 Run `python3 scripts/check_public.py`, inspect the staged diff, and scan the full
 history with a secret scanner. The guard refuses runtime and credential file names
 (`.env` and `.env.*` other than examples, `.netrc`, `.npmrc`, SSH private key names,

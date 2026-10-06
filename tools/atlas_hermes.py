@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UX46 adapter over the real native Hermes TUI gateway (Pane's runtime).
+"""UX46 adapter over the real native Hermes TUI gateway (Hermes's runtime).
 
 This is a thin overlay on the Hermes install that is already on this machine,
 already configured and already logged in. It starts one native TUI gateway
@@ -11,15 +11,15 @@ exposes the same loopback HTTP shape the UX46 console already speaks to
 
 What it deliberately is not
 ---------------------------
-* Not a second agent, and not a Codex agent wearing Pane's name. Every turn is
+* Not a second agent, and not a Codex agent wearing Hermes's name. Every turn is
   run by the installed Hermes runtime, by the persona in its own ``SOUL.md``.
   This adapter adds no model, no prompt and no agent layer of its own.
 * Not a manager of anybody else's Hermes. The messaging gateway that is already
   running (``hermes gateway run``) is never contacted, never signalled and
   never reconfigured. No lock is deleted, no process is stopped.
 * Not an owner of sessions it did not open. Hermes's ``_claim_active_session_slot``
-  is a *capacity lease*, not an exclusive writer lock — and on this machine the
-  cap is unset, so it records nothing at all. Ownership is therefore decided
+  is a *capacity lease*, not an exclusive writer lock; it may be unset and
+  record nothing. Ownership is therefore decided
   here, conservatively, from evidence: our own live session list, the session's
   own ``ended_at``, and the messaging gateway's own routing table. Anything this
   adapter cannot prove is idle is read-only, and says why.
@@ -34,8 +34,7 @@ What it deliberately is not
   own environment exactly as Hermes always does.
 
 The wire contract is ``tui_gateway/server.py`` in the installed build and
-``website/docs/developer-guide/programmatic-integration.md``; what was verified
-and when is recorded in ``architecture/hermes-pane-adapter-1.md``.
+``website/docs/developer-guide/programmatic-integration.md`` in that installation.
 """
 
 from __future__ import annotations
@@ -67,7 +66,7 @@ sys.path.insert(0, str(HERE))
 import atlas_files as files  # noqa: E402
 import atlas_rivet as agent3  # noqa: E402
 
-# Reused verbatim from the Agent3 adapter because they are runtime-neutral: a
+# Reused verbatim from the OpenClaw adapter because they are runtime-neutral: a
 # durable client-id journal, a long-poll event ring, and a compare-and-set
 # draft store. Nothing OpenClaw-specific comes across with them.
 Events = agent3.Events
@@ -91,7 +90,7 @@ DEFAULT_HERMES_HOME = "~/.hermes"
 DEFAULT_HERMES_REPO = "~/.hermes/hermes-agent"
 DEFAULT_REGISTRY = "~/.codex/projects/registry.json"
 DEFAULT_UNFILED_PROJECT = "unfiled"
-DEFAULT_AGENT_NAME = "Pane"
+DEFAULT_AGENT_NAME = "Hermes"
 DEFAULT_SOURCE = "ux46"
 
 MAX_BODY = 64 * 1024
@@ -147,7 +146,7 @@ ALLOWED_METHODS = frozenset({
 # hundreds of them.
 DERIVED_SOURCES = frozenset({"tool", "subagent"})
 # Conversations the already-running `hermes gateway` owns end-to-end. A person
-# is talking to Pane there right now; this adapter never resumes one.
+# is talking to Hermes there right now; this adapter never resumes one.
 ROUTED_SOURCES = frozenset({
     "discord", "telegram", "slack", "whatsapp", "signal",
     "imessage", "email", "sms", "webhook", "api",
@@ -218,7 +217,7 @@ NATIVE_COMMANDS = {
 }
 COMMAND_HELP = (
     {"name": "/help", "usage": "/help",
-     "description": "show commands this Pane adapter can currently execute"},
+     "description": "show commands this Hermes adapter can currently execute"},
     {"name": "/new", "usage": "/new [title]",
      "description": "start a fresh native Hermes conversation through session.create and "
                     "open it here; the conversation you are in is left exactly as it is"},
@@ -248,12 +247,12 @@ COMMAND_UNSUPPORTED = {
 }
 
 CAPABILITY = "hermes-native"
-CAPABILITY_SHORT = "Pane · native Hermes"
+CAPABILITY_SHORT = "Native Hermes"
 CAPABILITY_LABEL = (
     "the native Hermes runtime on this machine — readable, and sendable through a "
     "native session this adapter opened"
 )
-CAPABILITY_READONLY_SHORT = "Pane · read-only"
+CAPABILITY_READONLY_SHORT = "Hermes · read-only"
 CAPABILITY_READONLY_LABEL = (
     "a native Hermes conversation this adapter cannot prove is free; readable here, "
     "not writable"
@@ -1307,7 +1306,7 @@ def _snippet(text: str, needle: str, width: int = 160) -> str:
 # ---------------------------------------------------------------------------
 
 class Journal(agent3.Journal):
-    """The Agent3 journal, saying what is true for this runtime.
+    """The OpenClaw journal, saying what is true for this runtime.
 
     Only the reported wording changes; the durability rules — reserved before
     the runtime is called, settled after, never replayed on its own — are the
@@ -1742,7 +1741,7 @@ class HermesService:
     def _refusal_text(self, room: Room) -> str:
         if room.claim == CLAIM_ROUTED:
             return ("that conversation is routed by the Hermes messaging gateway that is "
-                    "already running, so somebody may be talking to Pane in it right now. "
+                    "already running, so somebody may be talking to Hermes in it right now. "
                     "This adapter will not resume it. You can read it here, or start a new "
                     "conversation with /new.")
         if room.claim == CLAIM_DERIVED:
@@ -2287,7 +2286,7 @@ class HermesService:
                 if room is None or not self.catalog.live_session_for(room.session_id):
                     continue
                 # Claim as one compare-and-set at the version just read and send
-                # the claimed body (the shared Agent3 journal's queue_mark): a
+                # the claimed body (the shared OpenClaw journal's queue_mark): a
                 # Cancel or Edit that lands after queue_ready() wins, never the send.
                 try:
                     claimed = self.journal.queue_mark(item["client_id"], DISPATCHING,
@@ -2448,7 +2447,7 @@ class HermesService:
         return {"room": room.id, "command": {
             "name": name, "state": "unsupported", "sent_as_text": False,
             "reason": COMMAND_UNSUPPORTED.get(
-                name, "this command is not available through Pane; it was not sent as text"),
+                name, "this command is not available through Hermes; it was not sent as text"),
             "supported": self.supported_commands(),
         }}
 
@@ -2844,7 +2843,7 @@ class HermesHandler(BaseHTTPRequestHandler):
                 self._check_mutation()
             return self._api(method, path, parse_qs(parsed.query))
         except (AdapterError, agent3.AdapterError) as exc:
-            # The reused journal raises the Agent3 adapter's own refusal type;
+            # The reused journal raises the OpenClaw adapter's own refusal type;
             # it carries the same three fields and means the same thing.
             self._error(exc.status, exc.code, exc.message, exc.detail)
         except NativeUncertain as exc:
@@ -3143,7 +3142,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="an extra Host name this adapter answers under")
     parser.add_argument("--identity-header", default="X-Forwarded-User")
     parser.add_argument("--path-prefix", default="",
-                        help="strip this proxy prefix, e.g. /api/agents/pane")
+                        help="strip this proxy prefix, e.g. /api/agents/hermes")
     parser.add_argument("--quiet", action="store_true")
     return parser
 

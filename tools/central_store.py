@@ -1153,7 +1153,7 @@ def add_store_parser(commands: argparse._SubParsersAction) -> None:
         ),
     )
     publish.add_argument("identity", help="composite identity project/session")
-    publish.add_argument("--principal", required=True, help="publishing principal, e.g. cp-workspace")
+    publish.add_argument("--principal", required=True, help="publishing principal, e.g. reviewer-workspace")
     publish.add_argument("--reporter", help="reporter asserting the record (default: --principal)")
     publish.add_argument("--node", help="publishing node id (default: the Atlas registry node)")
     publish.add_argument(

@@ -1,6 +1,6 @@
-"""Focused checks for the UX46 Agent3 OpenClaw adapter.
+"""Focused checks for the UX46 OpenClaw adapter.
 
-Nothing here touches the real gateway, the real Agent3 agent or a real model.
+Nothing here touches the real gateway, the real OpenClaw agent or a real model.
 Every test drives ``tools/atlas_rivet.py`` against a synthetic gateway that
 speaks the same newline-JSON bridge protocol as
 ``tools/ux46_rivet_gateway.mjs``, records the exact method and params it was
@@ -36,7 +36,7 @@ import atlas_rivet as agent3  # noqa: E402
 AGENT = "main"
 MAIN_KEY = "agent:main:main"
 DISCORD_KEY = "agent:main:discord:channel:1501661986818363512"
-OTHER_AGENT_KEY = "agent:orbit-agent3:main"
+OTHER_AGENT_KEY = "agent:sample-agent3:main"
 
 # A synthetic gateway. It is deliberately dumb: it answers the eight methods
 # the adapter is allowed to call, logs every call, and does exactly what the
@@ -190,13 +190,13 @@ def message(role: str, blocks: list, *, mid: str, seq: int,
 
 
 DEFAULT_SCENARIO = {
-    "identity": {"agentId": AGENT, "name": "Agent3", "emoji": "\U0001f6e0️"},
-    # `main` is the default; `orbit-agent3` is a separate older profile that
+    "identity": {"agentId": AGENT, "name": "OpenClaw", "emoji": "\U0001f6e0️"},
+    # `main` is the default; `sample-agent3` is a separate older profile that
     # this adapter must never address or drift onto.
     "agents": {"defaultId": AGENT, "mainKey": AGENT,
-               "agents": [{"id": AGENT, "workspace": "/home/server/.openclaw/workspace"},
-                          {"id": "orbit-agent3", "name": "orbit-agent3",
-                           "workspace": "/home/server/.openclaw/workspace-orbit-agent3"}]},
+               "agents": [{"id": AGENT, "workspace": "/home/example/.openclaw/workspace"},
+                          {"id": "sample-agent3", "name": "sample-agent3",
+                           "workspace": "/home/example/.openclaw/workspace-sample-agent3"}]},
     "sessions": [
         {"key": MAIN_KEY, "kind": "direct", "updatedAt": 1787582737119,
          "sessionId": "436d269b", "status": "done", "hasActiveRun": False,
@@ -259,13 +259,13 @@ class Harness:
         fake = base / "fake_gateway.py"
         fake.write_text(FAKE_GATEWAY, encoding="utf-8")
 
-        # Two real Vault projects. Only ORBIT carries a verified openclaw
+        # Two real Vault projects. Only SAMPLE carries a verified openclaw
         # origin, and only for the main session key: everything else on this
         # gateway must land in the internal Unfiled namespace.
-        orbit = base / "Projects" / "orbit" / "sessions"
-        orbit.mkdir(parents=True)
-        (orbit / "agent3-main.origins.json").write_text(json.dumps({
-            "schema_version": 1, "project": "orbit", "session": "agent3-main",
+        sample = base / "Projects" / "sample" / "sessions"
+        sample.mkdir(parents=True)
+        (sample / "agent3-main.origins.json").write_text(json.dumps({
+            "schema_version": 1, "project": "sample", "session": "agent3-main",
             "origins": [{"runtime": "openclaw", "node": "server-agent3",
                          "session_key": MAIN_KEY, "captured": "2026-09-07",
                          "primary": True}],
@@ -282,7 +282,7 @@ class Harness:
         registry.write_text(json.dumps({
             "schema_version": 1, "node_id": "server-agent3",
             "projects": [
-                {"id": "orbit", "name": "ORBIT", "root": str(base / "Projects" / "orbit")},
+                {"id": "sample", "name": "SAMPLE", "root": str(base / "Projects" / "sample")},
                 {"id": "notes", "name": "Notes", "root": str(base / "Projects" / "notes")},
             ],
         }), encoding="utf-8")
@@ -415,7 +415,7 @@ class RivetAdapterTest(unittest.TestCase):
     def main_room(self) -> str:
         # Linked by a verified openclaw origin, so it keeps its real project
         # and its record's own session name.
-        return "orbit/agent3-main"
+        return "sample/agent3-main"
 
     @property
     def unfiled_room(self) -> str:
@@ -428,7 +428,7 @@ class BootstrapTest(RivetAdapterTest):
         self.assertEqual(status, 200)
         self.assertTrue(payload["csrf"])
         # The name is the gateway's own answer, not one this adapter chose.
-        self.assertEqual(payload["agent"]["name"], "Agent3")
+        self.assertEqual(payload["agent"]["name"], "OpenClaw")
         self.assertEqual(payload["agent"]["id"], AGENT)
         self.assertEqual(payload["agent"]["identity_source"],
                          "gateway.agent.identity.get")
@@ -503,7 +503,7 @@ class RoomTest(RivetAdapterTest):
         self.assertFalse(payload["record_linked"])
 
     def test_an_unknown_room_is_refused_not_invented(self) -> None:
-        status, payload = self.harness.get("/api/room/orbit/not-a-session")
+        status, payload = self.harness.get("/api/room/sample/not-a-session")
         self.assertEqual(status, 404)
         self.assertEqual(payload["error"], "room_unknown")
 
@@ -511,7 +511,7 @@ class RoomTest(RivetAdapterTest):
         status, payload = self.harness.get("/api/workspace")
         self.assertEqual(status, 200)
         project = payload["projects"][0]
-        self.assertEqual(project["id"], "orbit")
+        self.assertEqual(project["id"], "sample")
         self.assertEqual(project["record_total"], 1)
         self.assertEqual(len(project["suggested"]), 1)
         self.assertTrue(project["suggested"][0]["reason_label"])
@@ -945,7 +945,7 @@ class BoundaryTest(RivetAdapterTest):
         self.assertEqual(status, 200)
         self.assertEqual(payload["command"]["state"], "unsupported")
         self.assertFalse(payload["command"]["sent_as_text"])
-        # Not one of those refusals turned into a message for Agent3.
+        # Not one of those refusals turned into a message for OpenClaw.
         self.assertEqual(self.harness.calls("chat.send"), [])
         self.assertEqual(self.harness.calls("sessions.create"), [])
 
@@ -1035,7 +1035,7 @@ class BoundaryTest(RivetAdapterTest):
         self.harness.service.config.path_prefix = "/api/agents/agent3"
         status, payload = self.harness.get("/api/agents/agent3/api/workspace")
         self.assertEqual(status, 200)
-        self.assertEqual(payload["projects"][0]["id"], "orbit")
+        self.assertEqual(payload["projects"][0]["id"], "sample")
 
     def test_attention_and_approvals_claim_nothing(self) -> None:
         _status, attention = self.harness.get("/api/attention")
@@ -1078,8 +1078,8 @@ class ProjectFilingTest(RivetAdapterTest):
 
     def test_a_linked_session_keeps_its_real_project_and_record_name(self) -> None:
         _status, payload = self.harness.get(f"/api/room/{self.main_room}")
-        self.assertEqual(payload["project_id"], "orbit")
-        self.assertEqual(payload["project_name"], "ORBIT")
+        self.assertEqual(payload["project_id"], "sample")
+        self.assertEqual(payload["project_name"], "SAMPLE")
         # The room takes the record's own session name, not a derived slug.
         self.assertEqual(payload["session"], "agent3-main")
         self.assertEqual(payload["session_key"], MAIN_KEY)
@@ -1087,7 +1087,7 @@ class ProjectFilingTest(RivetAdapterTest):
         self.assertTrue(payload["vault_project"])
         self.assertFalse(payload["unfiled"])
 
-    def test_an_unlinked_session_is_unfiled_not_filed_under_orbit(self) -> None:
+    def test_an_unlinked_session_is_unfiled_not_filed_under_sample(self) -> None:
         _status, rooms = self.harness.get("/api/rooms")
         by_key = {room["session_key"]: room for room in rooms["rooms"]}
         unlinked = by_key[DISCORD_KEY]
@@ -1101,15 +1101,15 @@ class ProjectFilingTest(RivetAdapterTest):
         self.assertEqual(unfiled["root"], "")
         base = Path(self.harness.tmp.name) / "Projects"
         self.assertEqual(sorted(child.name for child in base.iterdir()),
-                         ["notes", "orbit"])
+                         ["notes", "sample"])
 
     def test_workspace_groups_by_real_project_with_unfiled_last(self) -> None:
         _status, payload = self.harness.get("/api/workspace")
         ids = [project["id"] for project in payload["projects"]]
-        self.assertEqual(ids, ["orbit", "unfiled"])
-        orbit, unfiled = payload["projects"]
-        self.assertTrue(orbit["vault_project"])
-        self.assertEqual(orbit["record_total"], 1)
+        self.assertEqual(ids, ["sample", "unfiled"])
+        sample, unfiled = payload["projects"]
+        self.assertTrue(sample["vault_project"])
+        self.assertEqual(sample["record_total"], 1)
         self.assertTrue(unfiled["unfiled"])
         self.assertEqual(unfiled["record_total"], 1)
         self.assertIn("no project was created", unfiled["note"])
@@ -1120,7 +1120,7 @@ class ProjectFilingTest(RivetAdapterTest):
     def test_projects_endpoint_agrees_with_the_workspace(self) -> None:
         _status, payload = self.harness.get("/api/projects")
         rows = {row["id"]: row for row in payload["projects"]}
-        self.assertEqual(rows["orbit"]["sessions"], 1)
+        self.assertEqual(rows["sample"]["sessions"], 1)
         self.assertEqual(rows["unfiled"]["sessions"], 1)
         self.assertTrue(rows["unfiled"]["unfiled"])
 
@@ -1130,14 +1130,14 @@ class ProjectFilingTest(RivetAdapterTest):
         self.assertEqual(payload["agent"]["gateway_default_id"], AGENT)
         self.assertTrue(payload["agent"]["is_gateway_default"])
         # The older separate profile is named, never addressed.
-        self.assertIn("orbit-agent3", payload["agent"]["other_agent_ids"])
+        self.assertIn("sample-agent3", payload["agent"]["other_agent_ids"])
         _status, rooms = self.harness.get("/api/rooms")
         self.assertNotIn(OTHER_AGENT_KEY,
                          {room["session_key"] for room in rooms["rooms"]})
 
     def test_an_unfiled_name_that_collides_with_a_real_project_is_refused(self) -> None:
         config = self.harness.config
-        config.unfiled_project = "orbit"
+        config.unfiled_project = "sample"
         with self.assertRaises(SystemExit) as caught:
             agent3.RivetService(config, self.harness.transport)
         self.assertIn("already has a project called", str(caught.exception))
@@ -1183,12 +1183,12 @@ class DraftTest(RivetAdapterTest):
 
     def test_drafts_are_isolated_per_room(self) -> None:
         self.harness.request("PUT", f"/api/room/{self.main_room}/draft",
-                             {"body": "orbit text", "base_version": 0})
+                             {"body": "sample text", "base_version": 0})
         self.harness.request("PUT", f"/api/room/{self.harness_unfiled}/draft",
                              {"body": "unfiled text", "base_version": 0})
         _status, first = self.harness.get(f"/api/room/{self.main_room}/draft")
         _status, second = self.harness.get(f"/api/room/{self.harness_unfiled}/draft")
-        self.assertEqual(first["body"], "orbit text")
+        self.assertEqual(first["body"], "sample text")
         self.assertEqual(second["body"], "unfiled text")
         self.assertEqual(first["version"], 1)
         self.assertEqual(second["version"], 1)
@@ -1501,7 +1501,7 @@ class NewCommandTest(RivetAdapterTest):
         self.assertEqual(status, 200)
         command = payload["command"]
         self.assertEqual(command["state"], "completed")
-        self.assertEqual(command["message"], "Started a new Agent3 conversation.")
+        self.assertEqual(command["message"], "Started a new OpenClaw conversation.")
 
         # A brand new key under the configured agent, not the source's.
         created = self.created_keys()
@@ -1517,7 +1517,7 @@ class NewCommandTest(RivetAdapterTest):
         self.assertFalse(command["run_started"])
         params = self.harness.calls("sessions.create")[0]["params"]
         self.assertEqual(set(params), {"key", "agentId", "label"})
-        self.assertEqual(params["label"], "New Agent3 conversation")
+        self.assertEqual(params["label"], "New OpenClaw conversation")
         self.assertEqual(params["agentId"], AGENT)
 
         # The new view is attached, so the composer works straight away.
@@ -2028,7 +2028,7 @@ class BrowserJourneyTest(unittest.TestCase):
         attached = steps["attached"]
         self.assertEqual(attached["ownership"], "atlas_owned")
         self.assertFalse(attached["send_disabled"])
-        # ...without claiming exclusive ownership of Agent3's gateway.
+        # ...without claiming exclusive ownership of OpenClaw's gateway.
         self.assertEqual(attached["scope"], "ux46_view")
         self.assertIs(attached["exclusive"], False)
 
@@ -2055,10 +2055,10 @@ class SlugTest(unittest.TestCase):
     def test_a_slug_is_room_safe_and_never_a_session_key(self) -> None:
         slug = agent3.session_slug(DISCORD_KEY, AGENT)
         self.assertEqual(slug, "discord-channel-1501661986818363512")
-        self.assertTrue(agent3.ROOM_ID_RE.match(f"orbit/{slug}"))
+        self.assertTrue(agent3.ROOM_ID_RE.match(f"sample/{slug}"))
         self.assertEqual(agent3.session_slug("agent:main:main", AGENT), "main")
         self.assertTrue(agent3.ROOM_ID_RE.match(
-            "orbit/" + agent3.session_slug("agent:main:::weird::", AGENT)))
+            "sample/" + agent3.session_slug("agent:main:::weird::", AGENT)))
 
 
 if __name__ == "__main__":

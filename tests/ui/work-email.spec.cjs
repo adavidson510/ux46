@@ -182,7 +182,7 @@ test('Suggestions merges deliberate categories and folds automatic roundups with
   const p=new URL(route.request().url()).pathname;
   if(p.endsWith('/summary'))return route.fulfill({json:{enabled:true,unread_count:99,boards:[...ids,'daily-review'].map(id=>({id,unread_count:20}))}});
   const id=p.split('/').pop();
-  return route.fulfill({json:{board:{id},posts:[{id,board:id,title:'Chosen '+id,author:'Owner',human_body:'A specific suggestion',sources:[],created_at:'2026-10-02T09:00:00Z'}, {id:'automatic-'+id,board:id,title:'Automatic '+id,author:'Keel · daily review',human_body:'Old report',sources:[],created_at:'2026-10-01T09:00:00Z'}]}});
+  return route.fulfill({json:{board:{id},posts:[{id,board:id,title:'Chosen '+id,author:'Owner',human_body:'A specific suggestion',sources:[],created_at:'2026-10-02T09:00:00Z'}, {id:'automatic-'+id,board:id,title:'Automatic '+id,author:'Assistant · daily review',human_body:'Old report',sources:[],created_at:'2026-10-01T09:00:00Z'}]}});
  });
  await page.addScriptTag({url:'/tell.js'});await page.evaluate(()=>__atlas.showView('tell'));
  await expect(page.getByRole('tab',{name:'Suggestions',exact:true})).toHaveAttribute('aria-selected','true');

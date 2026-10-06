@@ -23,20 +23,39 @@ SPEC.loader.exec_module(atlas_ui)
 
 
 class AtlasStudioTests(unittest.TestCase):
+    def test_legacy_attention_fields_still_load_and_deduplicate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            service = self.make_service(Path(temporary))
+            old = self.attention_request()
+            old['need_from_aaron'] = old.pop('need_from_human')
+            old['why_aaron'] = old.pop('why_human')
+            created = service.attention_action('create', old)['attention']
+            self.assertEqual(created['need_from_human'], old['need_from_aaron'])
+            self.assertNotIn('need_from_aaron', created)
+            state = service.state()
+            state['attention'][0]['need_from_aaron'] = state['attention'][0].pop('need_from_human')
+            state['attention'][0]['why_aaron'] = state['attention'][0].pop('why_human')
+            service.state_store.save(state)
+            loaded = service.state()['attention'][0]
+            self.assertEqual(loaded['why_human'], old['why_aaron'])
+            self.assertNotIn('why_aaron', loaded)
+            duplicate = service.attention_action('create', self.attention_request())['attention']
+            self.assertEqual(created['id'], duplicate['id'])
+
     def make_service(self, base: Path) -> atlas_ui.AtlasService:
-        project = base / "Projects" / "orbit"
+        project = base / "Projects" / "sample"
         sessions = project / "sessions"
         sessions.mkdir(parents=True)
-        source = base / "orbit-source"
+        source = base / "sample-source"
         source.mkdir()
         (project / "project.json").write_text(json.dumps({
             "schema_version": 1,
-            "id": "orbit",
-            "name": "ORBIT",
+            "id": "sample",
+            "name": "SAMPLE",
             "status": "active",
             "visibility": "private",
-            "aliases": ["orbit-v3"],
-            "keywords": ["ORBIT v3", "mockups"],
+            "aliases": ["sample-v3"],
+            "keywords": ["SAMPLE v3", "mockups"],
             "sources": [{
                 "path": str(source),
                 "kind": "canonical-repo",
@@ -46,16 +65,16 @@ class AtlasStudioTests(unittest.TestCase):
         }), encoding="utf-8")
         record = sessions / "v3-ux.md"
         record.write_text(
-            "---\nproject: \"orbit\"\nsession: \"v3-ux\"\ntitle: \"ORBIT v3 UX\"\n"
+            "---\nproject: \"sample\"\nsession: \"v3-ux\"\ntitle: \"SAMPLE v3 UX\"\n"
             "date: \"2026-08-15\"\nupdated: \"2026-08-15\"\nstatus: \"active\"\n"
             "origins: \"v3-ux.origins.json\"\n---\n\n"
-            "# ORBIT v3 UX\n\n## Summary\n\nDesigned the v3 adaptive workspace.\n\n"
+            "# SAMPLE v3 UX\n\n## Summary\n\nDesigned the v3 adaptive workspace.\n\n"
             "## Open loops\n\n- Validate it.\n",
             encoding="utf-8",
         )
         (sessions / "v3-ux.origins.json").write_text(json.dumps({
             "schema_version": 1,
-            "identity": "orbit/v3-ux",
+            "identity": "sample/v3-ux",
             "origins": [{
                 "runtime": "codex",
                 "node": "test-node",
@@ -68,8 +87,8 @@ class AtlasStudioTests(unittest.TestCase):
             "schema_version": 1,
             "node_id": "test-node",
             "projects": [{
-                "id": "orbit", "name": "ORBIT", "root": str(project),
-                "aliases": ["orbit-v3"],
+                "id": "sample", "name": "SAMPLE", "root": str(project),
+                "aliases": ["sample-v3"],
             }],
         }), encoding="utf-8")
         index_file = base / "index.jsonl"
@@ -79,16 +98,16 @@ class AtlasStudioTests(unittest.TestCase):
     @staticmethod
     def attention_request() -> dict[str, object]:
         return {
-            "project_id": "orbit",
-            "session_id": "orbit/v3-ux",
+            "project_id": "sample",
+            "session_id": "sample/v3-ux",
             "blocked_dependency_key": "navigation-labels",
             "requested_by": "Mira",
             "source": {"runtime": "Codex", "room": "v3 UX", "machine": "test-node"},
             "interruption_class": "needs_now",
             "type": "Product decision",
             "priority": "Blocking one workstream",
-            "need_from_aaron": "Choose the navigation labels.",
-            "why_aaron": "This is a product-language decision with two viable choices.",
+            "need_from_human": "Choose the navigation labels.",
+            "why_human": "This is a product-language decision with two viable choices.",
             "paused": "Final mobile navigation labels.",
             "still_continuing": "Accessibility and tablet layout.",
             "if_no_action": "Only the final mobile labels remain paused.",
@@ -106,7 +125,7 @@ class AtlasStudioTests(unittest.TestCase):
             self.assertEqual(payload["node"], "test-node")
             self.assertEqual(payload["projects"][0]["session_count"], 1)
             session = payload["sessions"][0]
-            self.assertEqual(session["identity"], "orbit/v3-ux")
+            self.assertEqual(session["identity"], "sample/v3-ux")
             self.assertEqual(session["summary"], "Designed the v3 adaptive workspace.")
             self.assertEqual(session["created_at"], "2026-08-15T00:00:00Z")
             self.assertEqual(session["meaningful_activity_at"], "2026-08-15T00:00:00Z")
@@ -133,11 +152,11 @@ class AtlasStudioTests(unittest.TestCase):
     def test_session_and_project_detail_remain_pointers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service = self.make_service(Path(temporary))
-            session = service.session("orbit/v3-ux")
+            session = service.session("sample/v3-ux")
             self.assertIn("## Summary", session["record"])
-            project = service.project("orbit")
+            project = service.project("sample")
             self.assertEqual(project["sources"][0]["kind"], "canonical-repo")
-            self.assertEqual(project["sessions"][0]["identity"], "orbit/v3-ux")
+            self.assertEqual(project["sessions"][0]["identity"], "sample/v3-ux")
 
     def test_workspace_persists_views_and_close_does_not_stop_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -158,13 +177,13 @@ class AtlasStudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             service = self.make_service(Path(temporary))
             first = service.bootstrap("csrf")["workspace"]["windows"][0]["views"][0]
-            opened = service.workspace_action("open", {"session_id": "orbit/v3-ux"})
+            opened = service.workspace_action("open", {"session_id": "sample/v3-ux"})
             self.assertTrue(opened["existing"])
             self.assertEqual(opened["view"]["id"], first["id"])
-            duplicate = service.workspace_action("open", {"session_id": "orbit/v3-ux", "duplicate": True})
+            duplicate = service.workspace_action("open", {"session_id": "sample/v3-ux", "duplicate": True})
             service.workspace_action("control", {"view_id": duplicate["view"]["id"]})
             views = service.state()["workspace"]["windows"][0]["views"]
-            controls = [view["control_state"] for view in views if view["session_id"] == "orbit/v3-ux"]
+            controls = [view["control_state"] for view in views if view["session_id"] == "sample/v3-ux"]
             self.assertEqual(controls.count("controlled"), 1)
 
     def test_detach_attach_and_undo_are_reversible(self) -> None:
@@ -218,10 +237,10 @@ class AtlasStudioTests(unittest.TestCase):
     def test_command_lists_project_sessions_and_opens_existing_view(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             service = self.make_service(Path(temporary))
-            listed = service.command("Show me all Orbit sessions")
+            listed = service.command("Show me all Sample sessions")
             self.assertEqual(listed["kind"], "session_list")
-            self.assertEqual(listed["sessions"][0]["identity"], "orbit/v3-ux")
-            opened = service.command("Open Orbit v3 UX")
+            self.assertEqual(listed["sessions"][0]["identity"], "sample/v3-ux")
+            opened = service.command("Open Sample v3 UX")
             self.assertEqual(opened["kind"], "session_opened")
             self.assertTrue(opened["existing"])
 
@@ -246,11 +265,11 @@ class AtlasStudioTests(unittest.TestCase):
             (base / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
             service = atlas_ui.AtlasService(base / "registry.json", base / "index.jsonl", base / "atlas-state.json")
 
-            composed = service.command("Give me current Orbit and current Demo-pet")
+            composed = service.command("Give me current Sample and current Demo-pet")
             self.assertEqual(composed["kind"], "workspace_composed")
-            self.assertEqual({item["project"] for item in composed["sessions"]}, {"orbit", "demo-pet"})
+            self.assertEqual({item["project"] for item in composed["sessions"]}, {"sample", "demo-pet"})
             views = service.state()["workspace"]["windows"][0]["views"]
-            self.assertEqual({item["session_id"] for item in views}, {"orbit/v3-ux", "demo-pet/current"})
+            self.assertEqual({item["session_id"] for item in views}, {"sample/v3-ux", "demo-pet/current"})
 
     def test_search_cache_reads_pointer_index_and_refreshes_on_change(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -258,7 +277,7 @@ class AtlasStudioTests(unittest.TestCase):
             service = self.make_service(base)
             first = {
                 "name": "atlas-patent-map.md", "path": str(base / "atlas-patent-map.md"),
-                "projects": ["orbit"], "project_names": ["ORBIT"],
+                "projects": ["sample"], "project_names": ["SAMPLE"],
                 "keywords": ["patent evaluation"], "kinds": ["loose-project-document"],
                 "roles": ["research"], "size": 12,
             }
@@ -268,7 +287,7 @@ class AtlasStudioTests(unittest.TestCase):
 
             second = {
                 "name": "claimant-records.txt", "path": str(base / "claimant-records.txt"),
-                "projects": ["orbit"], "project_names": ["ORBIT"],
+                "projects": ["sample"], "project_names": ["SAMPLE"],
                 "keywords": ["claimant controlled records"], "kinds": ["artifact"],
                 "roles": ["governance"], "size": 18,
             }
@@ -302,7 +321,7 @@ class AtlasStudioTests(unittest.TestCase):
             os.chmod(fake_codex, 0o700)
             os.chmod(fake_vault, 0o700)
             manager = atlas_ui.TerminalManager(base / "registry.json", fake_vault)
-            launched = manager.launch("orbit/v3-ux", "ORBIT v3 UX")
+            launched = manager.launch("sample/v3-ux", "SAMPLE v3 UX")
             try:
                 snapshot = launched
                 for _ in range(12):
@@ -363,7 +382,7 @@ class AtlasStudioTests(unittest.TestCase):
             manager = atlas_ui.TerminalManager(Path(temporary) / "registry.json", Path(temporary) / "vault")
             manager.tmux = "/usr/bin/tmux"
             manager._terminals["0123456789ab"] = atlas_ui.Terminal(
-                "0123456789ab", "atlas-0123456789ab", "orbit/v3-ux", "t", temporary, time.time()
+                "0123456789ab", "atlas-0123456789ab", "sample/v3-ux", "t", temporary, time.time()
             )
             with mock.patch.object(manager, "alive", return_value=True), \
                     mock.patch.object(atlas_ui.subprocess, "run") as run:

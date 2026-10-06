@@ -5,6 +5,14 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.41 · October 5, 2026
+
+- **A workspace for your setup.** Agent-facing skills use “the human”; adapter defaults and messages use provider names. Examples use invented projects and identities. Legacy project colors, morning-view selection and peer status no longer assume the maintainer's installation.
+- **Publication privacy checks.** Contributor guidance covers private details in source, fixtures, images, commit messages and Git identity. Optional local hooks check staged source and messages; an owner-only marker list stays outside the repository. CI checks credential patterns in commit messages but does not receive private marker lists.
+- **Compatibility:** existing agent names remain configurable. Historical attention fields and email labels remain readable. Public project branding and attribution are retained. This cleanup does not erase earlier Git history or release archives.
+- **After updating:** restart updated adapters when idle and refresh browser pages. Local customization and private settings are not renamed.
+- **Verification:** synthetic adapter, saved-data and browser checks; current-source privacy review and visual inspection of shipped PNGs. Automated matching does not detect every kind of personal information.
+
 ## v0.2.0-alpha.40 · October 5, 2026
 
 - **Security and reliability fixes from the October review.** Tightens local adapter access, browser-origin checks, file downloads, queued-message cancellation, shared-store paths and installer verification. See [review #44](https://github.com/adavidson510/ux46/pull/44) and [tracking #8](https://github.com/adavidson510/ux46/issues/8).

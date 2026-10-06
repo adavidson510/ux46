@@ -33,8 +33,8 @@ import ux46_access_gateway as gate  # noqa: E402
 needs_scrypt = unittest.skipUnless(hasattr(hashlib, "scrypt"),
                                    "this Python has no hashlib.scrypt")
 
-ORIGIN = "https://pane.example.ts.net:8443"
-HOST = "pane.example.ts.net:8443"
+ORIGIN = "https://node.example.ts.net:8443"
+HOST = "node.example.ts.net:8443"
 USER = "user@example.com"
 PASSWORD = "Fixture-Password9!"
 BINARY = bytes(range(256)) * 64          # 16 KiB that no text pass survives

@@ -57,7 +57,7 @@ class VaultCliHarness:
             "date: 2026-08-14\n"
             "updated: 2026-08-14\n"
             "status: active\n"
-            f"aliases: {'WELLHELD' if project_id == 'alpha' else ''}\n"
+            f"aliases: {'SAMPLE-ALIAS' if project_id == 'alpha' else ''}\n"
             f"keywords: {body}\n"
             "---\n\n"
             f"# {project_id}/review\n\n## Summary\n\n{body}.\n",
@@ -71,7 +71,7 @@ class SessionVaultCliTests(VaultCliHarness, unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             alpha = self.write_project(base, "alpha", "claimant controlled records")
-            beta = self.write_project(base, "beta", "orbit v3 ux design")
+            beta = self.write_project(base, "beta", "sample v3 ux design")
             registry = base / "registry.json"
             registry.write_text(json.dumps({
                 "schema_version": 1,
@@ -93,9 +93,9 @@ class SessionVaultCliTests(VaultCliHarness, unittest.TestCase):
 
             qualified = self.run_vault(registry, "show", "beta/review")
             self.assertEqual(qualified.returncode, 0, qualified.stderr)
-            self.assertIn("orbit v3 ux design", qualified.stdout)
+            self.assertIn("sample v3 ux design", qualified.stdout)
 
-            legacy_alias = self.run_vault(registry, "path", "WELLHELD")
+            legacy_alias = self.run_vault(registry, "path", "SAMPLE-ALIAS")
             self.assertEqual(legacy_alias.returncode, 0, legacy_alias.stderr)
             self.assertTrue(legacy_alias.stdout.strip().endswith("alpha/sessions/review.md"))
 
@@ -255,24 +255,24 @@ class SessionVaultCliTests(VaultCliHarness, unittest.TestCase):
             started = self.run_vault(
                 registry,
                 "start",
-                "builders/orbit-builder",
+                "builders/sample-builder",
                 "--title",
-                "Orbit builder",
+                "Sample builder",
                 "--summary",
-                "Building Orbit v3 UX flows",
+                "Building Sample v3 UX flows",
                 "--json",
             )
             self.assertEqual(started.returncode, 0, started.stderr)
             payload = json.loads(started.stdout)
             self.assertTrue(payload["created"])
-            self.assertEqual(payload["identity"], "universal-builder/orbit-builder")
+            self.assertEqual(payload["identity"], "universal-builder/sample-builder")
             record = Path(payload["path"])
-            self.assertIn("Building Orbit v3 UX flows", record.read_text())
+            self.assertIn("Building Sample v3 UX flows", record.read_text())
 
             repeated = self.run_vault(
                 registry,
                 "start",
-                "universal-builder/orbit-builder",
+                "universal-builder/sample-builder",
                 "--summary",
                 "must not replace the original",
                 "--json",
@@ -899,7 +899,7 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
     def route_environment(self, base: Path, log: Path, **extra: str) -> dict[str, str]:
         environment = {
             "SESSION_VAULT_ROUTE_STATE": str(base / "runtime"),
-            "SESSION_VAULT_TELL_PRINCIPAL": "cp-workspace",
+            "SESSION_VAULT_TELL_PRINCIPAL": "reviewer-workspace",
             "FAKE_TELL_LOG": str(log),
             "TELL_SESSION_ID": "",
         }
@@ -951,7 +951,7 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
             self.assertNotIn("/tmp/wake", bind.stdout)
 
             self.assertEqual(self.calls(log), [[
-                "--as", "cp-workspace", "session", "register",
+                "--as", "reviewer-workspace", "session", "register",
                 "--vault", "alpha/review", "--collective", "workspace",
                 "--ttl", "600", "--label", "cp macbook window",
                 "--wake", '{"kind":"touch","path":"/tmp/wake"}',
@@ -1087,7 +1087,7 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
             self.assertEqual(len(sorted(runtime.glob("*.json"))), 3)
 
             # Cache files this principal must never judge or touch.
-            (runtime / "alpha__foreign__keel-workspace.json").write_text(json.dumps({
+            (runtime / "alpha__foreign__assistant-workspace.json").write_text(json.dumps({
                 "schema_version": 1,
                 "kind": "tell-route-runtime",
                 "rebuildable": True,
@@ -1148,8 +1148,8 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
             self.assertEqual(
                 sorted(path.name for path in runtime.glob("*.json")),
                 [
-                    "alpha__foreign__keel-workspace.json",
-                    "alpha__review__cp-workspace.json",
+                    "alpha__foreign__assistant-workspace.json",
+                    "alpha__review__reviewer-workspace.json",
                     "not-a-route.json",
                 ],
             )
@@ -1158,7 +1158,7 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
             prune_calls = [call for call in self.calls(log) if call[3] == "list"]
             self.assertEqual(len(prune_calls), 2)
             for call in prune_calls:
-                self.assertEqual(call, ["--as", "cp-workspace", "session", "list"])
+                self.assertEqual(call, ["--as", "reviewer-workspace", "session", "list"])
             self.assertNotIn(
                 "end", [call[3] for call in self.calls(log) if call[2] == "session"]
             )
@@ -1255,7 +1255,7 @@ class SessionVaultTellRouteTests(VaultCliHarness, unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["tell_root"], str(tell_root))
-            self.assertEqual(payload["principal"], "cp-workspace")
+            self.assertEqual(payload["principal"], "reviewer-workspace")
             self.assertEqual(payload["collective"], "workspace")
             self.assertEqual(payload["ttl_seconds"], 900)
             self.assertEqual(payload["label"], "registered")

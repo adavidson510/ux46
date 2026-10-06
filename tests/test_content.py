@@ -9,7 +9,7 @@ from constellation_store import Conflict, Unavailable
 class ContentTests(unittest.TestCase):
  def setUp(self):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.s=ContentStore(self.temp.name)
-  self.a={'agent':'keel','room':'example/article','id':'article-draft-01'}
+  self.a={'agent':'assistant','room':'example/article','id':'article-draft-01'}
  def create(self):return self.s.action({**self.a,'action':'create','kind':'markdown','title':'Draft 2','payload':{'text':'Original baseline'}})
  def test_two_editors_conflict_and_baseline_survives_reopen(self):
   self.create();self.s.action({**self.a,'action':'save','base_revision':1,'title':'Edited','payload':{'text':'Human edit'}})

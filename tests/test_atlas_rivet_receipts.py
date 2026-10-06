@@ -1,4 +1,4 @@
-"""Regressions from Agent3's installed OpenClaw 2026.7.1-2 wire responses."""
+"""Regressions from OpenClaw's installed OpenClaw 2026.7.1-2 wire responses."""
 import sys
 import unittest
 import time

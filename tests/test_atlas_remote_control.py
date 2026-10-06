@@ -18,13 +18,13 @@ class ControlDeadlineTests(unittest.TestCase):
         console.request.side_effect = answer
         agent = remote.Agent(agent_id='agent2', label='Agent2', kind='remote', runtime='codex', node='server', console=console)
         registry = object.__new__(remote.AgentRegistry)
-        result = registry.proxy(agent, 'POST', '/api/room/orbit/agent2-controller/continue', '', headers={}, body=b'{}')
+        result = registry.proxy(agent, 'POST', '/api/room/sample/agent2-controller/continue', '', headers={}, body=b'{}')
         self.assertEqual(result.status, 200)
         console.request.assert_called_once()
         self.assertEqual(agent.as_json()['availability']['state'], 'available')
         console.request.side_effect = remote.RemoteError('still pending', code='agent_request_timeout')
         with self.assertRaises(remote.RemoteError):
-            registry.proxy(agent, 'POST', '/api/room/orbit/agent2-controller/continue', '', headers={}, body=b'{}')
+            registry.proxy(agent, 'POST', '/api/room/sample/agent2-controller/continue', '', headers={}, body=b'{}')
         self.assertEqual(console.request.call_count, 2)  # once per explicit request
         self.assertEqual(agent.as_json()['availability']['state'], 'available')
 
@@ -36,7 +36,7 @@ class ControlDeadlineTests(unittest.TestCase):
         console._open = Mock(return_value=conn)
         console._csrf = 'fixture-token'
         with self.assertRaises(remote.RemoteError) as error:
-            console.request('POST', '/api/room/orbit/agent2-controller/continue', headers={}, body=b'{}', timeout=120)
+            console.request('POST', '/api/room/sample/agent2-controller/continue', headers={}, body=b'{}', timeout=120)
         self.assertEqual(error.exception.code, 'agent_request_timeout')
         conn.request.assert_called_once()
         transport.mark_broken.assert_not_called()

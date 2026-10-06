@@ -59,6 +59,45 @@ personal memories, or screenshots containing private work. A screenshot can show
 more than the feature you meant to demonstrate. Use a fresh fixture workspace
 for public examples.
 
+## Check what you are making public
+
+Review names and context as well as passwords. Private people, clients, projects,
+device names, account IDs, home paths and email addresses can appear in fixtures,
+comments, commit messages or image metadata. Prefer invented examples and use
+"the human" in instructions for agents, and "you" in the interface. Deliberate
+public branding and attribution can stay. Check images visually too.
+
+For details specific to your installation, optionally create
+`~/.ux46/private-markers.txt` **outside the checkout**, with one literal phrase
+per line. Blank lines and lines beginning with `#` are ignored; matching is
+case-insensitive. Use `chmod 600 ~/.ux46/private-markers.txt`. Choose distinctive
+phrases: a common word can match unrelated code. The list is private and is never
+uploaded by the check. `UX46_PRIVATE_MARKERS` or `--markers` can select another
+owner-only file; an explicitly configured file that cannot be read fails the check.
+
+`python3 scripts/check_public.py` checks the staged source, filenames and embedded
+image text against that list and the built-in credential patterns. It does not
+recognize every kind of personal information or read text from image pixels.
+Check a proposed commit message with `--message-file PATH`, or messages already
+committed with `--commits origin/main..HEAD`. The check reports the affected file,
+not the private phrase. A filename containing a private phrase is also redacted.
+
+Optional Git hooks check staged content before commit and the proposed message
+before it is recorded. Run `git config --get core.hooksPath` first; if you already
+use hooks, integrate these checks without replacing yours. Otherwise enable them:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+Hooks use `python3`; `UX46_CHECK_PYTHON` can select your Python executable. Hooks
+are local and can be bypassed. CI repeats the source and commit-message checks,
+but **does not have your private marker list**. Review before pushing, not just
+before merging. Deleting exposed content from main does not erase Git history,
+old releases, forks or downloaded copies. Git author names and email addresses
+are also public metadata; choose your preferred public identity or GitHub
+no-reply address before committing. Do not invent another person's attribution.
+
 The [vibe-craft skill](skills/vibe-craft/SKILL.md) describes our approach to docs,
 code commentary, and building with an AI. The [security guide](SECURITY.md) covers
 private data and reporting a vulnerability. Neither requires you to speak like

@@ -223,7 +223,7 @@ class AtlasStateStore:
                 value = self._seed(sessions)
                 self.save(value)
             value.setdefault("workspace", self._seed(sessions)["workspace"])
-            value.setdefault("attention", [])
+            value["attention"] = [normalize_attention(item) for item in value.get("attention", [])]
             value.setdefault("history", [])
             self._reconcile(value, sessions)
             return value
@@ -446,9 +446,10 @@ class AtlasStateStore:
         return counts
 
     def create_attention(self, state: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+        request = normalize_attention(request)
         required = [
             "project_id", "session_id", "requested_by", "source", "interruption_class",
-            "type", "priority", "need_from_aaron", "why_aaron", "paused",
+            "type", "priority", "need_from_human", "why_human", "paused",
             "still_continuing", "if_no_action", "after_response", "authoritative_action",
         ]
         missing = [key for key in required if not request.get(key)]
@@ -462,12 +463,12 @@ class AtlasStateStore:
         authority = request.get("authoritative_action")
         if not isinstance(authority, dict) or authority.get("mode") not in {"inline", "external"}:
             raise UiError("Attention request must declare inline or external authority")
-        key = str(request.get("blocked_dependency_key") or request["need_from_aaron"]).strip().casefold()
+        key = str(request.get("blocked_dependency_key") or request["need_from_human"]).strip().casefold()
         for item in state.get("attention", []):
             same = (
                 item.get("project_id") == request["project_id"]
                 and item.get("session_id") == request["session_id"]
-                and str(item.get("blocked_dependency_key") or item.get("need_from_aaron", "")).strip().casefold() == key
+                and str(item.get("blocked_dependency_key") or item.get("need_from_human", "")).strip().casefold() == key
                 and item.get("lifecycle_state") in self.ACTIVE_ATTENTION
             )
             if same:
@@ -526,6 +527,16 @@ class AtlasStateStore:
             raise UiError(f"Cannot {action} an Attention request in state {current}")
         self.save(state)
         return item
+
+
+def normalize_attention(item: dict[str, Any]) -> dict[str, Any]:
+    """Read old saved field names; emit only the generic schema."""
+    item = dict(item)
+    for current, legacy in (("need_from_human", "need_from_aaron"), ("why_human", "why_aaron")):
+        if current not in item and legacy in item:
+            item[current] = item[legacy]
+        item.pop(legacy, None)
+    return item
 
 
 def load_object(path: Path, label: str) -> dict[str, Any]:
@@ -999,8 +1010,7 @@ class AtlasService:
         if "morning build" in lowered or (lowered.startswith("give me ") and len(mentioned_projects) > 1):
             selected_projects = mentioned_projects
             if "morning build" in lowered and not selected_projects:
-                preferred = {"orbit", "demo-pet", "nightwatch", "general"}
-                selected_projects = [project for project in projects if project["id"] in preferred]
+                selected_projects = projects
             chosen = []
             missing = []
             for project in selected_projects:
@@ -1098,7 +1108,7 @@ class AtlasService:
         except (OSError, urllib.error.URLError):
             pass
 
-        tell = {"state": "unavailable", "server": "unknown", "biggie": "unknown"}
+        tell = {"state": "unavailable", "peers": {}}
         tell_cli = Path.home() / "telld" / "src" / "tell" / "cli.py"
         if tell_cli.is_file():
             try:
@@ -1115,8 +1125,8 @@ class AtlasService:
                     peers = value.get("peers", {}) if isinstance(value, dict) else {}
                     tell = {
                         "state": value.get("daemon", "unknown"),
-                        "server": "online" if peers.get("server", {}).get("ok") else "offline",
-                        "biggie": "online" if peers.get("biggie", {}).get("ok") else "offline",
+                        "peers": {name: "online" if peer.get("ok") else "offline"
+                                  for name, peer in peers.items() if isinstance(peer, dict)},
                         "queued": value.get("outbound_queued", 0),
                     }
             except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):

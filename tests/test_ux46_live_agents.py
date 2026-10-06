@@ -46,7 +46,7 @@ class LiveCase(unittest.TestCase):
     public_brand=False
     ask=GateCase.ask
     def setUp(self):self.console.seen.clear();self.adapter.seen.clear();self.write_config('cp')
-    def test_merges_live_agent_without_replacing_keel(self):
+    def test_merges_live_agent_without_replacing_assistant(self):
         status,_,body=self.ask(path='/api/agents');self.assertEqual(status,200)
         self.assertEqual([a['id'] for a in json.loads(body)['agents']],['local','cp'])
         self.write_config('next');_,_,body=self.ask(path='/api/agents')

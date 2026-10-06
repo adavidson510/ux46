@@ -60,7 +60,7 @@ class Learning(unittest.TestCase):
         self.assertEqual(self.brief('AI')['items'],[])
     def test_cross_project_retrieval_is_scoped_not_hard_filtered(self):
         self.capture('backup','Check backups after migrations',subjects=['snapshot'],learning={'trigger':'Moving the database','action':'Verify destination files','check':'Restore and read'},origin='agent-discovery')
-        result=self.brief('database migrations backups',project='orbit')
+        result=self.brief('database migrations backups',project='sample')
         self.assertEqual(result['items'][0]['id'],'backup')
         self.assertEqual(result['items'][0]['learning']['check'],'Restore and read')
         self.assertFalse(result['items'][0]['match']['project_match'])

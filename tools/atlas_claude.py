@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""UX46 adapter for CP — the Claude Code CLI already installed on this machine.
+"""UX46 adapter for Claude Code — the Claude Code CLI already installed on this machine.
 
-CP is a Claude Code runtime, not a new agent. This adapter adds nothing to it:
+This adapter uses the installed runtime without adding an agent layer:
 no wrapper prompt, no second identity, no separate memory. It runs the
 installed `claude` binary exactly as a person would, with that binary's own
 `~/.claude` configuration, tools, MCP servers and login, and it reads the
@@ -69,7 +69,7 @@ ADAPTER_VERSION = "1"
 DEFAULT_PORT = 8882
 DEFAULT_NODE = "user-mac"
 DEFAULT_AGENT_ID = "cp"
-DEFAULT_AGENT_NAME = "CP"
+DEFAULT_AGENT_NAME = "Claude Code"
 DEFAULT_PROJECTS_DIR = "~/.claude/projects"
 DEFAULT_REGISTRY = "~/.codex/projects/registry.json"
 DEFAULT_STATE_DIR = "~/.ux46-claude"
@@ -77,7 +77,7 @@ DEFAULT_UNFILED_PROJECT = "unfiled-claude"
 
 RUNTIME = "claude"
 CAPABILITY = "claude-code-local"
-CAPABILITY_SHORT = "CP · Claude Code"
+CAPABILITY_SHORT = "Claude Code"
 CAPABILITY_LABEL = ("the Claude Code CLI on this machine — its own transcripts, "
                     "read here, and sendable one turn at a time")
 
@@ -142,11 +142,11 @@ COMMANDS_SUPPORTED = (
     "/help", "/refresh", "/new", "/status", "/model", "/effort", "/reasoning", "/reasononing",
 )
 COMMAND_HELP = (
-    {"name": "/refresh", "usage": "/refresh", "description": "refresh CP conversation metadata; each turn already starts a fresh CLI process"},
+    {"name": "/refresh", "usage": "/refresh", "description": "refresh Claude Code conversation metadata; each turn already starts a fresh CLI process"},
     {"name": "/help", "usage": "/help",
-     "description": "show the commands this CP adapter can carry out"},
+     "description": "show the commands this Claude Code adapter can carry out"},
     {"name": "/new", "usage": "/new [title]",
-     "description": "start a fresh CP conversation in this project and open it here"},
+     "description": "start a fresh Claude Code conversation in this project and open it here"},
     {"name": "/status", "usage": "/status",
      "description": "show the model, effort, working directory and permission mode "
                     "the next turn will really use"},
@@ -1631,7 +1631,7 @@ class ClaudeService:
                                 "unsupported": dict(COMMAND_UNSUPPORTED)}}
         if name == "/refresh":
             self.catalog.refresh(force=True)
-            return {"command": {"name": name, "state": COMPLETED, "message": "CP conversation metadata refreshed. The next turn starts a fresh CLI process with CP’s current login; no message was replayed."}}
+            return {"command": {"name": name, "state": COMPLETED, "message": "Claude Code conversation metadata refreshed. The next turn starts a fresh CLI process with Claude Code’s current login; no message was replayed."}}
         if name == "/status":
             runtime = self._runtime.get(room.id) or {}
             return {"command": {"name": "/status", "state": COMPLETED, "native": {
@@ -1733,10 +1733,10 @@ class ClaudeService:
         self.catalog.reserve(room)
         self.catalog.refresh(force=True)
         self.events.publish({"type": "session", "room": room.id, "state": "created"})
-        self.journal.settle(client, journal_store.ACCEPTED, mode="command", detail="New CP conversation: " + room.id)
+        self.journal.settle(client, journal_store.ACCEPTED, mode="command", detail="New Claude Code conversation: " + room.id)
         return {"state": "created", "new_room": room.id, "room": room.id,
                 "session_id": native_id,
-                "message": ("Started a CP conversation. Claude Code writes its transcript "
+                "message": ("Started a Claude Code conversation. Claude Code writes its transcript "
                             "when the first message runs, so it is empty until then.")}
 
     # -- bootstrap ---------------------------------------------------------
@@ -2117,7 +2117,7 @@ class ClaudeServer(ThreadingHTTPServer):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="UX46 adapter over the installed Claude Code CLI (CP)")
+        description="UX46 adapter over the installed Claude Code CLI (Claude Code)")
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind address (loopback only by design)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
