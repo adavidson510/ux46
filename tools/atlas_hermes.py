@@ -2045,6 +2045,9 @@ class HermesService:
             }]
         record = {
             "key": key, "kind": kind, "room": room.id,
+            "answer_supported": event == 'clarify.request' and bool(request_id),
+            "answer_notice": ('' if event == 'clarify.request' and request_id else
+                'Answer in Hermes. This request cannot be safely approved from UX46 yet.'),
             "request_id": request_id,
             "native_event": event,
             "native_session_id": session_id,

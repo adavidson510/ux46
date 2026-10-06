@@ -4483,6 +4483,11 @@ function approvalNode(approval) {
   node.appendChild(el("div", {text: "The native runtime is asking you before it continues."}));
   for (const line of lines) node.appendChild(el("div", {text: line}));
 
+  if (approval.answer_supported === false) {
+    node.appendChild(el("p", {text: approval.answer_notice || "Answer this request in its native app."}));
+    return node;
+  }
+
   if (approval.kind === "user_input") {
     for (const question of params.questions || []) {
       node.appendChild(el("div", {text: question.title}));
@@ -7437,7 +7442,9 @@ async function renderBoard() {
       text: (approval.room || "unmapped room") + " · thread " + shortId(approval.thread_id)
         + " · turn " + shortId(approval.turn_id)}));
     const acts = el("div", {class: "decide-acts"});
-    if (approval.kind === "user_input") {
+    if (approval.answer_supported === false) {
+      acts.appendChild(el("p", {text: approval.answer_notice || "Answer this request in its native app."}));
+    } else if (approval.kind === "user_input") {
       for (const question of params.questions || []) {
         for (const option of question.options.length ? question.options : ["ok"]) {
           acts.appendChild(el("button", {class: "primary", type: "button", text: option,
