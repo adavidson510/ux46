@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import struct
 import sys
 import subprocess
@@ -908,9 +909,11 @@ class CliTransportTest(unittest.TestCase):
     def test_an_argv_too_large_for_exec_is_a_definite_gateway_error(self) -> None:
         # The CLI carries params in one argv element; past the kernel's
         # per-argument limit exec fails with E2BIG before anything is sent.
-        transport = agent3.CliTransport(["/bin/true"])
+        transport = agent3.CliTransport([sys.executable])
         with self.assertRaises(agent3.GatewayError) as caught:
-            transport.call("chat.send", {"message": "\u6f22" * 60000})
+            # macOS permits a larger argument than Linux's per-argument cap.
+            # Exceed the total advertised limit so both kernels refuse exec.
+            transport.call("chat.send", {"message": "x" * (os.sysconf('SC_ARG_MAX') + 1)})
         self.assertNotIsInstance(caught.exception, agent3.GatewayUncertain)
         self.assertEqual(caught.exception.code, "cli_exec_failed")
         self.assertIn("too large", str(caught.exception))

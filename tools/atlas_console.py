@@ -2489,7 +2489,10 @@ class ConsoleServer(ThreadingHTTPServer):
         finally:
             # SQLite's transaction context does not close a connection. Each
             # HTTP thread owns a Journal connection; retire it with the thread.
-            self.service.journal.close()
+            # The Tell-only gateway shares this server but owns no journal.
+            owned_journal = getattr(self.service, 'journal', None)
+            if owned_journal is not None:
+                owned_journal.close()
 
     def __init__(self, address, handler_class, service: ConsoleService):
         self.service = service
