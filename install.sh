@@ -40,8 +40,8 @@ private_path() {
   case "$listing" in ?????w*|????????w*) return 1;; esac
 }
 main() {
-  release='v0.2.0-alpha.39'
-  archive_sha='5b3ab8e7b1f2708f83a3fe0e02f727948c5ac77a1fcf240e802e996cd744bf1c'
+  release='v0.2.0-alpha.40'
+  archive_sha='ca2c3373b5f2d54e41a01494ec0ebc45b0986f8c1d8162384a95eefd806f7276'
   # Private Python bootstrap pins: the exact uv installer script (its sha256 is
   # checked before it runs) and an exact CPython patch release. uv verifies the
   # Python archive against the checksum built into that uv release.
