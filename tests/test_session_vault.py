@@ -1351,3 +1351,37 @@ class NativeOriginOwnershipTests(VaultCliHarness, unittest.TestCase):
                          [result.stderr for result in results])
         paths = list(self.alpha.glob("sessions/race-*")) + list(self.beta.glob("sessions/race-*"))
         self.assertEqual(len(paths), 2)  # one Markdown owner and its origin sidecar
+
+
+class RouteStatePathTests(unittest.TestCase):
+    def test_route_state_refuses_an_identity_that_would_leave_its_directory(self) -> None:
+        # A record's frontmatter ``session`` reaches the route-state file name,
+        # so a traversal there must be refused before any write or unlink.
+        sys.path.insert(0, str(REPO_ROOT / "tools"))
+        import session_vault as vault
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            routes = base / "state" / "routes"
+            victim = base / "outside" / "pwn__default.json"
+            victim.parent.mkdir()
+            victim.write_text("{}", encoding="utf-8")
+            previous = os.environ.get("SESSION_VAULT_ROUTE_STATE")
+            os.environ["SESSION_VAULT_ROUTE_STATE"] = str(routes)
+            try:
+                for identity in ("proj/x/../../../outside/pwn", "../outside/pwn", "proj/",
+                                 "proj/.hidden", "/abs"):
+                    with self.subTest(identity):
+                        with self.assertRaises(vault.VaultError):
+                            vault.save_route_state(identity, None, {"identity": identity})
+                        with self.assertRaises(vault.VaultError):
+                            vault.clear_route_state(identity, None)
+                self.assertTrue(victim.exists())
+                self.assertFalse(routes.exists())
+                path = vault.save_route_state("proj/notes", None, {"identity": "proj/notes"})
+                self.assertEqual(path.parent, routes)
+            finally:
+                if previous is None:
+                    os.environ.pop("SESSION_VAULT_ROUTE_STATE", None)
+                else:
+                    os.environ["SESSION_VAULT_ROUTE_STATE"] = previous

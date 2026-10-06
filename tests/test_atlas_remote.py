@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import unittest
@@ -75,8 +76,8 @@ class PrivateSocketForwardTests(unittest.TestCase):
     def test_private_socket_forward_retains_logical_http_port(self):
         tunnel = remote.SshTunnel(host="server", user="agent2", remote_port=8878,
                                   remote_socket="/home/agent2/.local/state/ux46/a.sock")
-        argv = tunnel._argv(12345)
-        self.assertIn("127.0.0.1:12345:/home/agent2/.local/state/ux46/a.sock", argv)
+        argv = tunnel._argv("/run/ux46-ssh-x/fwd.sock")
+        self.assertIn("/run/ux46-ssh-x/fwd.sock:/home/agent2/.local/state/ux46/a.sock", argv)
         self.assertEqual(tunnel.remote_port, 8878)
         self.assertEqual(argv[-1], "agent2@server")
 
@@ -84,6 +85,45 @@ class PrivateSocketForwardTests(unittest.TestCase):
         for path in ("relative.sock", "/tmp/../a.sock", "/tmp/a:123", "/tmp/a\n.sock", "/" + "a" * 101):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 remote.SshTunnel(host="server", remote_port=8878, remote_socket=path)
+
+
+class SocketRootTests(unittest.TestCase):
+    """The forward's socket path must fit sun_path, and exit cleans up (S27)."""
+
+    def setUp(self):
+        from tempfile import TemporaryDirectory
+        from unittest import mock
+
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.mock = mock
+        patch = mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": ""})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_long_temp_dir_falls_back_to_tmp(self):
+        long_tmp = Path(self.tmp.name) / ("x" * 90)
+        long_tmp.mkdir()
+        with self.mock.patch.object(remote.tempfile, "gettempdir", return_value=str(long_tmp)):
+            root = remote._private_runtime_root()
+        self.assertEqual(root, Path("/tmp"))
+        self.assertTrue(remote._socket_root_fits(root))
+
+    def test_with_no_short_temp_dir_a_private_home_dir_is_used(self):
+        home = Path(self.tmp.name)
+        with self.mock.patch.object(remote, "_socket_root_fits",
+                                    side_effect=lambda root: str(root).startswith(str(home))), \
+                self.mock.patch.object(remote.Path, "home", return_value=home):
+            root = remote._private_runtime_root()
+        self.assertEqual(root, home / ".ux46" / "run")
+        self.assertEqual(stat.S_IMODE(os.stat(root).st_mode), 0o700)
+
+    def test_exit_cleanup_removes_each_tunnel_s_private_dir(self):
+        tunnel = remote.SshTunnel(host="server", remote_port=8878, runtime_root=self.tmp.name)
+        private = tunnel._private_dir()
+        self.assertTrue(private.is_dir())
+        remote._close_open_tunnels()
+        self.assertFalse(private.exists())
 
 
 class ProxyHarness:
@@ -540,6 +580,35 @@ class ClientScopingTests(unittest.TestCase):
         self.assertTrue('consoleFetch(opts.absolute ? path : apiUrl(path), opts)' in APP_JS)
         # And no literal "/api/..." string is handed to an element attribute.
         self.assertIn('return apiUrl("/api/atlas/files/"', APP_JS)
+
+
+class RelayedContentTypeTests(unittest.TestCase):
+    """A remote's Content-Type is never trusted on this origin (S19/S06)."""
+
+    def relay(self, suffix: str, content_type: str, body: bytes = b"<script>1</script>") -> str:
+        from types import SimpleNamespace
+
+        console = SimpleNamespace(request=lambda *a, **k: (
+            200, {"Content-Type": content_type}, body))
+        agent = SimpleNamespace(id="agent2", is_local=False, console=console,
+                                note_available=lambda: None,
+                                note_unavailable=lambda detail: None)
+        result = remote.AgentRegistry.proxy(None, agent, "GET", suffix, "",
+                                            headers={}, body=None)
+        return result.content_type
+
+    def test_a_relayed_file_gets_the_served_type(self):
+        for declared, served in (("text/html", "application/octet-stream"),
+                                 ("image/svg+xml", "application/octet-stream"),
+                                 ("image/png", "image/png")):
+            self.assertEqual(self.relay("/api/atlas/files/abc/download", declared), served)
+
+    def test_other_operations_are_json_audio_or_bytes(self):
+        self.assertEqual(self.relay("/api/rooms", "text/html; charset=utf-8"),
+                         "application/octet-stream")
+        self.assertEqual(self.relay("/api/rooms", "application/json; charset=utf-8", b"{}"),
+                         "application/json; charset=utf-8")
+        self.assertEqual(self.relay("/api/audio/" + "a" * 32 + ".wav", "audio/wav"), "audio/wav")
 
 
 if __name__ == "__main__":

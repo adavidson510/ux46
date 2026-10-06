@@ -32,6 +32,22 @@ _RASTER_SIGNATURES = (
 )
 
 
+# Types a download may be served as. Everything else is served as
+# application/octet-stream. The stored MIME is uploader- or agent-supplied and
+# downloads share the console origin, so a stored text/javascript (or HTML,
+# SVG, XML, CSS) attachment would otherwise be a same-origin resource that a
+# ``<script src>`` or ``<link>`` can load past ``script-src 'self'``;
+# ``Content-Disposition: attachment`` does not stop such subresource loads.
+# None of these can execute as script or render as a document.
+_SERVABLE_MIMES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp",
+    "application/pdf", "application/json", "application/zip", "application/gzip",
+    "text/plain", "text/csv", "text/markdown",
+})
+_SERVABLE_MEDIA_PREFIXES = ("audio/", "video/")
+_SERVED_FALLBACK_MIME = "application/octet-stream"
+
+
 class FileStoreError(RuntimeError):
     """A controlled attachment-store refusal."""
 
@@ -153,7 +169,11 @@ class FileStore:
             raise FileStoreError("Stored attachment bytes are unavailable") from exc
         if len(data) != record["size"] or hashlib.sha256(data).hexdigest() != record["sha256"]:
             raise FileStoreError("Stored attachment integrity check failed")
-        return record, data
+        # Every adapter serves and forwards ``record["mime"]`` from here, so the
+        # served type is narrowed in this one place. The declared type stays in
+        # ``declared_mime`` (and in ``get()``) for display only.
+        return {**record, "mime": served_mime(record["mime"]),
+                "declared_mime": record["mime"]}, data
 
     def native_path(self, file_id: str, *, room: str | None = None) -> tuple[dict, Path]:
         """Resolve a managed path for the native adapter after room validation.
@@ -305,6 +325,26 @@ class FileStore:
             "size": row["size"], "sha256": row["sha256"], "preview_url": row["preview_url"],
             "download_url": row["download_url"], "project": row["project"],
         }
+
+
+def served_mime(mime: str | None) -> str:
+    """Return the Content-Type a stored attachment may be served with.
+
+    An allowlist, not a blocklist: text/html, any javascript/ecmascript type,
+    image/svg+xml, XML types, text/css and anything unrecognized all fall back
+    to application/octet-stream.
+    """
+
+    value = str(mime or "").split(";", 1)[0].strip().lower()
+    if value in _SERVABLE_MIMES:
+        return value
+    if value.startswith(_SERVABLE_MEDIA_PREFIXES):
+        subtype = value.split("/", 1)[1]
+        if subtype and "xml" not in subtype and all(
+            char.isalnum() or char in ".+-" for char in subtype
+        ):
+            return value
+    return _SERVED_FALLBACK_MIME
 
 
 def _required_label(value: str, label: str) -> str:

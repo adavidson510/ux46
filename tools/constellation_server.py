@@ -38,7 +38,9 @@ class Handler(BaseHTTPRequestHandler):
                 found=next((p for p in config['principals'] if p.get('enabled',True)
                             and hmac.compare_digest(p['token_sha256'],token_hash)),None)
                 if not found:raise PermissionError('Authentication refused')
-                principal=Principal(found['name'],tuple(found['projects']),found.get('write',False))
+                # A bearer grant is a remote client, never the human at this machine,
+                # whatever name an operator gave it.
+                principal=Principal(found['name'],tuple(found['projects']),found.get('write',False),human=False)
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=16000:raise ValueError('Request must be under 16 KB')
             payload=json.loads(self.rfile.read(length))
@@ -103,7 +105,11 @@ def main():
         try:server=UnixServer(str(path),Handler)
         except BaseException:lease.close();raise
         socket_identity=path.lstat()
-        server.local_principal=Principal(args.local_principal,('*',),True)
+        # The socket is a local client (the workspace or an agent CLI), not proof
+        # of the human at this machine, so attribution never comes from the
+        # --local-principal name: an operator naming it 'user' must not turn
+        # agent captures into human-confirmed ones (S24).
+        server.local_principal=Principal(args.local_principal,('*',),True,human=False)
     else:
         if not args.grants:p.error('--grants is required for HTTP')
         server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)

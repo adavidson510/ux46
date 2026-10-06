@@ -10,6 +10,7 @@ is read or touched.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -24,6 +25,7 @@ from argparse import Namespace
 from http.client import HTTPConnection
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools"))
@@ -858,8 +860,38 @@ class Commands(AdapterCase):
                   {"client_id": "client-oooooooo", "body": "go"})
         self.settle()
         argv = self.cli_calls()[0]["argv"]
-        self.assertEqual(argv[argv.index("--model") + 1], "opus")
-        self.assertEqual(argv[argv.index("--effort") + 1], "high")
+        self.assertIn("--model=opus", argv)
+        self.assertIn("--effort=high", argv)
+
+    def test_the_operator_s_configured_model_is_passed_whole(self):
+        # S14: the browser regex must not drop operator-configured ids; each
+        # goes as one "--model=<id>" element, never readable as an option.
+        for model in ("sonnet[1m]", "anthropic.claude-sonnet-4-5-v1:0",
+                      "arn:aws:bedrock:us-east-1:123456789012:inference-profile/x"):
+            with self.subTest(model=model):
+                self.service.config.model = model
+                run = cp.Turn(self.service, self.service.catalog.room(self.linked_room()),
+                              "client-model01", [], resume=False)
+                self.assertIn(f"--model={model}", run.argv())
+                self.assertNotIn("--model", run.argv())
+
+    def test_a_bad_stored_browser_model_is_skipped_out_loud(self):
+        self.service.config.model = "sonnet[1m]"
+        self.service.set_preference(self.linked_room(), "model", "-x")
+        run = cp.Turn(self.service, self.service.catalog.room(self.linked_room()),
+                      "client-model02", [], resume=False)
+        with mock.patch.object(cp.sys, "stderr", new_callable=io.StringIO) as err:
+            argv = run.argv()
+        self.assertIn("--model=sonnet[1m]", argv)
+        self.assertIn("ignoring stored /model", err.getvalue())
+
+    def test_a_model_value_that_could_read_as_an_option_is_refused(self):
+        for value in ("-x", "--dangerously-skip-permissions", ".hidden", "_x"):
+            status, payload = self.post(f"/api/room/{self.linked_room()}/command",
+                                        {"command": f"/model {value}"})
+            self.assertEqual(status, 400, value)
+            self.assertEqual(payload["error"], "bad_model", value)
+        self.assertEqual(self.service.preference(self.linked_room(), "model"), "")
 
     def test_an_effort_the_cli_does_not_take_is_refused_here(self):
         status, payload = self.post(f"/api/room/{self.linked_room()}/command",
@@ -898,10 +930,83 @@ class Boundary(AdapterCase):
         self.assertEqual(status, 403)
         self.assertEqual(self.cli_calls(), [])
 
+    def test_a_slash_command_cannot_be_queued_as_chat_text(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        for text in ("/add-dir /", "  /model opus"):
+            status, payload = self.post(f"/api/room/{self.linked_room()}/pending",
+                                        {"client_id": "queued-cmd-0001", "body": text})
+            self.assertEqual(status, 400, text)
+            self.assertEqual(payload["error"], "is_command")
+        self.assertEqual(self.service.journal.queue_list(self.linked_room()), [])
+        time.sleep(0.5)
+        self.assertEqual(self.cli_calls(), [])
+
+    def test_a_queued_message_sends_the_claimed_body_not_a_stale_read(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        status, payload = self.post(f"/api/room/{self.linked_room()}/pending",
+                                    {"client_id": "queued-claim-0001", "body": "first draft"})
+        self.assertEqual(status, 201, payload)
+        item = self.service.journal.queue_get("queued-claim-0001")
+        edited = self.service.journal.queue_update(item.client_id, item.version,
+                                                   body="edited text")
+        room = self.service.catalog.room(self.linked_room())
+        # The dispatcher read "first draft" before the edit landed.
+        self.service.dispatch(room, item.client_id, "first draft", [],
+                              background=False, reserved=True)
+        sent = json.dumps(self.cli_calls())
+        self.assertIn("edited text", sent)
+        self.assertNotIn("first draft", sent)
+        self.assertEqual(edited.body, "edited text")
+
+    def test_a_cancelled_queued_message_is_never_claimed(self):
+        os.environ["FAKE_CLI_DELAY"] = "0"
+        self.post(f"/api/room/{self.linked_room()}/pending",
+                  {"client_id": "queued-claim-0002", "body": "do not send"})
+        item = self.service.journal.queue_get("queued-claim-0002")
+        self.service.journal.queue_cancel(item.client_id, item.version)
+        room = self.service.catalog.room(self.linked_room())
+        with self.assertRaises(cp.recovery.RecoveryBusy):
+            self.service.dispatch(room, item.client_id, item.body, [],
+                                  background=False, reserved=True)
+        self.assertEqual(self.cli_calls(), [])
+
     def test_a_request_addressed_to_another_host_is_refused(self):
         status, payload = self.ask("GET", "/api/bootstrap", host="ux46.example.com")
         self.assertEqual(status, 403)
         self.assertEqual(payload["error"], "bad_host")
+
+    def _raw(self, path):
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=30)
+        try:
+            connection.request("GET", path, headers={"Host": f"127.0.0.1:{self.port}"})
+            response = connection.getresponse()
+            return response.status, response.read(), dict(response.getheaders())
+        finally:
+            connection.close()
+
+    def test_every_answer_carries_the_browser_hardening_headers(self):
+        record = self.service.files.upload(self.linked_room(), "x.html",
+                                           b"<script>alert(1)</script>", "text/html")
+        for path in ("/api/workspace", f"/api/atlas/files/{record['id']}/download"):
+            status, _raw, headers = self._raw(path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff", path)
+            self.assertEqual(headers["X-Frame-Options"], "DENY", path)
+        csp = headers["Content-Security-Policy"]
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("sandbox", csp)
+        status, _raw, _headers = self._raw(f"/api/atlas/files/{record['id']}/preview")
+        self.assertEqual(status, 404)
+
+    def test_a_stalled_client_is_dropped(self):
+        import socket
+        self.assertGreater(self.server.RequestHandlerClass.timeout, 30)
+        self.server.RequestHandlerClass.timeout = 0.5
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as stalled:
+            stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+            started = time.time()
+            self.assertEqual(stalled.recv(1024), b"")
+            self.assertLess(time.time() - started, 8)
 
     def test_reading_needs_no_token(self):
         status, _ = self.ask("GET", "/api/workspace", csrf="")

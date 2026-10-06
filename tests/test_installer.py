@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class InstallerTests(unittest.TestCase):
-    def attempt(self,root,*,hostile=False,bad_checksum=False,args=None,terminal=False,corrupt_download=False,fail_setup=False,no_python=False):
+    def attempt(self,root,*,hostile=False,bad_checksum=False,args=None,terminal=False,corrupt_download=False,fail_setup=False,no_python=False,bad_uv_installer=False,extra_env=None):
         fixtures=root/'fixtures';fixtures.mkdir(exist_ok=True)
         archive=fixtures/'source.tar.gz'
         if not archive.exists():
@@ -25,7 +25,6 @@ class InstallerTests(unittest.TestCase):
 
         sha='0'*64 if bad_checksum else hashlib.sha256(archive.read_bytes()).hexdigest()
         script=re.sub(r"archive_sha='[^']+'","archive_sha='"+sha+"'",(ROOT/'install.sh').read_text())
-        (fixtures/'install.sh').write_text(script)
         # Only curl is stubbed; run the real shell, extractor and generated launcher.
         curl=fixtures/'curl'
         curl.write_text('#!/bin/sh\nif [ -n "$CORRUPT_DOWNLOAD" ]; then while [ "$1" != -o ]; do shift; done; printf broken > "$2"; exit; fi\nwhile [ "$#" -gt 0 ]; do\nif [ "$1" = -o ]; then cp "$FIXTURE_ARCHIVE" "$2"; exit; fi\nshift\ndone\nexit 2\n')
@@ -36,19 +35,24 @@ class InstallerTests(unittest.TestCase):
             uv_install=fixtures/'uv-install.sh'
             uv_install.write_text('''#!/bin/sh
 mkdir -p "$UV_UNMANAGED_INSTALL"
-printf installed >> "$INSTALL_TEST_UV_CALLS"
+printf "installed${UV_DOWNLOAD_URL:-}${INSTALLER_DOWNLOAD_URL:-}${UV_INSTALLER_GITHUB_BASE_URL:-}" >> "$INSTALL_TEST_UV_CALLS"
 cat > "$UV_UNMANAGED_INSTALL/uv" <<'FAKEUV'
 #!/bin/sh
-if [ "$2" = find ]; then printf '%s\\n' "$FIXTURE_PYTHON"; else mkdir -p "$UV_PYTHON_INSTALL_DIR"; fi
+# Record what uv would see: its folder, arguments and redirecting variables.
+printf '%s|%s|%s|%s|%s|%s\\n' "$(pwd -P)" "$*" "${UV_NO_CONFIG:-}" "${UV_PYTHON_INSTALL_MIRROR:-}" "${UV_PYTHON_DOWNLOADS_JSON_URL:-}" "${UV_PYTHON:-}" >> "$INSTALL_TEST_UV_CALLS.uv"
+if [ "$3" = find ]; then printf '%s\\n' "$FIXTURE_PYTHON"; else mkdir -p "$UV_PYTHON_INSTALL_DIR"; fi
 FAKEUV
 chmod 700 "$UV_UNMANAGED_INSTALL/uv"
 ''')
+            uv_sha='f'*64 if bad_uv_installer else hashlib.sha256(uv_install.read_bytes()).hexdigest()
+            script=re.sub(r"uv_installer_sha='[^']+'","uv_installer_sha='"+uv_sha+"'",script)
             original=curl.read_text()
             curl.write_text(original.replace('#!/bin/sh\n', '#!/bin/sh\ncase "$*" in *astral.sh*) while [ "$1" != -o ]; do shift; done; cp "$FIXTURE_UV_INSTALL" "$2"; exit;; esac\n',1))
+        (fixtures/'install.sh').write_text(script)
         source=root/"my ' copy $(touch SHOULD_NOT_EXIST)"
         state=root/'private data';binaries=root/'local bin'
         env=dict(os.environ,HOME=str(root),PATH=str(fixtures)+os.pathsep+os.environ['PATH'],
-                 INSTALL_TEST_CALLS=str(root/'calls.jsonl'),INSTALL_TEST_UV_CALLS=str(root/'uv-calls'),FIXTURE_PYTHON=sys.executable,FIXTURE_UV_INSTALL=str(fixtures/'uv-install.sh'),INSTALL_FAIL_SETUP='1' if fail_setup else '',CORRUPT_DOWNLOAD='1' if corrupt_download else '',FIXTURE_ARCHIVE=str(archive),UX46_INSTALL_DIR=str(source),UX46_HOME=str(state),UX46_BIN_DIR=str(binaries))
+                 INSTALL_TEST_CALLS=str(root/'calls.jsonl'),INSTALL_TEST_UV_CALLS=str(root/'uv-calls'),FIXTURE_PYTHON=sys.executable,FIXTURE_UV_INSTALL=str(fixtures/'uv-install.sh'),INSTALL_FAIL_SETUP='1' if fail_setup else '',CORRUPT_DOWNLOAD='1' if corrupt_download else '',FIXTURE_ARCHIVE=str(archive),UX46_INSTALL_DIR=str(source),UX46_HOME=str(state),UX46_BIN_DIR=str(binaries),**(extra_env or {}))
         arguments=args if args is not None else ['--agent','none','--no-start','--no-python-download']
         # Feed the script through stdin, as curl | sh does.
         command=['sh','-s','--',*arguments]
@@ -119,6 +123,95 @@ chmod 700 "$UV_UNMANAGED_INSTALL/uv"
             self.assertEqual((root/'uv-calls').read_text(),'installed')
             receipt=json.loads((Path(str(state)+'.install')/'install.json').read_text())
             self.assertEqual(receipt['phase'],'complete');self.assertTrue(receipt['owned']['runtime'])
+
+    def test_private_python_bootstrap_ignores_current_folder_config_and_redirects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);args=['--agent','none','--no-start']
+            # The installer runs from root (cwd); a hostile repository there and
+            # download-redirecting variables must not reach uv.
+            (root/'uv.toml').write_text('python-downloads-json-url = "http://127.0.0.1:9/evil.json"\n')
+            (root/'.python-version').write_text('3.11\n')
+            hostile={'UV_PYTHON_INSTALL_MIRROR':'http://127.0.0.1:9/','UV_PYTHON_DOWNLOADS_JSON_URL':'http://127.0.0.1:9/x.json',
+                     'UV_PYTHON':'3.11','UV_DOWNLOAD_URL':'http://127.0.0.1:9/uv','INSTALLER_DOWNLOAD_URL':'http://127.0.0.1:9/uv',
+                     'HTTPS_PROXY':'http://proxy.invalid:3128'}
+            result,source,state,binaries=self.attempt(root,no_python=True,args=args,extra_env=hostile)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual((root/'uv-calls').read_text(),'installed')
+            calls=[line.split('|') for line in (root/'uv-calls.uv').read_text().splitlines()]
+            self.assertEqual(len(calls),2)
+            for folder,arguments,no_config,mirror,json_url,pinned in calls:
+                self.assertNotEqual(Path(folder),root.resolve())
+                self.assertTrue(Path(folder).name.startswith('ux46-install.'))
+                self.assertTrue(arguments.startswith('--no-config python '))
+                self.assertTrue(arguments.endswith(' 3.12.13'))
+                self.assertEqual((no_config,mirror,json_url,pinned),('1','','',''))
+
+    def test_private_python_bootstrap_refuses_unpinned_uv_installer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            result,source,state,binaries=self.attempt(root,no_python=True,bad_uv_installer=True,args=['--agent','none','--no-start'])
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('pinned checksum',result.stderr)
+            self.assertFalse((root/'uv-calls').exists())
+            self.assertFalse((Path(str(state)+'.install')/'runtime').exists())
+
+    def test_checksum_helper_works_with_each_platform_tool(self):
+        script=(ROOT/'install.sh').read_text()
+        helper=script[script.index('sha256_of() {'):script.index('\n}\n',script.index('sha256_of() {'))+3]
+        payload=b'uv installer bytes\n';expected=hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'payload').write_bytes(payload)
+            import shutil
+            for tool in ('sha256sum','shasum','openssl'):
+                real=shutil.which(tool)
+                if not real:continue
+                with self.subTest(tool=tool):
+                    bindir=root/tool;bindir.mkdir()
+                    # Only this one checksum tool (plus sed) is visible, as on macOS or minimal Linux.
+                    for name,target in ((tool,real),('sed',shutil.which('sed'))):(bindir/name).symlink_to(target)
+                    run=subprocess.run(['/bin/sh','-c',helper+'sha256_of "$1"','sh',str(root/'payload')],env={'PATH':str(bindir)},capture_output=True,text=True)
+                    self.assertEqual(run.stdout.strip(),expected,run.stderr)
+
+    def test_installer_pins_uv_installer_checksum_and_python_patch(self):
+        script=(ROOT/'install.sh').read_text()
+        self.assertIn("uv_installer_url='https://astral.sh/uv/0.10.12/install.sh'",script)
+        self.assertRegex(script,r"uv_installer_sha='[0-9a-f]{64}'")
+        self.assertRegex(script,r"uv_python='3\.12\.[0-9]+'")
+
+    def test_shared_or_foreign_transaction_files_are_never_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);first,source,state,binaries=self.attempt(root,corrupt_download=True)
+            self.assertNotEqual(first.returncode,0)
+            transaction=Path(str(state)+'.install')
+            evil=root/'evil';marker=root/'evil-ran'
+            evil.write_text('#!/bin/sh\necho ran >> '+str(marker)+'\n');evil.chmod(0o755)
+            (transaction/'python').write_text(str(evil)+'\n')
+            cases=[('group-writable transaction',transaction,0o770),('world-writable transaction',transaction,0o707),
+                   ('group-writable intent',transaction/'intent',0o620),('world-writable python',transaction/'python',0o606)]
+            for label,path,mode in cases:
+                with self.subTest(label):
+                    original=path.stat().st_mode & 0o777
+                    path.chmod(mode)
+                    try:result,*_=self.attempt(root)
+                    finally:path.chmod(original)
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertIn('owned by you',result.stderr)
+                    self.assertFalse(marker.exists())
+                    self.assertFalse(source.exists())
+            if os.getuid()==0:
+                with self.subTest('foreign owner'):
+                    os.chown(transaction/'python',65534,65534)
+                    result,*_=self.attempt(root)
+                    self.assertNotEqual(result.returncode,0);self.assertFalse(marker.exists())
+                    os.chown(transaction,65534,65534)
+                    result,*_=self.attempt(root)
+                    self.assertNotEqual(result.returncode,0);self.assertIn('not a private folder',result.stderr)
+                    os.chown(transaction,0,0);os.chown(transaction/'python',0,0)
+            # A private, owned saved choice is still honoured on resume.
+            (transaction/'python').write_text(sys.executable+'\n')
+            again,*_=self.attempt(root)
+            self.assertEqual(again.returncode,0,again.stderr)
+            self.assertFalse(marker.exists())
 
     def test_failed_setup_resumes_owned_paths_and_keeps_user_files(self):
         with tempfile.TemporaryDirectory() as tmp:

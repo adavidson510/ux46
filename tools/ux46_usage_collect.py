@@ -4,10 +4,28 @@ import concurrent.futures
 import json
 import os
 import re
+import tempfile
 import time
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from urllib.parse import urlsplit
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """Refuse every redirect: the configured headers belong to the configured
+    loopback endpoint only, and a 3xx must not carry them to another host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None   # urllib then raises HTTPError for the 3xx itself
+
+
+# No proxy either: an HTTP(S)_PROXY in the environment would otherwise receive
+# the loopback request and its headers.
+_OPENER = build_opener(ProxyHandler({}), _NoRedirect())
+
+
+def urlopen(req, timeout):
+    return _OPENER.open(req, timeout=timeout)
 
 
 def request(config, endpoint, path):
@@ -62,7 +80,16 @@ def collect(config, directory):
     result={'at':time.time(),'responses':responses,'rooms':receipts,'desktop_rooms':len(rooms),
             'next_offset':(offset+len(selected))%max(1,len(supported)), 'model_calls':0,
             'coverage':'Observed Codex rooms from saved UX46 desktops; at most 24 refreshes per five-minute pass. Other runtimes are explicitly unmeasured.'}
-    temp=root/'usage-collection.tmp';temp.write_text(json.dumps(result));temp.chmod(0o600);os.replace(temp,state_path)
+    # mkstemp creates the file 0600 from the start; it is never readable by
+    # others, even for the moment before it replaces the previous state.
+    fd,temp=tempfile.mkstemp(prefix='usage-collection.',suffix='.tmp',dir=root)
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as handle:handle.write(json.dumps(result))
+        os.replace(temp,state_path)
+    except BaseException:
+        try:os.unlink(temp)
+        except OSError:pass
+        raise
     return {'at':result['at'],'rooms_refreshed':len(receipts),'rooms_indexed':sum(r['state']=='indexed' for r in receipts),'agents_reporting':sum('data' in r for r in responses),'model_calls':0}
 
 if __name__=='__main__':

@@ -95,6 +95,10 @@ DEFAULT_AGENT_NAME = "Pane"
 DEFAULT_SOURCE = "ux46"
 
 MAX_BODY = 64 * 1024
+# Stored attachment bytes are served as an inert document: if a browser is
+# ever pointed at one directly it may not run script, load anything, submit a
+# form or be framed, whatever MIME label the uploader supplied.
+FILE_CSP = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
 CATALOG_TTL = 10.0
 HISTORY_PAGE_CAP = 200
 SEARCH_SCAN_CAP = 2000
@@ -546,15 +550,30 @@ class StateReader:
     def __init__(self, path: Path):
         self.path = Path(path)
         self._local = threading.local()
+        # The outcome of the most recent read, for status displays. It is not
+        # sticky: the next successful read clears it, so one transient error
+        # (a busy lock, a file being replaced) never blanks history until a
+        # restart. `call_error` is the same outcome for this thread's last
+        # read, for a caller deciding about the rows it just got.
         self.error = ""
-        try:
-            self._connect().execute("SELECT 1 FROM sessions LIMIT 1").fetchone()
-        except Exception as exc:
-            self.error = f"Hermes state.db could not be read ({exc})"
+        self._query("SELECT 1 FROM sessions LIMIT 1")
 
     @property
     def available(self) -> bool:
         return not self.error
+
+    @property
+    def call_error(self) -> str:
+        return getattr(self._local, "error", "")
+
+    def _drop_connection(self) -> None:
+        conn = getattr(self._local, "conn", None)
+        self._local.conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _connect(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)
@@ -565,13 +584,19 @@ class StateReader:
         return conn
 
     def _query(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
-        if self.error:
-            return []
         try:
-            return self._connect().execute(sql, args).fetchall()
+            rows = self._connect().execute(sql, args).fetchall()
         except Exception as exc:
-            self.error = f"Hermes state.db could not be read ({exc})"
+            # Reconnect on the next read: a handle that failed (or was opened
+            # before the file was replaced) is not reused.
+            self._drop_connection()
+            message = f"Hermes state.db could not be read ({exc})"
+            self._local.error = message
+            self.error = message
             return []
+        self._local.error = ""
+        self.error = ""
+        return rows
 
     # -- sessions ----------------------------------------------------------
     def catalog_rows(self, limit: int, include_derived: bool) -> list[dict]:
@@ -1609,15 +1634,15 @@ class HermesService:
             except ValueError:
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_cursor",
                                    "a history cursor is a message id this adapter issued")
-        if not self.state.available:
+        rows = self.state.messages(room.session_id, limit=size, before_id=before)
+        if self.state.call_error:
             return {
                 "room": room.id, "items": [], "complete": False,
                 "unavailable": True, "retryable": True,
                 "error": "state_unreadable",
-                "message": self.state.error or "Hermes state.db could not be read",
+                "message": self.state.call_error,
                 "source": "hermes state.db (read-only)",
             }
-        rows = self.state.messages(room.session_id, limit=size, before_id=before)
         items = project_messages(rows, room.session_id)
         tail_items: list[dict] = []
         if not before:
@@ -1643,12 +1668,12 @@ class HermesService:
 
     def search_history(self, room: Room, query: str, kinds: tuple[str, ...],
                        limit: int) -> dict:
-        if not self.state.available:
-            return {"room": room.id, "query": query, "hits": [], "complete": False,
-                    "unavailable": True, "retryable": True,
-                    "message": self.state.error}
         rows, capped = self.state.search(room.session_id, query,
                                          max(1, min(int(limit), 200)) * 4)
+        if self.state.call_error:
+            return {"room": room.id, "query": query, "hits": [], "complete": False,
+                    "unavailable": True, "retryable": True,
+                    "message": self.state.call_error}
         items = project_messages(sorted(rows, key=lambda r: int(r["id"])), room.session_id)
         hits = []
         for item in reversed(items):
@@ -2069,7 +2094,9 @@ class HermesService:
     def check_sendable(record: dict) -> None:
         """Refuse before sending what the native runtime would refuse mid-turn."""
         size = int(record.get("size") or 0)
-        mime = str(record.get("mime") or "")
+        # The declared type: open_download() narrows "mime" for HTTP serving
+        # only, and the runtime must still see an image as an image (S06).
+        mime = str(record.get("declared_mime") or record.get("mime") or "")
         if size <= 0:
             raise AdapterError(
                 HTTPStatus.BAD_REQUEST, "attachment_empty",
@@ -2099,7 +2126,10 @@ class HermesService:
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.NOT_FOUND, "file_unknown", str(exc)) from exc
             self.check_sendable(record)
-            mime = str(record.get("mime") or "application/octet-stream")
+            # Agent delivery uses the declared type (image.attach_bytes vs
+            # file.attach); record["mime"] is narrowed for HTTP serving only (S06).
+            mime = str(record.get("declared_mime") or record.get("mime")
+                       or "application/octet-stream")
             encoded = base64.b64encode(data).decode("ascii")
             if mime.startswith("image/"):
                 result = self.gateway.call("image.attach_bytes", {
@@ -2256,10 +2286,16 @@ class HermesService:
                 room = self.catalog.room(item["room"])
                 if room is None or not self.catalog.live_session_for(room.session_id):
                     continue
+                # Claim as one compare-and-set at the version just read and send
+                # the claimed body (the shared Agent3 journal's queue_mark): a
+                # Cancel or Edit that lands after queue_ready() wins, never the send.
                 try:
-                    self.journal.queue_mark(item["client_id"], DISPATCHING)
-                    result = self.dispatch(room, item["client_id"], item["body"],
-                                           item.get("attachments") or [])
+                    claimed = self.journal.queue_mark(item["client_id"], DISPATCHING,
+                                                      expect=PENDING, version=item["version"])
+                    if claimed is None:
+                        continue
+                    result = self.dispatch(room, item["client_id"], claimed["body"],
+                                           claimed.get("attachments") or [])
                     status = (ACCEPTED if result.get("accepted")
                               else UNCERTAIN if result.get("uncertain")
                               else FAILED if result.get("failed") else DISPATCHING)
@@ -2633,6 +2669,12 @@ class HermesService:
 class HermesHandler(BaseHTTPRequestHandler):
     server_version = "Ux46Hermes/1.0"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     protocol_version = "HTTP/1.1"
     service: HermesService
 
@@ -2744,8 +2786,7 @@ class HermesHandler(BaseHTTPRequestHandler):
             raise AdapterError(HTTPStatus.FORBIDDEN, "denied",
                                "this adapter answers loopback only")
         host = (self.headers.get("Host") or "").strip().casefold()
-        if not host:
-            return
+        # A request with no Host names nobody; it is refused like a foreign one.
         allowed = self.service.allowed_hosts
         if host.rsplit(":", 1)[0].strip("[]") in allowed or host in allowed:
             return
@@ -2784,8 +2825,14 @@ class HermesHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
-            self._check_host()
             parsed = urlparse(self.path)
             path = parsed.path
             prefix = self.service.config.path_prefix
@@ -2874,17 +2921,24 @@ class HermesHandler(BaseHTTPRequestHandler):
             # Only bytes this adapter's own managed store holds. There is no
             # path here that serves an arbitrary local file.
             try:
-                record, data = service.files.open_download(media.group(1))
+                record, data = service.files.open_download(media.group(1),
+                                                           room=get("room") or None)
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.NOT_FOUND, "file_unknown", str(exc)) from exc
+            disposition = files.content_disposition(record["name"])
             if media.group(2) == "preview":
-                header = ("Content-Disposition",
-                          f'inline; filename="{files._safe_name(record["name"])}"')
+                # Inline only for what the store itself judged previewable
+                # (verified raster images); anything else is download-only, so
+                # an uploaded HTML or script file is never rendered here.
+                if record.get("preview_url") is None:
+                    raise AdapterError(HTTPStatus.NOT_FOUND, "preview_unavailable",
+                                       "this attachment is download-only")
+                header = ("Content-Disposition", "inline; " + disposition[12:])
             else:
-                header = ("Content-Disposition", files.content_disposition(record["name"]))
+                header = ("Content-Disposition", disposition)
             return self._send(HTTPStatus.OK, data,
                               str(record.get("mime") or "application/octet-stream"),
-                              (header,))
+                              (header, ("Content-Security-Policy", FILE_CSP)))
 
         submission = re.fullmatch(r"/api/submissions/([A-Za-z0-9_-]{8,64})", path)
         if submission and method == "GET":

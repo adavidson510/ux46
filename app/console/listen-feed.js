@@ -128,7 +128,7 @@
     if(!f.current.url){
       f.preparing=true;const seq=++f.speechGeneration;paint();
       try{
-        const speech=await api(agentPath(f.agent,'/api/room/'+encodeURI(f.room)+'/speak'),{absolute:true,method:'POST',body:{item_id:f.current.id,voice:f.voice||undefined}});
+        const speech=await api(agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/')+'/speak'),{absolute:true,method:'POST',body:{item_id:f.current.id,voice:f.voice||undefined}});
         if(feed!==f||seq!==f.speechGeneration)return;
         if(!/^\/api\/audio\/[a-zA-Z0-9_-]+\.wav$/.test(speech.audio_url||''))throw Error('Invalid audio response');
         f.current.url=agentPath(f.agent,speech.audio_url);f.audio.src=f.current.url;
@@ -143,7 +143,7 @@
   async function poll(){
     const f=feed;if(!f||f.polling||f.queue.length>=100)return;f.polling=true;
     try{
-      const path=agentPath(f.agent,'/api/room/'+encodeURI(f.room));
+      const path=agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/'));
       const room=await api(path,{absolute:true});if(feed!==f)return;if(room.id!==f.room)throw Error('Conversation could not be checked');
       let rows=[],cursor=null,page;
       for(let count=0;count<10;count++){

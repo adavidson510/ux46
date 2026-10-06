@@ -1,4 +1,5 @@
 import hashlib
+import os
 import importlib.util
 import json
 import sqlite3
@@ -118,6 +119,26 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(Store(self.root/'portable.db').get(self.peer,'method')['revision'],1)
         self.assertTrue(maintain(self.store.path,self.root/'snapshots')['changed'])
         self.assertFalse(maintain(self.store.path,self.root/'snapshots')['changed'])
+
+
+    def test_backup_and_export_are_private_from_their_first_byte(self):
+        self.store.capture(self.owner,lesson())
+        old=os.umask(0o022)
+        try:
+            created=[]
+            real_open=os.open
+            def watching_open(path,flags,mode=0o777,*a,**k):
+                fd=real_open(path,flags,mode,*a,**k)
+                if str(path).endswith(('backup-perm.db','export-perm.jsonl')):
+                    created.append((Path(path).name,os.fstat(fd).st_mode&0o777))
+                return fd
+            with patch("os.open",watching_open):
+                self.store.backup(self.root/'backup-perm.db')
+                self.store.export(self.root/'export-perm.jsonl')
+        finally:os.umask(old)
+        self.assertEqual(dict(created),{'backup-perm.db':0o600,'export-perm.jsonl':0o600})
+        for name in ('backup-perm.db','export-perm.jsonl'):
+            self.assertEqual((self.root/name).stat().st_mode&0o777,0o600)
 
 
 class MailTests(unittest.TestCase):

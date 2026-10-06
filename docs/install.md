@@ -28,9 +28,10 @@ use the download-and-inspect option at the bottom of this guide.
 
 Setup downloads a checked release into `~/ux46` and creates separate private
 settings in `~/.ux46`. The `~` means your home folder. If a suitable Python is
-missing, it can install a private Python 3.12 using
-[Astral uv](https://docs.astral.sh/uv/guides/install-python/); it doesn't replace
-system Python, ask for sudo, or edit your shell profile.
+missing, it can install a private Python 3.12 using a pinned, checksum-verified
+[Astral uv](https://docs.astral.sh/uv/guides/install-python/) installer; it doesn't replace
+system Python, ask for sudo, or edit your shell profile. uv settings in the folder
+you run the command from are ignored for this step.
 
 You don't need Git or a GitHub account. Installing UX46 doesn't publish your
 work or sign you up for a shared service.
@@ -96,7 +97,7 @@ diagnostics, `ux46 run` is still available; Control+C stops that foreground run.
 | :--- | :--- | :--- |
 | `~/ux46` | Source: the interface, tools, docs, and skills | Let your AI edit your copy |
 | `~/.ux46` | Private settings, registry, workspace stores and source recovery points | Back it up; keep it out of public contributions |
-| `~/.ux46.install` | Resumable installer, optional private Python and independent repair launcher | Keep it with this installation; it is not a temporary download to delete |
+| `~/.ux46.install` | Resumable installer, optional private Python and independent repair launcher | Keep it with this installation; it is not a temporary download to delete. It must stay private to you: the installer refuses one owned by someone else or writable by others |
 | Your project's `sessions/` folder | Portable Session Vault records | Keep useful project context; treat it as private |
 | Provider-managed storage | Native conversations and authentication | Leave ownership with Codex or Claude |
 

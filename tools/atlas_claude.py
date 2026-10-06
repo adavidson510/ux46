@@ -82,6 +82,12 @@ CAPABILITY_LABEL = ("the Claude Code CLI on this machine — its own transcripts
                     "read here, and sendable one turn at a time")
 
 MAX_BODY = 64 * 1024
+# A /model or /effort value passed to the CLI as its own argv element.
+MODEL_VALUE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+# Stored attachment bytes are served as an inert document: if a browser is
+# ever pointed at one directly it may not run script, load anything, submit a
+# form or be framed, whatever MIME label the uploader supplied.
+FILE_CSP = "default-src 'none'; frame-ancestors 'none'; form-action 'none'; sandbox"
 MAX_ATTACH_BYTES = 5 * 1024 * 1024        # what fits in one base64 image block
 HISTORY_MAX = 200
 SCAN_LIMIT = 600                          # newest transcripts considered per refresh
@@ -896,13 +902,29 @@ class Turn:
             args += ["--resume", self.native_id]
         else:
             args += ["--session-id", self.native_id]
-        model = self.service.preference(self.room.id, "model") or config.model
+        # Each value travels as ONE argv element, "--model=<value>": the CLI's
+        # option parser (commander.js) takes the whole remainder as the value,
+        # so nothing in it can ever be read as another option. That lets the
+        # operator's configured --model be any id the CLI knows - "sonnet[1m]",
+        # a Bedrock "...-v1:0", an ARN - without the browser regex (S14).
+        # MODEL_VALUE_RE still guards what a browser stored via /model and
+        # /effort; a stored value that fails it is skipped out loud, not
+        # silently, and the configured model is used instead.
+        model = self._browser_value("model") or config.model
         if model:
-            args += ["--model", model]
-        effort = self.service.preference(self.room.id, "effort")
+            args.append(f"--model={model}")
+        effort = self._browser_value("effort")
         if effort:
-            args += ["--effort", effort]
+            args.append(f"--effort={effort}")
         return args
+
+    def _browser_value(self, key: str) -> str:
+        value = self.service.preference(self.room.id, key)
+        if value and not MODEL_VALUE_RE.fullmatch(value):
+            sys.stderr.write(f"ux46-claude: ignoring stored /{key} value {value!r} for "
+                             f"{self.room.id}; it is not a value this adapter passes on\n")
+            return ""
+        return value
 
     def start(self) -> dict:
         """Hand the message to the CLI. This is what acceptance means.
@@ -1336,10 +1358,15 @@ class ClaudeService:
                 record, data = self.files.open_download(file_id, room=room.id)
             except files.FileStoreError as exc:
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "file_unknown", str(exc)) from exc
+            # Deliberately the narrowed record["mime"], not declared_mime: it
+            # becomes the image block's media_type, and only the raster types
+            # the store serves (png/jpeg/gif/webp...) are images Claude reads.
+            # The message names the declared type so the refusal makes sense.
             if not str(record["mime"]).startswith("image/"):
                 raise AdapterError(
                     HTTPStatus.BAD_REQUEST, "unsupported_attachment",
-                    f"{record['name']} is {record['mime']}; this adapter can only send "
+                    f"{record['name']} is {record.get('declared_mime') or record['mime']}; "
+                    "this adapter can only send "
                     "images to Claude Code, as native image blocks")
             if len(data) > MAX_ATTACH_BYTES:
                 raise AdapterError(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "too_large",
@@ -1404,7 +1431,14 @@ class ClaudeService:
                 queued = self.journal.queue_get(client_id)
                 if not queued or queued.status != PENDING:
                     raise recovery.RecoveryBusy("Queued input is held and has not been sent")
-                self.journal.queue_mark(client_id, DISPATCHING)
+                # Claim the row as one compare-and-set at the version just
+                # read, and send the claimed body: a Cancel or Edit that lands
+                # between the queue read and this claim wins, never the send.
+                claimed = self.journal.queue_mark(client_id, DISPATCHING,
+                                                  expect=PENDING, version=queued.version)
+                if claimed is None:
+                    raise recovery.RecoveryBusy("Queued input changed before it was sent")
+                text = claimed.body
             if self.running(room.id) is not None:
                 raise AdapterError(HTTPStatus.CONFLICT, "busy",
                                    "a turn is already running in this conversation")
@@ -1480,6 +1514,12 @@ class ClaudeService:
         if not isinstance(text, str) or len(text) > MAX_BODY or not text.strip():
             raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_message",
                                "a queued message needs short text")
+        if text.lstrip().startswith("/"):
+            # The same refusal as a direct send: the queue later hands this
+            # text to the CLI as a prompt, where a slash command would run.
+            raise AdapterError(HTTPStatus.BAD_REQUEST, "is_command",
+                               "that looks like a command; send it through the command "
+                               "endpoint so it is never delivered as chat text")
         try:
             # A short editing window, then this adapter sends it once, when the
             # conversation is free. It is the same reservation a direct send
@@ -1521,7 +1561,8 @@ class ClaudeService:
                 except AdapterError as exc:
                     # Still queued, still exactly once: it waits for the next
                     # pass rather than being retried into a second send.
-                    self.journal.queue_mark(item.client_id, PENDING, exc.message)
+                    self.journal.queue_mark(item.client_id, PENDING, exc.message,
+                                            expect=(PENDING, DISPATCHING))
                     continue
                 except Exception as exc:  # noqa: BLE001 - report, never crash the loop
                     self.journal.queue_mark(item.client_id, FAILED, str(exc)[:200])
@@ -1615,7 +1656,10 @@ class ClaudeService:
             if key == "effort" and argument not in ("low", "medium", "high", "xhigh", "max"):
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_effort",
                                    "effort is one of low, medium, high, xhigh, max")
-            if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", argument):
+            # Leading alphanumeric: the value is its own argv element after
+            # --model/--effort, and one starting with '-' would be read by the
+            # CLI as another option.
+            if not MODEL_VALUE_RE.fullmatch(argument):
                 raise AdapterError(HTTPStatus.BAD_REQUEST, "bad_model",
                                    "that is not a model name this adapter will pass on")
             self.set_preference(room.id, key, argument)
@@ -1769,6 +1813,12 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = f"{ADAPTER_NAME}/{ADAPTER_VERSION}"
     sys_version = ""
+    # A socket timeout for every read and write on a connection, so a client
+    # that stops sending mid-request (or idles on keep-alive) cannot hold a
+    # handler thread forever. It is well above the longest wait any route
+    # makes on purpose (the /api/events long-poll is capped at 30s), and that
+    # wait happens server-side without touching the socket anyway.
+    timeout = 60
     service: ClaudeService = None       # bound per server
 
     def log_message(self, fmt, *args):
@@ -1776,12 +1826,20 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     # -- plumbing ----------------------------------------------------------
+    def _security_headers(self) -> None:
+        # Every answer, JSON or stored bytes: never sniffed into another
+        # type, never framed, never cached, no referrer leaked.
+        self.send_header("Cache-Control", "no-store, private")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
     def _json(self, status, payload) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -1790,6 +1848,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))
+        self._security_headers()
         for name, value in extra:
             self.send_header(name, value)
         self.end_headers()
@@ -1859,7 +1918,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
-            self._check_host()
+            try:
+                self._check_host()
+            except AdapterError:
+                # Refused before the body is read: never frame another
+                # request out of bytes we did not consume.
+                self.close_connection = True
+                raise
             self._raw_body = self._consume_body()
             parsed = urlparse(self.path)
             path = parsed.path
@@ -1944,9 +2009,11 @@ class Handler(BaseHTTPRequestHandler):
                     raise AdapterError(HTTPStatus.NOT_FOUND, "preview_unavailable",
                                        "this attachment is download-only")
                 return self._send(HTTPStatus.OK, data, record["mime"],
-                                  (("Content-Disposition", "inline; " + disposition[12:]),))
+                                  (("Content-Disposition", "inline; " + disposition[12:]),
+                                   ("Content-Security-Policy", FILE_CSP)))
             return self._send(HTTPStatus.OK, data, record["mime"],
-                              (("Content-Disposition", disposition),))
+                              (("Content-Disposition", disposition),
+                               ("Content-Security-Policy", FILE_CSP)))
 
         room_match = re.fullmatch(
             r"/api/room/([^/]+/[^/]+)"

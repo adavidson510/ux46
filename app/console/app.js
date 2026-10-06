@@ -394,7 +394,9 @@ function useIcon(id, className) {
 // A room may deliberately override that project mark through the owner
 // desktop state; otherwise a configured uploaded logo wins.
 const projectMarks = new Map();
-const MARK_AGENT_ID = /^[A-Za-z0-9._-]{1,64}$/;
+// The connector's agent-id grammar (atlas_remote AGENT_ID_RE): a mark's file
+// owner becomes an /api/agents/<id>/ path segment, so nothing looser passes.
+const MARK_AGENT_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const MARK_FILE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 function sessionMark(tab) {
@@ -520,7 +522,20 @@ function clearReceipt() { state.receipt = null; }
 
 const TABS_KEY = "atlas.tabs";        // the old per-agent lists, left in place
 const TABS_KEY_V2 = "atlas.tabs.v2";  // the unified list this reads and writes
-const ROOM_ID_SHAPE = /^[^/]+\/[^/]+$/;
+/* A room id is "<project>/<session>". It comes from deep links, the shared
+   layout and browser storage, all of which another party can write, and it is
+   spliced into API paths. So each segment must be non-empty, free of path and
+   URL syntax ('/', '\\', '?', '#') and not a dot segment; the servers' own
+   ROOM_ID_RE is narrower still, so no real id is refused here. */
+const ROOM_ID_SHAPE = /^(?!\.\.?\/)[^/\\?#]+\/(?!\.\.?$)[^/\\?#]+$/;
+function validRoomId(room) { return typeof room === "string" && ROOM_ID_SHAPE.test(room); }
+/* The one way a room id becomes a URL path: each segment encoded on its own,
+   so even a value that slipped past validRoomId cannot add a segment. Valid
+   ids ([A-Za-z0-9._-]) encode to themselves. */
+function roomPathSegments(room) {
+  return String(room).split("/").map(encodeURIComponent).join("/");
+}
+function roomApiPath(room) { return "/api/room/" + roomPathSegments(room); }
 
 function tabKey(agent, room) { return (agent || DEFAULT_AGENT) + "\0" + room; }
 function tabIdentity(tab) {
@@ -2905,7 +2920,7 @@ async function finishChapter(agent, previousRoom, nextRoom, chapter, desktop, so
   let canvasNote = "";
   if (mode !== "blank") {
     try {
-      const canvasPath = (room) => "/api/boards/" + encodeURIComponent(agent) + "/" + encodeURI(room);
+      const canvasPath = (room) => "/api/boards/" + encodeURIComponent(agent) + "/" + roomPathSegments(room);
       const source = await api(canvasPath(previousRoom), {absolute: true});
       const destination = await api(canvasPath(next.id), {absolute: true});
       if (source.board && !destination.board) await api(canvasPath(next.id), {
@@ -3107,7 +3122,7 @@ async function closeTab(tab) {
   try {
     if (tab.agent === agentId() && tab.room === state.room) await flushDraft();
     const result = await api(
-      agentPath(tab.agent, "/api/room/" + encodeURI(tab.room) + "/release"),
+      agentPath(tab.agent, roomApiPath(tab.room) + "/release"),
       {method: "POST", body: {}, absolute: true});
     const outcome = String(result.release_state || "");
     if (!RELEASE_DONE.has(outcome)) {
@@ -4645,7 +4660,7 @@ async function speakItem(itemId, entry) {
     el("span", {class: "speech-pulse", "aria-hidden": "true"}, [el("i"), el("i"), el("i")]),
     el("span", {text: "Preparing audio…"})]));
   try {
-    const speech = await api(agentPath(owner, "/api/room/" + encodeURI(roomId) + "/speak"), {
+    const speech = await api(agentPath(owner, roomApiPath(roomId) + "/speak"), {
       absolute: true, method: "POST", body: {item_id: itemId, voice: state.voice.preferred || undefined},
     });
     if (!mine()) return;
@@ -4770,7 +4785,9 @@ function rememberRoomView() {
 async function selectRoom(roomId, opts) {
   if (SATELLITE && roomId !== satelliteTarget.room) return false;
   closeCommands();
-  if (!roomId) return false;
+  // Every route into a room passes here, so an id of the wrong shape (a
+  // hand-edited link, a stale or foreign layout) never reaches state.room.
+  if (!roomId || !validRoomId(roomId)) return false;
   const agent = agentId();
   const gen = state.agentGen;
   const intent = ++roomSelectionIntent;
@@ -4817,7 +4834,7 @@ async function selectRoom(roomId, opts) {
   setSendState(cached ? "Checking for updates…" : "Opening…","ok");
   const read = ++state.roomRead;
   try {
-    const detail = await api("/api/room/" + encodeURI(roomId));
+    const detail = await api(roomApiPath(roomId));
     if (stale(seq,roomId) || gen !== state.agentGen || read !== state.roomRead) return false;
     state.freshness.room = Date.now();
     state.freshness.roomError = "";
@@ -4930,7 +4947,7 @@ async function loadHistory(seq, roomId) {
   const gen = state.agentGen, read = ++state.historyRead;
   const obsolete = () => stale(seq, roomId) || gen !== state.agentGen || read !== state.historyRead;
   try {
-    const payload = await readHistoryPage("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc", obsolete);
+    const payload = await readHistoryPage(roomApiPath(roomId) + "/history?limit=40&direction=desc", obsolete);
     if (obsolete()) return;
     const ascending = payload.items.slice().reverse();
     state.items = ascending;
@@ -4963,7 +4980,7 @@ async function loadEarlier() {
   const stream = $("#stream");
   state.following = false;
   const before = stream.scrollHeight;
-  const payload = await api("/api/room/" + encodeURI(roomId)
+  const payload = await api(roomApiPath(roomId)
     + "/history?limit=40&direction=desc&cursor=" + encodeURIComponent(cursor));
   // Same room names on two agents are different conversations. A newer
   // history read also invalidates this page's cursor and scroll adjustment.
@@ -5014,7 +5031,7 @@ async function refreshTail() {
   let rows = [], cursor = null, payload, newest;
   try {
     for (let page = 0; page < 20; page++) {
-      payload = await readHistoryPage("/api/room/" + encodeURI(roomId) + "/history?limit=40&direction=desc"
+      payload = await readHistoryPage(roomApiPath(roomId) + "/history?limit=40&direction=desc"
         + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""), obsolete);
       if (obsolete()) return false;
       if (!newest) newest = payload;
@@ -5220,7 +5237,7 @@ function seedDraftWriter(roomId, version) {
 /* Every save names the room and base version it was typed against, so a slow
    response can never land on a room the person has since left. */
 async function saveDraftFor(roomId, body, baseVersion) {
-  return api("/api/room/" + encodeURI(roomId) + "/draft", {
+  return api(roomApiPath(roomId) + "/draft", {
     method: "PUT", body: {body, base_version: baseVersion, device: state.device},
   });
 }
@@ -5421,7 +5438,7 @@ async function send() {
   renderActivity();          // say "Sending" before the request leaves
 
   try {
-    const result = await api("/api/room/" + encodeURI(roomId) + "/submit", {
+    const result = await api(roomApiPath(roomId) + "/submit", {
       method: "POST", body: {client_id: id, body: sentText, thread_id: threadId},
     });
     const submission = result.submission || {};
@@ -5853,7 +5870,7 @@ async function refreshRoomState() {
   const read = ++state.roomRead;
   const obsolete = () => stale(seq, roomId) || gen !== state.agentGen || read !== state.roomRead;
   try {
-    const detail = await api("/api/room/" + encodeURI(roomId));
+    const detail = await api(roomApiPath(roomId));
     if (obsolete()) return false;
     state.detail = detail;
     state.freshness.room = Date.now();
@@ -5942,7 +5959,7 @@ async function attachSession(agent, roomId, detail, auto) {
   try {
     // The body is empty. Connecting is connecting: it never carries a message,
     // a command or a prompt of any kind.
-    const result = await api(agentPath(agent, "/api/room/" + encodeURI(roomId) + "/continue"),
+    const result = await api(agentPath(agent, roomApiPath(roomId) + "/continue"),
                              {method: "POST", body: {}, absolute: true});
     const room = result.room || null;
     const owned = room && (room.ownership || {}).state === "atlas_owned";
@@ -6115,14 +6132,14 @@ async function changeSessionConnection(owner, room, reconnect) {
   renderDetails();
   try {
     if (here()) await flushDraft();
-    const released = await api(agentPath(owner, "/api/room/" + encodeURI(room) + "/release"),
+    const released = await api(agentPath(owner, roomApiPath(room) + "/release"),
       {absolute: true, method: "POST", body: {}});
     if (!RELEASE_DONE.has(released.release_state)) {
       throw new Error(released.message || "The old connection has not finished disconnecting. Reconnect was not attempted.");
     }
     manuallyDisconnected.add(key);
     if (reconnect) {
-      const result = await api(agentPath(owner, "/api/room/" + encodeURI(room) + "/attach"),
+      const result = await api(agentPath(owner, roomApiPath(room) + "/attach"),
         {absolute: true, method: "POST", body: {}});
       if (!result.room?.ownership?.atlas_owned) {
         throw new Error("The conversation has not confirmed its new connection. Your messages were not resent.");
@@ -6372,7 +6389,7 @@ async function runNavSearch(query) {
   const roomId = detail.id;
   const seq = state.roomSeq;
   try {
-    const payload = await api("/api/room/" + encodeURI(roomId) + "/search?kinds="
+    const payload = await api(roomApiPath(roomId) + "/search?kinds="
       + (kind === "both" ? "human,final" : kind === "turns" ? "human" : "final")
       + "&limit=60&q=" + encodeURIComponent(query || ""));
     if (stale(seq, roomId) || gen !== state.agentGen || read !== navSearchRead || state.navKind !== kind || $("#navSearch").value.trim() !== query) return;
@@ -6453,7 +6470,7 @@ async function jumpToItem(itemId) {
   }
   setSendState("Loading the page around that message…", "ok");
   try {
-    const payload = await api("/api/room/" + encodeURI(roomId)
+    const payload = await api(roomApiPath(roomId)
       + "/history?around=" + encodeURIComponent(itemId));
     if (stale(seq, roomId)) return;
     state.items = payload.items;
@@ -7361,7 +7378,7 @@ function roomRow(room, opts) {
 
 async function setRoomPref(roomId, patch) {
   try {
-    await browseApi("/api/room/" + encodeURI(roomId) + "/pref", {method: "POST", body: patch});
+    await browseApi(roomApiPath(roomId) + "/pref", {method: "POST", body: patch});
   } catch (error) {
     flash("Could not save that: " + error.message);
     return;
@@ -8081,7 +8098,7 @@ async function loadRoomStatus(tab, gen) {
   if (entry.at && Date.now() - entry.at < STATUS_FRESH_MS) return;
   entry.reading = true;
   try {
-    const detail = await api(agentPath(tab.agent, "/api/room/" + encodeURI(tab.room)),
+    const detail = await api(agentPath(tab.agent, roomApiPath(tab.room)),
                              {absolute: true});
     if (gen !== attentionGen) { entry.reading = false; return; }
     entry.detail = detail;
@@ -8199,7 +8216,7 @@ async function openGoalPanel(agent = agentId(), room = state.room, detail = stat
   $("#commandClose").focus();
   if (state.goalPanelStatus.state === "unsupported") return;
   try {
-    const result = await api(agentPath(agent, "/api/room/" + encodeURI(room) + "/command"),
+    const result = await api(agentPath(agent, roomApiPath(room) + "/command"),
       {absolute: true, method: "POST", body: {command: "/goal", client_id: clientId()}});
     if (state.goalPanelTarget !== target || state.commandMode !== "goal") return;
     const outcome = result.command || {}, native = outcome.native || {};
@@ -9554,7 +9571,7 @@ async function pollEvents() {
         if (event.type === "goal" && event.room === state.room && state.commandMode === "goal"
             && state.goalPanelTarget?.agent === agentId() && state.goalPanelTarget?.room === state.room) {
           const roomId=state.room, seq=state.roomSeq, target=state.goalPanelTarget;
-          const read=await api("/api/room/"+encodeURI(roomId)+"/command",{method:"POST",body:{command:"/goal",client_id:clientId()}});
+          const read=await api(roomApiPath(roomId)+"/command",{method:"POST",body:{command:"/goal",client_id:clientId()}});
           if (!stale(seq,roomId) && state.commandMode === "goal" && state.goalPanelTarget === target) {
             const outcome = read.command || {}, native = outcome.native || {};
             state.goalPanel = native.goal || null;
@@ -9878,9 +9895,11 @@ async function enterAgent(bootstrap, wantRoom, opts) {
       const params = new URLSearchParams(window.location.search);
       wanted = params.get("room") || "";
     } catch (e) { wanted = ""; }
+    if (!validRoomId(wanted)) wanted = "";
   }
   if (!wanted && !opts?.sharedStartup) {
     try { wanted = window.localStorage.getItem(agentKey("atlas.room")) || ""; } catch (e) { wanted = ""; }
+    if (!validRoomId(wanted)) wanted = "";
   }
   if (!wanted && !opts?.sharedStartup) {
     const mine = state.tabs.find((tab) => tab.agent === agentId());
@@ -9979,6 +9998,9 @@ async function boot() {
     linkAgent = params.get("agent") || "";
     linkRoom = params.get("room") || "";
   } catch (e) { linkAgent = ""; linkRoom = ""; }
+  // A link is the least trusted source of a room; a malformed one is dropped
+  // here so the layout's own choice (or nothing) is used instead.
+  if (!validRoomId(linkRoom)) linkRoom = "";
   let wantedAgent = linkAgent;
   if (!wantedAgent) {
     try { wantedAgent = window.localStorage.getItem("atlas.agent") || ""; } catch (e) { wantedAgent = ""; }
@@ -10095,7 +10117,7 @@ async function loadCommandCatalog() {
   const changed=()=>stale(seq,roomId) || owner!==agentId() || gen!==state.agentGen;
   state.catalogLoading=true;
   try {
-    const result=await api(agentPath(owner,"/api/room/"+encodeURI(roomId)+"/command"),{absolute:true,method:"POST",body:{command:"/model",client_id:clientId(),thread_id:(state.detail.native || {}).thread_id}});
+    const result=await api(agentPath(owner,roomApiPath(roomId)+"/command"),{absolute:true,method:"POST",body:{command:"/model",client_id:clientId(),thread_id:(state.detail.native || {}).thread_id}});
     if (changed()) return;
     const catalog=(result.command || {}).catalog || (result.room && result.room.native || {}).catalog || [];
     if (state.detail.native) state.detail.native.catalog=catalog;
@@ -10327,7 +10349,7 @@ async function drainCommandQueue() {
         if (entry.state!=='pending') continue;
         if (blocked.has(target)) {commandQueueWait(entry,'Waiting for an earlier command for this conversation. Review any unknown result first.');continue;}
         blocked.add(target); // One operation per native session per pass.
-        const path=agentPath(entry.agent,'/api/room/'+encodeURI(entry.room));
+        const path=agentPath(entry.agent,roomApiPath(entry.room));
         let detail;
         try {detail=await api(path,{absolute:true,signal:AbortSignal.timeout(10000)});}
         catch (_) {commandQueueWait(entry,'Cannot reach this conversation to check its activity. Nothing has been sent; checking again while this page is open.');continue;}
@@ -10430,7 +10452,7 @@ async function sendCommand(command, fromDraft) {
   }
   state.sending = true; clearTimeout(draftTimer); closeCommands(); renderTarget(); setSendState("Running " + name + "…","ok");
   try {
-    const result = await api(agentPath(commandAgent, "/api/room/" + encodeURI(roomId) + "/command"), {absolute:true,method:"POST",body:attempt});
+    const result = await api(agentPath(commandAgent, roomApiPath(roomId) + "/command"), {absolute:true,method:"POST",body:attempt});
     const outcome = result.command || {}, sameRoom = stillCurrent();
     const refused = ["unsupported","failed","uncertain","needs_input","needs_idle","needs_sign_in"].includes(outcome.state);
     if (outcome.state !== "uncertain") {try {localStorage.removeItem(key);} catch(e) {}}
@@ -10474,7 +10496,7 @@ async function sendCommand(command, fromDraft) {
     // Observe once; never retry the resume or attribute this state to it.
     if (busy && command.trim() === "/goal resume" && stillCurrent()) {
       try {
-        const read = await api(agentPath(commandAgent, "/api/room/" + encodeURI(roomId) + "/command"),
+        const read = await api(agentPath(commandAgent, roomApiPath(roomId) + "/command"),
           {absolute: true, method: "POST", body: {command: "/goal", client_id: clientId()}});
         if (!stillCurrent()) return;
         const outcome = read.command || {}, goal = outcome.goal || outcome.native?.goal;
@@ -11145,7 +11167,7 @@ async function uploadOne(entry, room) {
     data.append("file", entry.blob, entry.name);
     // The room is an argument, never state.room, so a mid-flight session
     // switch cannot redirect a file into another conversation.
-    const response = await consoleFetch(agentPath(owner, "/api/room/" + encodeURI(target) + "/files"), {
+    const response = await consoleFetch(agentPath(owner, roomApiPath(target) + "/files"), {
       method: "POST", body: data,
       headers: {"X-Atlas-CSRF": state.csrf, "Accept": "application/json"},
     });
@@ -11213,7 +11235,7 @@ async function checkUploadMessage(id, room, agent) {
   try {
     // Asked of the agent that queued it, by name: another agent has never
     // heard of this id and would answer as though nothing were queued.
-    const data = await api(agentPath(owner, "/api/room/" + encodeURI(room) + "/pending"),
+    const data = await api(agentPath(owner, roomApiPath(room) + "/pending"),
                            {absolute: true});
     const item = (data.pending || []).find(p => p.client_id === id);
     if (!item) {
@@ -11271,7 +11293,7 @@ send = async function () {
   saveUploadDrafts();
   state.sending = true; renderTarget(); renderActivity(); setReceipt("Sending message and files…", "ok");
   try {
-    await api("/api/room/" + encodeURI(room) + "/pending", {method: "POST", body: {
+    await api(roomApiPath(room) + "/pending", {method: "POST", body: {
       client_id: id, thread_id: state.detail.native.thread_id, body,
       attachments: entries.map(e => ({file_id: e.file.id})),
     }});
@@ -11330,7 +11352,7 @@ const PENDING_SETTLED_MS = 10 * 60 * 1000;
 let pendingTimer = null;
 
 function pendingPath(roomId, clientId) {
-  return "/api/room/" + encodeURI(roomId) + "/pending"
+  return roomApiPath(roomId) + "/pending"
     + (clientId ? "/" + encodeURIComponent(clientId) : "");
 }
 
@@ -11585,7 +11607,7 @@ async function loadAttachmentIndex(room) {
   entry.at = Date.now();                             // never re-ask on every redraw
   attachmentIndex.set(room, entry);
   let data = null;
-  try { data = await api("/api/room/" + encodeURI(room) + "/pending"); }
+  try { data = await api(roomApiPath(room) + "/pending"); }
   catch (error) { entry.loading = false; return; }   // no thumbnail is better than a wrong one
   entry.loading = false;
   entry.at = Date.now();

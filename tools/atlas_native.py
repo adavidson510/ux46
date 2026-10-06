@@ -1546,7 +1546,20 @@ class NativeSessions:
         return self.server.request("turn/interrupt", {"threadId": thread_id})
 
     def answer_request(self, key: str, kind: str, decision: str, answers: dict | None = None) -> dict:
-        return self.server.answer_request(key, response_for_decision(kind, decision, answers))
+        """Answer with the shape the runtime asked for, not the one the page claims.
+
+        The kind decides the response body (a permissions grant versus a
+        command decision), so it is read from the pending request itself. A
+        page that names a different kind is out of step and is refused.
+        """
+        pending = next((item for item in self.server.pending_requests() if item.get("key") == key), None)
+        if pending is None:
+            raise NativeError("no such native request", code="request_unknown")
+        actual = str(pending.get("kind") or "")
+        if kind and kind != actual:
+            raise NativeError("that answer does not match the native request it names",
+                              code="request_kind_mismatch", detail={"kind": actual})
+        return self.server.answer_request(key, response_for_decision(actual, decision, answers))
 
 
 def _unsupported(exc: NativeError) -> bool:

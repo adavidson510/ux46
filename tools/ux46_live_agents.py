@@ -11,6 +11,14 @@ from http.client import HTTPConnection
 from pathlib import Path
 import atlas_remote as remote
 
+# The gateway's own page policy (ux46_access_gateway.CONSOLE_CSP), defined
+# here rather than imported: the gateway runs as __main__ and imports this
+# module, so importing it back would load a second copy of the gateway.
+# tests/test_ux46_live_agents.py asserts the two stay identical.
+CONSOLE_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+               "media-src 'self'; connect-src 'self'; frame-src 'self' blob:; form-action 'none'; "
+               "frame-ancestors 'none'; base-uri 'none'")
+
 
 class LiveAgents:
     def __init__(self, config_path):
@@ -71,8 +79,15 @@ class LiveAgents:
                 wanted = boot.get('csrf') if status == 200 else None
                 if not isinstance(wanted, str) or not wanted or not secrets.compare_digest(wanted, handler.headers.get('X-Atlas-CSRF', '')):
                     self._reject(handler, 403, 'bad_csrf', 'Refresh this page to reconnect.'); return True
-            length = int(handler.headers.get('Content-Length') or 0)
+            raw_length = (handler.headers.get('Content-Length') or '0').strip()
+            # Exact, non-negative framing only: a negative length would make
+            # rfile.read() wait for the client to close the socket.
+            if not raw_length.isdigit():
+                handler.close_connection = True
+                self._reject(handler, 400, 'bad_length', 'The request length was not valid.'); return True
+            length = int(raw_length)
             if length > remote.MAX_PROXY_BODY:
+                handler.close_connection = True
                 self._reject(handler, 413, 'too_large', 'That attachment is too large.'); return True
             body = handler.rfile.read(length) if length else None
             if body is not None and len(body) != length:
@@ -116,6 +131,10 @@ class LiveAgents:
         handler.send_header('Content-Length', str(len(body)))
         handler.send_header('Cache-Control','no-store')
         handler.send_header('X-Content-Type-Options','nosniff')
+        # Relayed agent bytes are served on the gateway origin: never frameable,
+        # and under the console's own CSP whatever the remote answered (S19).
+        handler.send_header('X-Frame-Options','DENY')
+        handler.send_header('Content-Security-Policy',CONSOLE_CSP)
         for key,value in headers: handler.send_header(key,value)
         if handler.close_connection:handler.send_header('Connection','close')
         handler.end_headers()

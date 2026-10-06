@@ -68,5 +68,42 @@ class LiveCase(unittest.TestCase):
     def test_arbitrary_route_refused(self):
         self.assertEqual(self.ask(path='/api/agents/cp/api/test-thread')[0],400)
         self.assertFalse(self.adapter.seen)
+    def test_relayed_agent_bytes_cannot_be_framed_or_run(self):
+        # S19: agent answers are served on the gateway origin with the
+        # gateway's own CSP and frame refusal, whatever the remote sent.
+        self.assertEqual(live.CONSOLE_CSP, gate.CONSOLE_CSP)
+        status,headers,_=self.ask(path='/api/agents/cp/api/bootstrap')
+        self.assertEqual(status,200)
+        self.assertEqual(headers.get('X-Frame-Options'),'DENY')
+        self.assertEqual(headers.get('Content-Security-Policy'),gate.CONSOLE_CSP)
+
+class _StubHandler:
+    """Just enough of a request handler to drive LiveAgents.handle directly."""
+    def __init__(self,path,command,headers):
+        import email.message,io
+        self.path=path;self.command=command;self.headers=email.message.Message()
+        for k,v in headers.items():self.headers[k]=v
+        self.rfile=io.BytesIO(b'{"leftover":"bytes"}');self.wfile=io.BytesIO()
+        self.close_connection=False;self.status=None
+    def send_response(self,status):self.status=status
+    def _emit_login(self):pass
+    def send_header(self,*_):pass
+    def end_headers(self):pass
+
+class LengthFraming(unittest.TestCase):
+    def test_negative_or_malformed_content_length_is_refused_before_reading(self):
+        with TemporaryDirectory() as tmp:
+            config=Path(tmp)/'agents.json'
+            config.write_text(json.dumps({'schema_version':1,'agents':[{'id':'cp','label':'CP','runtime':'claude','node':'fixture','transport':'loopback','remote_port':9}]}))
+            agents=live.LiveAgents(config)
+            proxied=[]
+            registry=agents.read();registry.proxy=lambda *a,**k:proxied.append(a)
+            for value in ('-1','-20','1e3',' x'):
+                handler=_StubHandler('/api/agents/cp/api/workspace','GET',{'Content-Length':value})
+                self.assertTrue(agents.handle(handler))
+                self.assertEqual(handler.status,400,value)
+                self.assertTrue(handler.close_connection)
+                self.assertEqual(handler.rfile.tell(),0,value)
+            self.assertEqual(proxied,[])
 
 if __name__=='__main__':unittest.main()

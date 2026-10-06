@@ -13,6 +13,16 @@ obsolete guidance rather than deleting rare useful safeguards or silently raisin
 the limit. The interface distinguishes active and archived records and calls
 outcomes reported outcomes, not measured savings.
 
+Attribution follows the writer. Only the workspace (the human) records a lesson
+as `human-confirmed`; a lesson captured through the agent CLI or a granted agent
+token is `agent-asserted`. When an agent reports a human direction
+(`origin: human-direction` or `evidence: explicit-direction`), the claim is kept
+under `asserted` but the lesson is stored as an agent observation and recall warns
+that the human has not confirmed it. Saving the lesson from the workspace confirms
+it; the human may revise or retire any lesson, including one an agent captured.
+All local agents still share one principal, so one agent can revise another's
+lesson; per-room agent identities are a separate design change.
+
 Signals offers one suggestions view with previous categories retained on the
 original cards. Previous automatic findings are folded into Earlier notes; daily
 reports remain in Roundup archive. Reading a finding never assigns a room work.

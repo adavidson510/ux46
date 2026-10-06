@@ -1230,6 +1230,30 @@ class QueueTest(HermesAdapterTest):
         self.assertEqual(cancelled["cancelled"]["status"], "cancelled")
         self.assertEqual(self.harness.calls("prompt.submit"), [])
 
+    def test_a_cancel_after_the_queue_read_is_never_sent(self) -> None:
+        # S04: the owner cancels after the loop read its snapshot but before
+        # it claimed the row; the claim must lose and nothing is submitted.
+        room = self.room_for(S_LINKED)
+        journal = self.harness.service.journal
+        real_ready = journal.queue_ready
+
+        def ready():
+            snapshot = real_ready()
+            for item in snapshot:
+                catalog = self.harness.service.catalog
+                live = catalog.live_session_for(catalog.room(item["room"]).session_id)
+                if item["client_id"] == "queuedrace01" and item["status"] == "pending" and live:
+                    journal.queue_cancel(item["client_id"], item["version"])
+            return snapshot
+
+        journal.queue_ready = ready
+        self.harness.post(f"/api/room/{room}/pending", {
+            "client_id": "queuedrace01", "body": "never mind"})
+        self.harness.post(f"/api/room/{room}/continue")
+        time.sleep(4.5)
+        self.assertEqual(self.harness.calls("prompt.submit"), [])
+        self.assertEqual(journal.queue_get("queuedrace01")["status"], "cancelled")
+
     def test_a_stale_version_cannot_clobber_a_queued_message(self) -> None:
         room = self.room_for(S_LINKED)
         self.harness.post(f"/api/room/{room}/pending",
@@ -1261,6 +1285,18 @@ class DraftTest(HermesAdapterTest):
         other = self.room_for(S_OPEN)
         _, payload = self.harness.get(f"/api/room/{other}/draft")
         self.assertEqual(payload["body"], "")
+
+
+def assert_stalled_client_is_dropped(test, server, port) -> None:
+    """A client that stops mid-request loses its handler thread on timeout."""
+    import socket as _socket
+    test.assertGreater(server.RequestHandlerClass.timeout, 30)
+    server.RequestHandlerClass.timeout = 0.5
+    with _socket.create_connection(("127.0.0.1", port), timeout=10) as stalled:
+        stalled.sendall(b"GET /api/workspace HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        started = time.time()
+        test.assertEqual(stalled.recv(1024), b"")  # closed by the server
+        test.assertLess(time.time() - started, 8)
 
 
 class AttachmentTest(HermesAdapterTest):
@@ -1300,6 +1336,21 @@ class AttachmentTest(HermesAdapterTest):
                       self.harness.calls("prompt.submit")[0]["params"]["text"])
         self.harness.finish_turn()
 
+    def test_the_runtime_gets_the_declared_type_not_the_served_one(self) -> None:
+        # S06: serving narrows text/x-python to octet-stream; the runtime's
+        # attach hook must still be told what the file is.
+        self.harness.post(f"/api/room/{self.linked_room}/continue")
+        _, payload = self.harness.upload(
+            self.linked_room, "tool.py", b"print('hi')\n", "text/x-python")
+        status, _sent = self.harness.post(f"/api/room/{self.linked_room}/submit", {
+            "client_id": "withmime0001", "body": "read this",
+            "attachments": [{"file_id": payload["file"]["id"]}]})
+        self.assertEqual(status, 200)
+        attach = self.harness.calls("file.attach")
+        self.assertTrue(attach[0]["params"]["data_url"].startswith(
+            "data:text/x-python;base64,"))
+        self.harness.finish_turn()
+
     def test_an_image_uses_the_byte_upload_hook(self) -> None:
         self.harness.post(f"/api/room/{self.linked_room}/continue")
         _, payload = self.harness.upload(
@@ -1332,6 +1383,51 @@ class AttachmentTest(HermesAdapterTest):
         self.assertEqual(status, 404)
         self.assertEqual(refused["error"], "file_unknown")
 
+    def test_only_a_previewable_file_is_served_inline(self) -> None:
+        # An uploaded HTML or script file has no preview: /preview refuses it
+        # instead of rendering browser-supplied markup inline.
+        for name, data, mime in (("x.html", b"<script>alert(1)</script>", "text/html"),
+                                 ("x.js", b"alert(1)", "application/javascript")):
+            _, payload = self.harness.upload(self.linked_room, name, data, mime)
+            record = payload["file"]
+            self.assertIsNone(record["preview_url"])
+            status, raw, _headers = self._raw_get(f"/api/atlas/files/{record['id']}/preview")
+            self.assertEqual(status, 404, name)
+            self.assertNotIn(b"alert", raw)
+            status, _raw, headers = self._raw_get(record["download_url"])
+            self.assertEqual(status, 200)
+            self.assertTrue(headers["Content-Disposition"].startswith("attachment;"))
+            self.assertIn("sandbox", headers["Content-Security-Policy"])
+            self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+
+    def test_an_image_preview_is_inline_quoted_and_inert(self) -> None:
+        _, payload = self.harness.upload(
+            self.linked_room, 'sh"oté.png', self.PNG, "image/png")
+        record = payload["file"]
+        self.assertIsNotNone(record["preview_url"])
+        status, raw, headers = self._raw_get(record["preview_url"])
+        self.assertEqual(status, 200)
+        self.assertEqual(raw, self.PNG)
+        disposition = headers["Content-Disposition"]
+        self.assertTrue(disposition.startswith("inline; filename=\""))
+        self.assertIn("filename*=UTF-8''", disposition)
+        self.assertEqual(disposition.count('"'), 2)
+        self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+
+    def test_a_file_is_scoped_to_the_room_named_on_download(self) -> None:
+        _, payload = self.harness.upload(
+            self.linked_room, "shot.png", self.PNG, "image/png")
+        file_id = payload["file"]["id"]
+        other = self.room_for(S_OPEN)
+        for kind in ("preview", "download"):
+            status, _raw, _headers = self._raw_get(
+                f"/api/atlas/files/{file_id}/{kind}?room={other}")
+            self.assertEqual(status, 404, kind)
+            status, _raw, _headers = self._raw_get(
+                f"/api/atlas/files/{file_id}/{kind}?room={self.linked_room}")
+            self.assertEqual(status, 200, kind)
+
     def _raw_get(self, path: str) -> tuple[int, bytes, dict]:
         conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
         conn.request("GET", path)
@@ -1343,6 +1439,20 @@ class AttachmentTest(HermesAdapterTest):
 
 
 class RequestBoundaryTest(HermesAdapterTest):
+    def test_a_request_without_a_host_is_refused(self) -> None:
+        conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
+        conn.putrequest("GET", "/api/bootstrap", skip_host=True)
+        conn.endheaders()
+        response = conn.getresponse()
+        payload = json.loads(response.read())
+        conn.close()
+        self.assertEqual(response.status, 403)
+        self.assertEqual(payload["error"], "bad_host")
+        self.assertNotIn("csrf", payload)
+
+    def test_a_stalled_client_is_dropped(self) -> None:
+        assert_stalled_client_is_dropped(self, self.harness.server, self.harness.port)
+
     def test_a_mutation_without_the_csrf_token_is_refused(self) -> None:
         conn = HTTPConnection("127.0.0.1", self.harness.port, timeout=20)
         conn.request("POST", f"/api/room/{self.linked_room}/continue", b"{}",
@@ -1420,7 +1530,11 @@ class RefreshTest(HermesAdapterTest):
 class DegradedStateTest(HermesAdapterTest):
     def test_an_unreadable_database_makes_everything_unverified(self) -> None:
         service = self.harness.service
-        service.state.error = "state.db could not be read (simulated)"
+        # Point the reader at a file that is not there: every read fails, on
+        # every thread, for as long as it stays that way.
+        real_path = service.state.path
+        service.state.path = real_path.with_name("missing-state.db")
+        service.state._drop_connection()
         service.catalog.refresh(force=True)
         _, detail = self.harness.get(f"/api/room/{self.linked_room}")
         self.assertEqual(detail["ownership"]["state"], "unknown")
@@ -1435,6 +1549,27 @@ class DegradedStateTest(HermesAdapterTest):
         status, _ = self.harness.post(f"/api/room/{self.linked_room}/continue")
         self.assertEqual(status, 409)
         self.assertEqual(self.harness.calls("session.resume"), [])
+
+    def test_one_failed_read_does_not_blank_history_until_restart(self) -> None:
+        state = self.harness.service.state
+        _, before = self.harness.get(f"/api/room/{self.linked_room}/history")
+        self.assertFalse(before["unavailable"])
+        self.assertTrue(before["items"])
+        # A transient failure on this thread's handle (e.g. a lock).
+        conn = state._connect()
+        state._local.conn = sqlite3.connect(":memory:")  # no `messages` table
+        conn.close()
+        self.assertEqual(state.message_count("anything"), 0)
+        self.assertTrue(state.error)
+        self.assertTrue(state.call_error)
+        # The failed handle is dropped and the next read reconnects; both the
+        # shared status and the per-call outcome clear on success.
+        self.assertGreaterEqual(len(state.catalog_rows(10, True)), 1)
+        self.assertEqual(state.error, "")
+        self.assertEqual(state.call_error, "")
+        _, after = self.harness.get(f"/api/room/{self.linked_room}/history")
+        self.assertFalse(after["unavailable"])
+        self.assertEqual(len(after["items"]), len(before["items"]))
 
 
 if __name__ == "__main__":

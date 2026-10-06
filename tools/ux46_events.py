@@ -4,12 +4,15 @@ Events are hints to read authoritative state, not a durable transcript. A cursor
 only acknowledges the returned page; a lost interval explicitly asks readers
 to reconcile snapshots. Epochs distinguish two processes with equal cursors.
 """
+import math
 import secrets
 import threading
 import time
 
 
 class EventLog:
+    MAX_WAIT = 30.0  # seconds; HTTP handlers time out idle sockets after longer
+
     def __init__(self, limit: int = 500):
         self.limit = max(1, limit)
         self.epoch = secrets.token_hex(16)
@@ -32,6 +35,9 @@ class EventLog:
 
     def since(self, after: int, timeout: float = 25.0, room: str = "",
               epoch: str = "") -> dict:
+        # Every adapter's long-poll lands here: a non-finite or huge wait must
+        # still end, so the wait is bounded whatever the caller parsed.
+        timeout = min(max(timeout, 0.0), self.MAX_WAIT) if math.isfinite(timeout) else 0.0
         deadline = time.monotonic() + timeout
         with self._cond:
             while True:

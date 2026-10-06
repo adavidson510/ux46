@@ -18,6 +18,9 @@ sending account, recipients, body and uncertainties, save your edits, then Send.
 Editing disables Send until the new version is saved. A changed thread blocks
 a stale reply; an uncertain send is never automatically retried. Outgoing
 attachments are not supported in this version; use Gmail for those messages.
+A prepared reply goes to the message's Reply-To. When that differs from its
+From, the draft records `reply_to_differs` with the original sender and a
+`recipient_note`, so the review can show where the reply will actually go.
 
 Gmail labels act as folders. Filing can categorize messages, archive routine
 newsletters/receipts with no attention flags, and optionally mark those read.

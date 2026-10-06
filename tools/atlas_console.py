@@ -23,6 +23,7 @@ from email.parser import BytesParser
 import html
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -289,42 +290,61 @@ class ConsoleService:
             return
 
     def _dispatch_admitted_queue(self, item: journal.QueuedMessage) -> None:
-        """One FIFO attempt. Ownership and approvals keep the item queued."""
+        """One FIFO attempt. Ownership and approvals keep the item queued.
+
+        `item` is a snapshot; the owner may cancel or edit it while workers
+        attach. Every write here is therefore a compare-and-set, and the
+        message only leaves after an atomic PENDING -> DISPATCHING claim at the
+        version we read. What is sent is the claimed row, never the snapshot.
+        A row that is cancelled or being edited is left exactly where it is.
+        """
+        claimed: journal.QueuedMessage | None = None
+
+        def requeue(reason: str) -> None:
+            self.journal.queue_mark(item.client_id, journal.PENDING, reason,
+                                    expect=journal.DISPATCHING if claimed else journal.PENDING)
+
         try:
             room = self.require_room(item.room)
             if not room.controllable or room.thread_id != item.thread_id:
-                self.journal.queue_mark(item.client_id, journal.PENDING, "native target is unavailable")
+                requeue("native target is unavailable")
                 return
             if self.workers.pending_requests(item.thread_id):
-                self.journal.queue_mark(item.client_id, journal.PENDING, "waiting for a native approval")
+                requeue("waiting for a native approval")
                 return
             if item.thread_id not in self.workers.attached():
                 remembered = next((saved for saved in self.journal.remembered_owned()
                                    if saved["thread_id"] == item.thread_id and saved["room"] == item.room), None)
                 if not remembered:
-                    self.journal.queue_mark(item.client_id, journal.PENDING,
-                                            "Continue here before this message can dispatch")
+                    requeue("Continue here before this message can dispatch")
                     return
                 # Startup recovery: a remembered conversation gets its own
                 # process back, and only that conversation.
                 self.workers.attach(item.thread_id, item.room)
-            self.journal.queue_mark(item.client_id, journal.DISPATCHING)
-            attachments = self.native_attachments(room, item.attachments)
-            result = self.writer_for(item.thread_id).send_input(
-                item.thread_id, item.body, item.client_id, attachments)
+            claimed = self.journal.queue_mark(item.client_id, journal.DISPATCHING,
+                                              expect=journal.PENDING, version=item.version)
+            if claimed is None:
+                return  # cancelled, edited or claimed since it was read: send nothing
+            attachments = self.native_attachments(room, claimed.attachments)
+            result = self.writer_for(claimed.thread_id).send_input(
+                claimed.thread_id, claimed.body, claimed.client_id, attachments)
         except native.UncertainDelivery as exc:
             self.journal.settle(item.client_id, journal.UNCERTAIN, detail=str(exc))
-            self.journal.queue_mark(item.client_id, journal.UNCERTAIN, "delivery is unknown; UX46 will not replay it")
+            self.journal.queue_mark(item.client_id, journal.UNCERTAIN, "delivery is unknown; UX46 will not replay it",
+                                    expect=journal.DISPATCHING)
         except native.NativeError as exc:
             if exc.code in {"held_elsewhere", "ownership_unavailable", "not_owned", "connection_busy"}:
-                self.journal.queue_mark(item.client_id, journal.PENDING, str(exc))
+                requeue(str(exc))
                 return
-            self.journal.settle(item.client_id, journal.FAILED, detail=str(exc))
-            self.journal.queue_mark(item.client_id, journal.FAILED, str(exc))
+            # Before the claim the owner may have cancelled or reopened it;
+            # only a row this attempt still holds is failed.
+            if self.journal.queue_mark(item.client_id, journal.FAILED, str(exc),
+                                       expect=journal.DISPATCHING if claimed else journal.PENDING):
+                self.journal.settle(item.client_id, journal.FAILED, detail=str(exc))
         else:
             self.journal.settle(item.client_id, journal.ACCEPTED,
                                 native_turn_id=result.get("turn_id", ""), mode=result.get("mode", ""))
-            self.journal.queue_mark(item.client_id, journal.ACCEPTED)
+            self.journal.queue_mark(item.client_id, journal.ACCEPTED, expect=journal.DISPATCHING)
             self.events.publish({"type": "queued_message", "room": item.room,
                                  "client_id": item.client_id, "state": journal.ACCEPTED})
 
@@ -1223,6 +1243,9 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     server_version = "AtlasConsole/1.0"
     sys_version = ""
     protocol_version = "HTTP/1.1"
+    # Idle or trickling sockets are dropped instead of pinning a thread
+    # forever. Longer than the longest legitimate wait (the 30 s events poll).
+    timeout = 60
     service: ConsoleService  # set on the server instance
 
     # -- plumbing ----------------------------------------------------------
@@ -1274,14 +1297,48 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         self._json(status, payload)
 
     # -- request gate ------------------------------------------------------
-    def _gate(self) -> AuthDecision:
+    def _gate(self, method: str = "GET") -> AuthDecision:
         service = self.service
         host = self.headers.get("Host", "")
         client_ip = self.client_address[0] if self.client_address else ""
         decision = service.auth.check(host, self.headers, client_ip)
         if not decision.ok:
             raise ApiError(HTTPStatus.FORBIDDEN, "denied", decision.reason or "denied")
+        # Host alone does not stop another site: a page elsewhere can still
+        # make the browser GET http://127.0.0.1:<port>/... with our Host, and
+        # some GET routes have effects. Browsers label such requests, so any
+        # verb from another site (or a sibling subdomain) is refused here.
+        # Absent (curl, older browsers), "none" (a bookmark or typed URL) and
+        # "same-origin" pass; Origin, when sent, must be exactly ours.
+        fetch_site = (self.headers.get("Sec-Fetch-Site") or "").strip().casefold()
+        if fetch_site in ("cross-site", "same-site") and not self._top_level_page_navigation(method):
+            raise ApiError(HTTPStatus.FORBIDDEN, "cross_site",
+                           "this console only answers its own pages")
+        origin = self.headers.get("Origin")
+        if origin is not None and origin.strip().rstrip("/").casefold() != service.auth.origin_for(host).casefold():
+            raise ApiError(HTTPStatus.FORBIDDEN, "bad_origin",
+                           "a request must come from this console's own page")
         return decision
+
+    def _top_level_page_navigation(self, method: str) -> bool:
+        """Is this a person following a link to a console page (S12)?
+
+        A ?room= deep link clicked in mail, chat or another tailnet host
+        arrives labelled cross-site; refusing it broke ordinary links. Only a
+        top-level document navigation to a non-API page is let through:
+        GET/HEAD, outside /api/, Sec-Fetch-Mode navigate and Sec-Fetch-Dest
+        document. Every /api/ route and every mutation stays refused, and
+        X-Frame-Options/CSP frame-ancestors already stop the page being framed.
+        """
+
+        if method not in ("GET", "HEAD"):
+            return False
+        path = urlparse(self.path).path
+        if path == "/api" or path.startswith("/api/"):
+            return False
+        mode = (self.headers.get("Sec-Fetch-Mode") or "").strip().casefold()
+        dest = (self.headers.get("Sec-Fetch-Dest") or "").strip().casefold()
+        return mode == "navigate" and dest == "document"
 
     def _check_mutation(self, decision: AuthDecision) -> None:
         service = self.service
@@ -1333,7 +1390,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                            "that submission is too large for the console")
         if not length:
             return
-        body = self.rfile.read(length)
+        try:
+            body = self.rfile.read(length)
+        except TimeoutError:
+            self.close_connection = True
+            raise ApiError(HTTPStatus.REQUEST_TIMEOUT, "slow_body", "the request body stalled")
         if len(body) != length:
             self.close_connection = True
             raise ApiError(HTTPStatus.BAD_REQUEST, "short_body",
@@ -1397,8 +1458,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
 
     def _handle(self, method: str) -> None:
         try:
+            # Who is asking is settled before a single body byte is read: a
+            # foreign Host, cross-site page or wrong Origin must not get up to
+            # an upload's worth of bytes buffered first. A refusal ends the
+            # connection rather than draining a body nobody admitted.
+            try:
+                decision = self._gate(method)
+                if method in ("POST", "PUT", "PATCH", "DELETE"):
+                    self._check_mutation(decision)
+            except ApiError:
+                self.close_connection = True
+                raise
             self._consume_body()      # exact framing for every route
-            decision = self._gate()
             parsed = urlparse(self.path)
             path = parsed.path
             query = parse_qs(parsed.query)
@@ -1406,8 +1477,6 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._serve_static(path)
             if not path.startswith("/api/"):
                 raise ApiError(HTTPStatus.NOT_FOUND, "not_found", "no such page")
-            if method in ("POST", "PUT", "PATCH", "DELETE"):
-                self._check_mutation(decision)
             scoped = AGENT_PREFIX_RE.fullmatch(path)
             target_agent = scoped.group(1) if scoped else "local"
             suffix = scoped.group(2) if scoped else path
@@ -1437,6 +1506,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 "refresh_safety_unknown": HTTPStatus.CONFLICT,
                 "release_unconfirmed": HTTPStatus.CONFLICT,
                 "agent_unsupported": HTTPStatus.BAD_REQUEST,
+                "request_kind_mismatch": HTTPStatus.BAD_REQUEST,
                 "read_only_runtime": HTTPStatus.CONFLICT,
                 "runtime_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
                 "uncertain": HTTPStatus.ACCEPTED,
@@ -1756,7 +1826,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/events":
             after = int(get("after", "0") or 0)
             room = get("room")
-            timeout = min(float(get("timeout", "25") or 25), 30.0)
+            try:
+                timeout = float(get("timeout", "25") or 25)
+            except ValueError:
+                timeout = float("nan")
+            # nan/inf would make the long-poll deadline never arrive (a busy
+            # loop any page can start blind), so only a finite wait is served.
+            if not math.isfinite(timeout):
+                raise ApiError(HTTPStatus.BAD_REQUEST, "bad_timeout", "timeout must be a number of seconds")
+            timeout = min(max(timeout, 0.0), 30.0)
             return self._json(HTTPStatus.OK, service.events.since(after, timeout, room, get("epoch")))
 
         if method == "GET" and path == "/api/approvals":
@@ -2411,7 +2489,10 @@ class ConsoleServer(ThreadingHTTPServer):
         finally:
             # SQLite's transaction context does not close a connection. Each
             # HTTP thread owns a Journal connection; retire it with the thread.
-            self.service.journal.close()
+            # The Tell-only gateway shares this server but owns no journal.
+            owned_journal = getattr(self.service, 'journal', None)
+            if owned_journal is not None:
+                owned_journal.close()
 
     def __init__(self, address, handler_class, service: ConsoleService):
         self.service = service
