@@ -93,3 +93,19 @@ test('narrow Canvas keeps editor controls reachable beside the overview',async({
  await expect(page.locator('.content-status')).toHaveText('Saved · revision 2');
  await page.screenshot({path:test.info().outputPath('canvas-editor-phone.png')});
 });
+
+test('overview has no document section until requested, on desktop and phone',async({context,page})=>{
+ const f=await fixture(context);
+ for(const width of [1280,390]){
+  await page.setViewportSize({width,height:844});await f.main(page);
+  await page.getByRole('button',{name:'Back to overview',exact:true}).click();
+  await page.evaluate(()=>UX46Content.refresh());
+  await expect(page.locator('#contentWorkspace')).toBeHidden();
+  await expect(page.getByRole('button',{name:'Documents',exact:true})).toHaveCount(0);
+  await page.evaluate(()=>UX46Content.open({agent:'assistant',room:'example/article',id:'article-test-01'}));
+  await expect(page.getByLabel('Markdown source',{exact:true})).toBeVisible();
+  await page.evaluate(()=>{state.room='other/room';return UX46Content.poll();});
+  await expect(page.locator('#contentWorkspace')).toBeHidden();
+  await page.screenshot({path:test.info().outputPath('overview-'+width+'.png')});
+ }
+});
