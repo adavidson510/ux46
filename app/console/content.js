@@ -34,10 +34,16 @@
     if(host)return;
     host=n('section',undefined,'content-workspace');host.id='contentWorkspace';host.setAttribute('aria-label','Saved Canvas content');
     const heading=n('div',undefined,'content-toolbar');heading.append(n('h3',pop?'Content':'Documents & charts'));
-    if(!pop)heading.append(btn('New scratchpad',create),btn('Refresh content',()=>list(true)));
+    if(!pop)heading.append(btn('New scratchpad',create),btn('Refresh content',()=>list(true)),btn('Back to overview',()=>{
+      if(!leave())return;host.hidden=true;
+    }));
     menu=n('div',undefined,'content-menu');note=n('p','','content-status');note.setAttribute('role','status');body=n('div',undefined,'content-body');
     host.append(heading,menu,note,body);
-    if(pop){document.body.append(host);}else document.querySelector('#panelBoard').prepend(host);
+    if(pop){document.body.append(host);}else {
+      // Saved documents are an explicit view, not permanent chrome above the overview.
+      host.hidden=true;
+      document.querySelector('#panelBoard').append(host);
+    }
   }
   async function list(force=false){
     mount();const c=scope(),identity=key(c);
@@ -47,7 +53,7 @@
     try{
       const d=await call('view',c);if(key(scope())!==identity)return;listing=identity;lastList=Date.now();menu.replaceChildren();
       for(const item of d.items)menu.append(btn(item.title,()=>open({...c,id:item.id})));
-      if(!d.items.length)menu.append(n('p','Save a draft or chart here. Your room overview stays below.'));
+      if(!d.items.length)menu.append(n('p','No saved documents in this conversation.'));
     }catch(e){notice(e.message);}finally{loading=false;}
   }
   function leave(){
@@ -56,11 +62,11 @@
     return true;
   }
   async function open(c){
-    mount();if(current&&key(current)===key(c)){if(!pop)openPanel('board');return;}if(current&&!leave())return;
+    mount();if(current&&key(current)===key(c)){if(!pop){openPanel('board');host.hidden=false;}return;}if(current&&!leave())return;
     if(!pop){openPanel('board');}
     const seq=++serial;notice('Opening…');
     const d=await call('view',c);if(seq!==serial||(!pop&&(scope().agent!==c.agent||scope().room!==c.room)))return;
-    render(d);if(!pop)host.scrollIntoView({block:'nearest'});
+    render(d);if(!pop){host.hidden=false;host.scrollIntoView({block:'nearest'});}
   }
   function render(d){
     const c={...d,baselineTitle:d.title,dirty:false,saving:false};current=c;body.replaceChildren();
@@ -125,7 +131,7 @@
   async function poll(){
     if(document.hidden)return;
     if(!pop){
-      if(current&&key(scope())!==key({agent:current.agent,room:current.room})){saveLocal();current=null;++serial;body?.replaceChildren();listing='';}
+      if(current&&key(scope())!==key({agent:current.agent,room:current.room})){saveLocal();current=null;++serial;body?.replaceChildren();listing='';host.hidden=true;notice('');menu.replaceChildren();}
       if(state.ui.dock==='board')await list();
     }
     const c=current;if(!c||c.dirty||c.saving)return;

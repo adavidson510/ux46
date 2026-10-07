@@ -1,5 +1,5 @@
 const {test,expect}=require('@playwright/test');
-const fs=require('node:fs');const path=require('node:path');const root=path.resolve(__dirname,'../..');
+const fs=require('node:fs');const path=require('node:path');const root=process.env.UX46_TEST_UI_ROOT||path.resolve(__dirname,'../..');
 const empty={sources:[],routes:[],experiments:[],results:[],metrics:{interested:0,awaiting_review:0,helped:0,failed:0,unknown:0},coverage:'Reported outcomes'};
 async function fixture(page,work=empty,mail={}){
  const writes=[];
@@ -25,6 +25,7 @@ test('room result pairs artifact, changes and check limits; other room clears it
  const data={...empty,results:[{id:'r',version:1,title:'Timer buttons',summary:'Larger touch targets',artifact_version:'v1',reporter:'Fixture',url:'https://example.com/timer',changed:'Only timer buttons',checked:'Narrow layout',unchecked:'Physical phone',evidence:'Fixture receipt',article:''}]};
  await fixture(page,data);await page.addScriptTag({url:'/work.js'});
  await page.evaluate(()=>{document.querySelector('#dock').hidden=false;document.querySelector('#panelBoard').hidden=false;});
+ await page.locator('#btnCurrentResult').click();
  await expect(page.getByRole('link',{name:'Open current result'})).toHaveAttribute('href','https://example.com/timer');
  await page.getByText('What changed and what was checked').click();await expect(page.locator('#roomWork')).toContainText('Physical phone');
  await page.route('**/api/work/view?**',r=>r.fulfill({json:empty}));
@@ -125,8 +126,11 @@ test('returning from Signals keeps Canvas visible with many room ideas, even whe
  await expect(page.locator('#boardBody')).toContainText('What you can use today');
  await expect(page.locator('.room-review')).not.toHaveAttribute('open','');
  await expect(page.getByText('Room idea 0',{exact:true})).toBeHidden();
- const board=await page.locator('#boardBody').boundingBox(),footer=await page.locator('#roomWork').boundingBox();
- expect(board.height).toBeGreaterThan(150);expect(footer.y).toBeGreaterThanOrEqual(board.y+board.height);
+ const board=await page.locator('#boardBody').boundingBox();
+ expect(board.height).toBeGreaterThan(150);
+ await expect(page.locator('#panelBoard #roomWork')).toHaveCount(0);
+ await expect(page.locator('#roomWork')).toBeHidden();
+ await page.locator('#btnCurrentResult').click();
  await page.locator('.room-review>summary').click();
  await expect(page.getByText('Room idea 0',{exact:true})).toBeVisible();
  expect((await page.locator('#boardBody').boundingBox()).height).toBeGreaterThan(150);
@@ -157,6 +161,7 @@ test('resolved suggestions stay in history and discussion preserves an unfinishe
  {id:'new',title:'A chosen suggestion',reason:'Check the narrow layout',needs_review:true,status:'Waiting for room review'}]};
  const writes=await fixture(page,data);await page.addScriptTag({url:'/work.js'});
  await page.evaluate(()=>{__atlas.applyShell();__atlas.openPanel('board');});
+ await page.locator('#btnCurrentResult').click();
  await page.getByText('Suggestions for this room · 1',{exact:true}).click();
  await expect(page.getByText('Already handled',{exact:true})).toBeHidden();
  await expect(page.getByRole('button',{name:'Choose a test',exact:true})).toHaveCount(0);
@@ -165,6 +170,10 @@ test('resolved suggestions stay in history and discussion preserves an unfinishe
  await expect(page.locator('#draft')).toHaveValue('My unfinished question');
  await page.getByText('Reviewed · 1',{exact:true}).click();
  await expect(page.getByText('Already handled',{exact:true})).toBeVisible();
+ await page.evaluate(()=>{const draft=document.getElementById('draft');draft.value='';draft.disabled=false;});
+ await page.getByRole('button',{name:'Discuss',exact:true}).click();
+ await expect(page.locator('#roomWorkDialog')).not.toBeVisible();
+ await expect(page.locator('#draft')).toHaveValue(/Assess these relevant suggestions.*[\s\S]*A chosen suggestion/);
  expect(writes).toEqual([]);
 });
 

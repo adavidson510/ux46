@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.42 · October 7, 2026
+
+- **Canvas keeps its space.** The room overview no longer shares its panel with an empty Documents & charts section, Add result, or Suggestions.
+- **Open extras when you need them.** The existing Result button opens results and suggestions separately. Documents still open from conversation cards, with Back to overview to tuck their controls away. Saved content is retained.
+- **After updating:** refresh open browser pages. This interface change does not require restarting native agent sessions.
+- **Verification:** focused desktop and phone-size browser journeys cover document access, room switching, result review and preserved drafts. Physical phone verification remains pending.
+
 ## v0.2.0-alpha.41 · October 5, 2026
 
 - **A workspace for your setup.** Agent-facing skills use “the human”; adapter defaults and messages use provider names. Examples use invented projects and identities. Legacy project colors, morning-view selection and peer status no longer assume the maintainer's installation.
