@@ -1,7 +1,7 @@
 const {test, expect} = require('@playwright/test');
 const fs = require('node:fs'), path = require('node:path');
 const root = process.env.UX46_TEST_UI_ROOT || path.resolve(__dirname, '../..');
-async function fixture(page, envelope, width = 1440) {
+async function fixture(page, envelope, width = 1440, realNavigation = false) {
   await page.setViewportSize({width, height: 900});
   await page.route('**/*', async route => {
     const url = new URL(route.request().url());
@@ -24,7 +24,7 @@ async function fixture(page, envelope, width = 1440) {
     }
     return route.fulfill({json:envelope});
   });
-  await page.evaluate(async envelope => {
+  await page.evaluate(async ({envelope, realNavigation}) => {
     state.device = 'browser-' + Math.random(); state.agents=[{id:'local',label:'Local'}];
     state.room='project/keep'; state.agent='local'; state.detail={controllable:true,native:{}};
     state.connKind='live'; state.eventRecovery=false; state.roomRefreshing=false;
@@ -33,8 +33,8 @@ async function fixture(page, envelope, width = 1440) {
     state.tabs=JSON.parse(JSON.stringify(envelope.state.liveDesktops[0].layout.tabs));
     shared.applied=layoutRecord(envelope.state); renderTabs();
     document.querySelector('#draft').value='Keep this unsent draft';
-    openSession=async()=>true;
-  }, envelope);
+    if (!realNavigation) openSession=async()=>true;
+  }, {envelope, realNavigation});
 }
 const tab = room => ({agent:'local',room:'project/'+room,title:room,controllable:false});
 const makeEnvelope = () => ({version:1,state:{schema_version:1,aliases:[],desktops:[],liveDesktops:[{id:'default',name:'Desktop 1',layout:{version:1,generation:0,tabs:[tab('keep'),tab('closed')],active:{agent:'local',room:'project/keep'},customizations:{version:1}}}]}});
@@ -144,4 +144,48 @@ test('a failed rename keeps the typed name visible for retry and does not preten
   await expect(page.locator('#tabs .on .tname')).toHaveText('keep');
   fail=false;await page.getByRole('button',{name:'Rename',exact:true}).click();
   await expect(page.locator('#tabMenu')).toBeHidden();await expect(page.locator('#tabs .on .tname')).toHaveText('My room');
+});
+
+for (const width of [1440, 390]) {
+  test(`another window's selection never changes this window or its next draft (${width})`, async ({page}) => {
+    const envelope=makeEnvelope(); await fixture(page,envelope,width,true);
+    await page.route('**/api/room/project/*',route=> {
+      const room='project/'+new URL(route.request().url()).pathname.split('/').pop();
+      return route.fulfill({json:{id:room,title:room,controllable:false,draft:{body:'',version:0},approvals:[]}});
+    });
+    await page.evaluate(()=>{document.querySelector('#draft').value=''; state.draftDirty=false;});
+    // A poll arrives before the person has started typing (no focus protection).
+    envelope.state.liveDesktops[0].layout.active={agent:'local',room:'project/closed'};envelope.version++;
+    await page.evaluate(()=>refreshSharedLayout());
+    await expect.poll(()=>page.evaluate(()=>state.room)).toBe('project/keep');
+    // A remote choice while focused must not be queued to land on blur either.
+    await page.locator('#draft').focus();
+    envelope.state.liveDesktops[0].layout.active={agent:'local',room:'project/keep'};envelope.version++;
+    await page.evaluate(()=>refreshSharedLayout());
+    envelope.state.liveDesktops[0].layout.active={agent:'local',room:'project/closed'};envelope.version++;
+    await page.evaluate(()=>refreshSharedLayout());
+    await page.locator('#draft').blur();
+    await page.evaluate(()=>followDeferredSession());
+    expect(await page.evaluate(()=>state.room)).toBe('project/keep');
+    await page.locator('#draft').fill('Words for the room I chose');
+    await page.evaluate(()=>refreshSharedLayout());
+    expect(await page.evaluate(()=>state.room)).toBe('project/keep');
+    await expect(page.locator('#draft')).toHaveValue('Words for the room I chose');
+    expect(await page.evaluate(()=>shared.deferred)).toBeNull();
+  });
+}
+
+test('a deferred remote close cannot override a later explicit conversation choice',async({page})=>{
+  const envelope=makeEnvelope(); await fixture(page,envelope,1440,true);
+  await page.route('**/api/room/project/*',route=> {
+    const room='project/'+new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({json:{id:room,title:room,controllable:false,draft:{body:'',version:0},approvals:[]}});
+  });
+  envelope.state.liveDesktops[0].layout.tabs=[tab('closed'),tab('new')];
+  envelope.state.liveDesktops[0].layout.active={agent:'local',room:'project/closed'};envelope.version++;
+  await page.evaluate(()=>refreshSharedLayout());
+  expect(await page.evaluate(()=>state.room)).toBe('project/keep'); // draft retained
+  await page.evaluate(async()=>{document.querySelector('#draft').value='';await openSession('local','project/new');await followDeferredSession();});
+  expect(await page.evaluate(()=>state.room)).toBe('project/new');
+  expect(await page.evaluate(()=>shared.deferred)).toBeNull();
 });

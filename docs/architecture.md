@@ -156,3 +156,12 @@ history, ordinary version-checked drafts, input and server queues use the same
 existing endpoints. The main workspace remains available on every device.
 The browser controls whether the requested popup appears as a separate window;
 place that window on an OS virtual desktop using the operating system.
+
+### Shared tabs, independent selections
+
+A shared desktop synchronizes tab membership and order across windows and devices.
+Each window keeps the conversation the person chose. The saved active conversation
+is a hint for startup or an explicit desktop join, not a live navigation command.
+If another device closes the viewed tab, its draft remains until a safe fallback
+is possible; a later explicit choice cancels that fallback. Delayed connection and
+draft-save responses cannot override a newer room selection.
