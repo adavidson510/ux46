@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.43 · October 8, 2026
+
+- **Stay in the conversation you chose.** Shared desktops still synchronize open tabs and their order, but selecting a conversation in another window or device no longer switches yours, including after you finish typing.
+- **The latest click wins.** Slow agent connections and draft saves cannot reopen an earlier selection over your newer conversation. Drafts stay with their conversation.
+- **After updating:** refresh each open UX46 page. Native agent sessions do not need restarting.
+- **Verification:** browser fixtures cover desktop and phone layouts, delayed connections, preserved drafts, shared tab closures and satellites. Physical phone verification remains pending.
+
 ## v0.2.0-alpha.42 · October 7, 2026
 
 - **Canvas keeps its space.** The room overview no longer shares its panel with an empty Documents & charts section, Add result, or Suggestions.

@@ -832,3 +832,39 @@ for (const format of ['native ID', 'room descriptor']) {
     expect(posts.some(p => p.endsWith('/submit'))).toBe(false);
   });
 }
+
+
+test('a slow agent bootstrap cannot override a newer room clicked on that agent',async({page})=>{
+  await fixture(page);
+  await page.evaluate(()=>{state.agents=[{id:'local'},{id:'other'}];document.querySelector('#draft').value='';state.draftDirty=false;});
+  let release, requested;
+  const held=new Promise(resolve=>release=resolve), started=new Promise(resolve=>requested=resolve);
+  await page.route('**/api/agents/other/api/bootstrap',async route=>{requested();await held;await route.fulfill({json:{seq:0,voice:{}}});});
+  await page.route('**/api/agents/other/api/room/fixture/*',route=>{
+    const room='fixture/'+new URL(route.request().url()).pathname.split('/').pop();
+    return route.fulfill({json:detail(room,{controllable:false})});
+  });
+  await page.evaluate(()=>{window.oldOpen=openSession('other','fixture/old');});
+  await started;
+  await page.evaluate(()=>openSession('other','fixture/chosen'));
+  await page.evaluate(()=>{document.querySelector('#draft').value='For the conversation I chose';state.draftDirty=true;});
+  release();await page.evaluate(()=>window.oldOpen);
+  expect(await page.evaluate(()=>({agent:agentId(),room:state.room}))).toEqual({agent:'other',room:'fixture/chosen'});
+  await expect(page.locator('#draft')).toHaveValue('For the conversation I chose');
+});
+
+test('an agent switch waiting for a draft save cannot override a newer click',async({page})=>{
+  await fixture(page);
+  await page.route('**/api/room/fixture/chosen',route=>route.fulfill({json:detail('fixture/chosen',{controllable:false})}));
+  await page.evaluate(()=>{
+    state.agents=[{id:'local'},{id:'other'}];
+    let calls=0;
+    flushDraft=()=>++calls===1?new Promise(resolve=>window.releaseDraft=resolve):Promise.resolve();
+    window.oldOpen=openSession('other','fixture/old');
+  });
+  await page.evaluate(()=>openSession('local','fixture/chosen'));
+  await page.evaluate(()=>{document.querySelector('#draft').value='Newer choice';state.draftDirty=true;});
+  await page.evaluate(async()=>{window.releaseDraft();await window.oldOpen;});
+  expect(await page.evaluate(()=>({agent:agentId(),room:state.room}))).toEqual({agent:'local',room:'fixture/chosen'});
+  await expect(page.locator('#draft')).toHaveValue('Newer choice');
+});

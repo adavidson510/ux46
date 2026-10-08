@@ -1033,9 +1033,9 @@ async function retryDesktopChange() {
    back, so a tab another device added between the read and the write
    survives, and a tab it closed is not resurrected.
 
-   Nothing here interrupts. A remote change to which conversation is open
-   waits while there is a draft in the composer, a message going out, or a
-   dialog on screen, and lands the next time this page is safely in front.
+   Selection belongs to this window. The shared active room is only a startup
+   hint; another window cannot move this one. A remotely closed tab leaves the
+   strip, but its view and draft stay until it is safe to open a remaining tab.
 
    And a device can leave. "Only this device" forks the arrangement here and
    stops both following and publishing; unchecking it rejoins whatever the
@@ -1059,7 +1059,7 @@ const shared = {
   reading: false,
   poll: 0,
   applying: false,    // a change coming *from* the store; never published back
-  deferred: null,     // a remote open-conversation change, held until it is safe
+  deferred: null,     // fallback after a remote tab close, held until it is safe
   lost: 0,            // tabs this device set aside when it joined the layout
   generation: 0,      // a late room read may never win after another desktop was joined
   selectedDesktopId: "", // this browser window's joined live desktop
@@ -1247,7 +1247,7 @@ async function applySharedLayout(record, opts) {
         + "open are not part of it; nothing was closed or released.");
   }
   if (!record.tabs.length && safeToFollow()) showEmptyDesktop();
-  else if (!first) void followSharedActive(record, previous);
+  else if (!first) void followSharedActive(record);
 }
 
 /* Preferences, not pixels. A phone follows the theme and keeps its own
@@ -1267,11 +1267,8 @@ function applySharedCustomizations(custom, previous) {
   }
 }
 
-/* Which conversation is open travels too, but never over somebody's hands.
-   What is protected is what is on screen and in flight: text in the composer,
-   a message going out, a queued message being rewritten. A draft that is
-   merely unsaved is not a reason to stay, because leaving a room flushes it
-   before it goes anywhere. */
+/* Only a remote removal of the viewed tab needs a fallback. Do not interrupt
+   input, a send, or a dialog while arranging the remaining tabs. */
 function safeToFollow() {
   if (document.hidden) return false;
   if (state.sending || state.pendingEdit) return false;
@@ -1285,21 +1282,23 @@ function safeToFollow() {
   return true;
 }
 
-async function followSharedActive(record, previous) {
-  const want = record.active;
-  if (!want) return;
-  const was = previous && previous.active
-    ? tabKey(previous.active.agent, previous.active.room) : "";
-  if (tabKey(want.agent, want.room) === was && state.tabs.some(isActiveTab)) return;
-  if (want.agent === agentId() && want.room === state.room) return;
-  if (!configuredIds().has(want.agent)) return;
-  shared.deferred = want;
+async function followSharedActive(record) {
+  // Shared membership and order are not permission to navigate this window.
+  // The last selected room remains useful when joining or opening a desktop.
+  if (state.tabs.some(isActiveTab)) { shared.deferred = null; return; }
+  const want = record.tabs.find(tab => tab.agent === record.active?.agent && tab.room === record.active?.room)
+    || record.tabs[0];
+  if (!want || !configuredIds().has(want.agent)) { shared.deferred = null; return; }
+  shared.deferred = {agent: want.agent, room: want.room};
   await followDeferredSession();
 }
 
 async function followDeferredSession() {
+  // A later local choice cancels a fallback that was waiting behind a draft.
+  if (state.tabs.some(isActiveTab)) { shared.deferred = null; return; }
   const want = shared.deferred;
   if (!want || deviceOnlyLayout()) return;
+  if (!findTab(want.agent, want.room)) { shared.deferred = null; return; }
   if (want.agent === agentId() && want.room === state.room) { shared.deferred = null; return; }
   if (!safeToFollow()) return;
   shared.deferred = null;
@@ -1344,6 +1343,7 @@ function publishActive() {
   if (!shared.applied || shared.applied.tooNew) return;
   const tab = activeRef();
   if (!tab) return;
+  // Publish a startup hint only; existing windows retain their own selection.
   const held = shared.applied.active;
   if (held && held.agent === tab.agent && held.room === tab.room) return;
   queueLayoutOp({kind: "active", agent: tab.agent, room: tab.room});
@@ -2498,7 +2498,7 @@ function renderDesktopDialog() {
     lede.textContent = state.desk.available === false
       ? "Saved desktops live with your workspace. This console has no store for them "
         + "yet, so names and layouts are kept on this device only."
-      : "Desktops are shared workspaces. Keep your tabs, order and open conversation in sync. Use the same desktop everywhere, or different ones on different devices.";
+      : "Desktops are shared workspaces. Keep your tabs and their order in sync. Each window stays on the conversation you choose. Use the same desktop everywhere, or different ones on different devices.";
   }
   const note = $("#deskNote");
   if (note) {
@@ -4796,7 +4796,7 @@ async function selectRoom(roomId, opts) {
   if (previous && previous !== roomId) {
     state.positions[previous] = $("#stream").scrollTop;
     await flushDraft();
-    if (intent !== roomSelectionIntent) return false;
+    if (intent !== roomSelectionIntent || gen !== state.agentGen || agent !== agentId()) return false;
     rememberRoomView();
   }
   if (previous !== roomId) clearSpeech();
@@ -9822,8 +9822,9 @@ async function switchAgent(id, wantRoom, opts) {
   // History can be visible while its pending-message request is still loading.
   // Save the location before invalidating that request on an agent switch.
   if (state.room && !state.roomGone) rememberRoom(state.room);
-  roomSelectionIntent += 1;
+  const intent = ++roomSelectionIntent;
   await flushDraft();          // the agent you are leaving keeps your text
+  if (intent !== roomSelectionIntent) return false;
   state.agentGen += 1;
   state.roomSeq += 1;          // every reply still in flight is now stale
   state.agent = id === DEFAULT_AGENT ? "" : id;
@@ -9848,13 +9849,14 @@ async function switchAgent(id, wantRoom, opts) {
    no fallback: another agent's rooms are never shown under this agent's name. */
 async function enterAgent(bootstrap, wantRoom, opts) {
   const gen = state.agentGen;
+  let selection = roomSelectionIntent;
   state.agentError = "";
   setConn("connecting…", "");
   let payload = bootstrap || null;
   if (!payload) {
     try { payload = await api("/api/bootstrap"); }
     catch (error) {
-      if (gen !== state.agentGen) return;
+      if (gen !== state.agentGen || selection !== roomSelectionIntent) return;
       state.agentError = error.message || "not reachable";
       setConn(agentLabel() + " unavailable", "off");
       $("#stream").replaceChildren(el("p", {class: "empty", text:
@@ -9889,6 +9891,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   // The room is restored through this agent's own API, so a session that sits
   // outside the first catalogue page still comes back. A caller that named one
   // wins; then a deep link, then what this agent had open, then its first tab.
+  if (selection !== roomSelectionIntent) return;
   let wanted = wantRoom || "";
   if (!wanted && !opts?.sharedStartup) {
     try {
@@ -9911,8 +9914,10 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   // is not: nobody asked for it.
   let restored = false;
   if (wanted) {
-    restored = await selectRoom(wanted, opts || {toTail: true, connect: true});
-    if (gen !== state.agentGen) return;
+    const opening = selectRoom(wanted, opts || {toTail: true, connect: true});
+    selection = roomSelectionIntent;
+    restored = await opening;
+    if (gen !== state.agentGen || selection !== roomSelectionIntent) return;
     if (!restored && state.roomGone) {
       flash("The room you had open is no longer in the registry, so UX46 opened another.");
       rememberRoom("");
@@ -9927,7 +9932,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
   if ((!wanted || (!restored && state.roomGone)) && !opts?.sharedStartup) {
     try {
       const workspace = await api("/api/workspace");
-      if (gen !== state.agentGen) return;
+      if (gen !== state.agentGen || selection !== roomSelectionIntent) return;
       const suggested = workspace.projects
         .flatMap((project) => project.pinned.concat(project.suggested));
       const fallback = (suggested.find((room) => room.controllable) || suggested[0] || {}).id;
@@ -9945,7 +9950,7 @@ async function enterAgent(bootstrap, wantRoom, opts) {
     }
   }
   if (gen !== state.agentGen) return;
-  if (opts?.sharedStartup && !wanted) showEmptyDesktop();
+  if (opts?.sharedStartup && !wanted && selection === roomSelectionIntent) showEmptyDesktop();
   if (browseAgent() === agentId()) { invalidateRoomPages(); renderRoomList(); }
   await renderBoardCountOnly();
 }
