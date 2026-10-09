@@ -496,19 +496,23 @@
     let panel=host.querySelector('#emailAssistant');if(!panel){panel=h('section',{id:'emailAssistant',class:'email-brief'});const head=host.querySelector('.ws-header');if(head)head.after(panel);else host.prepend(panel);}
     if(panel.contains(document.activeElement))return;
     const settings=data.settings,b=data.briefs[0];
+    const dateInZone=new Intl.DateTimeFormat('en-CA',{timeZone:settings.timezone,year:'numeric',month:'2-digit',day:'2-digit'});
+    const oldBrief=Boolean(b?.at&&dateInZone.format(new Date(b.at*1000))!==dateInZone.format(new Date()));
     panel.replaceChildren(h('div',{class:'ws-actions'},[h('h2',{text:'Your email brief'}),btn('Prepare now',()=>action({action:'brief'},panel))]));
     panel.append(h('p',{class:'ws-sub',text:settings.enabled?`Ready by ${String(settings.hour).padStart(2,'0')}:${String(settings.minute).padStart(2,'0')} · ${settings.timezone}. Prepares ten minutes early; catches up after this computer wakes.`:'Morning email brief is paused.'}));
     if(settings.enabled&&(!data.scheduler?.at||Date.now()/1000-data.scheduler.at>900))panel.append(h('p',{class:'ws-warning',text:'The background scheduler has not checked in recently. Prepare now works; check the scheduled job before relying on tomorrow’s brief.'}));
     if(!data.configured)panel.append(h('p',{class:'ws-warning',text:'Connect your mail accounts and native synthesis before preparing a brief.'}));
     if(data.job?.state==='running')panel.append(h('p',{role:'status',text:'Preparing email… You can keep working.'}));
-    if(data.job?.state==='failed'||data.job?.state==='unknown')panel.append(h('p',{class:'ws-warning',text:data.job.message}));
-    if(data.daily_attempt?.state==='failed')panel.append(h('p',{class:'ws-warning',text:'Scheduled preparation failed. Your previous brief is below; Prepare now retries explicitly.'}));
+    if((data.job?.state==='failed'||data.job?.state==='unknown')&&(!b||data.job.at>b.at))panel.append(h('p',{class:'ws-warning',text:data.job.message}));
+    if(data.daily_attempt?.state==='failed'&&(!b||data.daily_attempt.at>b.at))panel.append(h('p',{class:'ws-warning',text:data.daily_attempt.message||'Scheduled preparation failed. Your previous brief is below; Prepare now retries explicitly.'}));
     if(b){
-      panel.append(h('p',{class:'ws-sub',text:'Prepared '+new Date(b.at*1000).toLocaleString()}),h('p',{text:b.summary}));
+      const briefBody=oldBrief?h('details',{class:'previous-email-brief'},[h('summary',{text:'Previous brief · '+new Date(b.at*1000).toLocaleDateString()})]):panel;
+      if(oldBrief)panel.append(h('p',{class:'ws-warning',text:'No brief for today. The saved brief below is from an earlier day; “today” and deadlines in it refer to that date.'}),briefBody);
+      briefBody.append(h('p',{class:'ws-sub',text:'Prepared '+new Date(b.at*1000).toLocaleString()}),h('p',{text:b.summary}));
       for(const item of b.items){const row=h('article',{class:'brief-item'},[h('strong',{text:item.subject}),h('p',{text:item.summary}),h('a',{href:item.gmail_url,target:'_blank',rel:'noopener noreferrer',text:'Open original in Gmail'})]);
-        const d=data.drafts.find(d=>d.id===item.draft_id);if(d)row.append(btn(d.state==='sent'?'View sent reply':'Review prepared reply',()=>openDraft(d)));panel.append(row);}
-      panel.append(h('p',{class:'ws-sub',text:b.coverage+(b.coverage_complete?'':' Some accounts have incomplete or stale coverage.')}));
-      if(!b.seen)panel.append(btn('Mark brief read',()=>action({action:'seen',id:b.id},panel)));
+        const d=data.drafts.find(d=>d.id===item.draft_id);if(d)row.append(btn(d.state==='sent'?'View sent reply':'Review prepared reply',()=>openDraft(d)));briefBody.append(row);}
+      briefBody.append(h('p',{class:'ws-sub',text:b.coverage+(b.coverage_complete?'':' Some accounts have incomplete or stale coverage.')}));
+      if(!b.seen)briefBody.append(btn('Mark brief read',()=>action({action:'seen',id:b.id},panel)));
     }else panel.append(h('p',{text:'No email brief has been prepared yet.'}));
     const details=h('details',{},[h('summary',{text:'Email schedule and drafting preferences'})]);
     const hour=input('Ready by',`${String(settings.hour).padStart(2,'0')}:${String(settings.minute).padStart(2,'0')}`);hour.type='time';

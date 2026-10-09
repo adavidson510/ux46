@@ -200,3 +200,24 @@ test('Suggestions merges deliberate categories and folds automatic roundups with
  await expect(page.locator('.tell-tab-count')).toHaveCount(0);await expect(page.locator('#tellCount')).toBeHidden();
  await page.getByText('Earlier notes · 3',{exact:true}).click();await expect(page.locator('.tell-post:visible')).toHaveCount(6);
 });
+
+
+test('old email briefs are collapsed and a fresh brief supersedes failed attempt warnings',async({page})=>{
+ const old=Date.now()/1000-3*86400;
+ const mail={configured:true,settings:{enabled:true,hour:5,minute:0,timezone:'America/Los_Angeles'},preferences:{text:'',revision:0},
+   briefs:[{id:'old',at:old,summary:'An old invoice is due today.',items:[],coverage:'Email only',coverage_complete:true,seen:true}],drafts:[],unread:0,
+   job:{state:'failed',at:old+60,message:'Previous manual failure'},daily_attempt:{state:'failed',at:old+120,message:'Cannot launch the brief writer.'}};
+ await fixture(page,empty,mail);await page.addScriptTag({url:'/workspace.js'});
+ await page.evaluate(()=>__atlas.showView('email'));await page.evaluate(()=>__mailAssistant.refresh());
+ await expect(page.locator('#emailAssistant')).toContainText('No brief for today');
+ await expect(page.locator('#emailAssistant')).toContainText('Cannot launch the brief writer.');
+ await expect(page.getByText('An old invoice is due today.',{exact:true})).toBeHidden();
+ await page.locator('.previous-email-brief summary').click();
+ await expect(page.getByText('An old invoice is due today.',{exact:true})).toBeVisible();
+ mail.briefs=[{...mail.briefs[0],id:'new',at:Date.now()/1000,summary:'Current email brief.'}];
+ await page.evaluate(()=>{document.activeElement.blur();return __mailAssistant.refresh();});
+ await expect(page.locator('#emailAssistant')).toContainText('Current email brief.');
+ await expect(page.locator('#emailAssistant')).not.toContainText('Previous manual failure');
+ await expect(page.locator('#emailAssistant')).not.toContainText('Cannot launch the brief writer.');
+ await expect(page.locator('#emailAssistant')).not.toContainText('No brief for today');
+});

@@ -66,6 +66,13 @@ installation's source path and private workspace path:
 python tools/ux46_mail_assistant.py --directory /private/ux46/workspace --tick
 ```
 
+The scheduler must be able to launch `codex_command` in its own environment.
+An npm Codex launcher also needs Node on that job's PATH; a terminal login can
+work while the background job cannot find Node. Use the installed native Codex
+executable or explicitly configure the job's runtime PATH. Verify `login status`
+and one preparation from the same environment as the scheduled job. Launch errors
+are reported separately from missing Codex login; Gmail access is independent.
+
 Enable the schedule and filing policy in Email. Keep the existing metadata
 checker running; it is separate from this preparation/filing job. The scheduler
 performs at most one scheduled model attempt per local day; Prepare now permits
