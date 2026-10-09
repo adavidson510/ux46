@@ -14,10 +14,18 @@ from email.utils import getaddresses, make_msgid
 from constellation_store import Conflict, encoded, identifier, text
 from ux46_email import EmailStore
 from ux46_mail_provider import MailProvider, addresses
-from ux46_synthesis import synthesize, shape, STRING
+from ux46_synthesis import synthesize, shape, STRING, PreparationError
 
 SCHEMA=shape({'summary':STRING,'items':{'type':'array','items':shape({'source':{'type':'integer'},'summary':STRING,'reply':STRING})}})
 DRAFT_SCHEMA=shape({'body':STRING,'note':STRING})
+
+def preparation_failure(exc):
+    # Native stderr and provider responses can contain private data. Only these
+    # fixed diagnostics are safe for the UI and persistent job records.
+    if isinstance(exc, PreparationError):
+        return {'reason': exc.code, 'message': str(exc)}
+    return {'reason': type(exc).__name__, 'message': 'Could not prepare the email brief. Your previous brief is retained. Choose Prepare now to retry.'}
+
 
 def mailbox_set(value):
     """Bare addresses, case-folded, for comparing who a header points at."""
@@ -126,7 +134,7 @@ class MailAssistant:
                     self.put('mail_assistant','job',{'id':ident,'kind':action,'state':'complete','at':time.time(),'result':result['id']})
                 except Exception as exc:
                     self.put('mail_assistant','job',{'id':ident,'kind':action,'state':'failed','at':time.time(),
-                        'message':'Could not prepare email. Check account access and retry explicitly.','reason':type(exc).__name__})
+                        **preparation_failure(exc)})
                 finally:lock.close()
             threading.Thread(target=run,daemon=True).start()
             return {'id':ident,'state':'running'}
@@ -279,7 +287,7 @@ class MailAssistant:
             self.put('mail_assistant','daily-attempt',{'day':day,'state':'running','at':time.time()})
             try:
                 b=self.prepare_brief();result={'day':day,'state':'complete','id':b['id'],'at':time.time()}
-            except Exception as exc:result={'day':day,'state':'failed','reason':type(exc).__name__,'at':time.time()}
+            except Exception as exc:result={'day':day,'state':'failed','at':time.time(),**preparation_failure(exc)}
             self.put('mail_assistant','daily-attempt',result);return result
         finally:lock.close()
 

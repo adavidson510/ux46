@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.44 · October 8, 2026
+
+- **Useful email preparation errors.** A missing brief-writer executable or runtime is reported as a launch problem rather than a mail-account problem. Scheduled failures retain a safe explanation.
+- **Old briefs are clearly historical.** An earlier day's brief stays collapsed under Previous brief with a date warning. A newer successful brief supersedes old failure warnings.
+- **After updating:** refresh the Email page and update the background preparation service. Check the scheduler's executable/runtime setup; updating the interface alone cannot fix its environment.
+- **Verification:** synthetic missing-runtime, scheduler-error and stale-brief browser checks. Existing Gmail filing and reviewed Send behavior are retained.
+
 ## v0.2.0-alpha.43 · October 8, 2026
 
 - **Stay in the conversation you chose.** Shared desktops still synchronize open tabs and their order, but selecting a conversation in another window or device no longer switches yours, including after you finish typing.

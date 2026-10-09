@@ -10,6 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from ux46_mail_assistant import MailAssistant
 from ux46_mail_filing import MailFiling
 from constellation_store import Conflict
+from ux46_synthesis import PreparationError
 
 class FakeProvider:
     def __init__(self):
@@ -99,6 +100,30 @@ class MailTests(unittest.TestCase):
     def test_brief_is_email_only_and_empty_coverage_is_explicit(self):
         b=self.a.prepare_brief();self.assertEqual(b['items'],[]);self.assertEqual(b['usage']['model_calls'],0)
         self.assertIn('not proof',b['summary']);self.assertEqual(self.provider.sent,[])
+    def test_scheduled_failure_records_safe_cause_without_retrying_or_losing_brief(self):
+        previous=self.a.prepare_brief()
+        self.a.put('mail_assistant','settings',{'enabled':True,'hour':0,'minute':0,'timezone':'UTC','revision':1})
+        calls=[]
+        def fail():
+            calls.append(1)
+            raise PreparationError('writer_unavailable')
+        self.a.prepare_brief=fail
+        result=self.a.tick()
+        self.assertEqual(result['reason'],'writer_unavailable')
+        self.assertIn('background job environment',result['message'])
+        self.assertEqual(self.a.tick(),result)
+        self.assertEqual(calls,[1])
+        self.assertEqual(self.a.status()['briefs'][0]['id'],previous['id'])
+        self.assertEqual(self.provider.sent,[])
+
+    def test_arbitrary_failure_text_cannot_leak_into_stored_diagnostics(self):
+        self.a.put('mail_assistant','settings',{'enabled':True,'hour':0,'minute':0,'timezone':'UTC','revision':1})
+        def fail():raise RuntimeError('private email and credential text')
+        self.a.prepare_brief=fail
+        result=self.a.tick()
+        self.assertNotIn('private email',json.dumps(result))
+        self.assertEqual(result['reason'],'RuntimeError')
+
     def test_full_thread_is_required_for_drafting(self):
         orig=self.provider.thread
         self.provider.thread=lambda ident:{**orig(ident),'complete':False}
