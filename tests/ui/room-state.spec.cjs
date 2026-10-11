@@ -868,3 +868,64 @@ test('an agent switch waiting for a draft save cannot override a newer click',as
   expect(await page.evaluate(()=>({agent:agentId(),room:state.room}))).toEqual({agent:'local',room:'fixture/chosen'});
   await expect(page.locator('#draft')).toHaveValue('Newer choice');
 });
+
+async function notesFixture(page) {
+  await fixture(page);
+  let envelope={version:1,state:{schema_version:1,aliases:[],desktops:[],notes:[{id:'old-note',text:'Buy filters',done:false}]}};
+  await page.route('**/api/desktop-state',async route=>{
+    if(route.request().method()==='PUT') {
+      const body=route.request().postDataJSON();
+      if(body.base_version!==envelope.version)return route.fulfill({status:409,json:{error:'desktop_conflict',detail:envelope}});
+      envelope={version:envelope.version+1,state:body.state};
+    }
+    await route.fulfill({json:envelope});
+  });
+  await page.evaluate(async()=>{await refreshNotes();openPanel('notes');});
+  return ()=>envelope;
+}
+
+test('personal and room notes retain old notes, isolate agents and survive reload',async({page})=>{
+  const read=await notesFixture(page);
+  await expect(page.locator('#notesList')).toContainText('Buy filters');
+  await page.locator('#roomNoteText').fill('Compare the two layouts');
+  await page.getByRole('button',{name:'Add room note',exact:true}).click();
+  await expect(page.locator('#roomNotesList')).toContainText('Compare the two layouts');
+  await seed(page,'fixture/beta');await page.evaluate(()=>renderNotes());
+  await expect(page.locator('#notesList')).toContainText('Buy filters');
+  await expect(page.locator('#roomNotesList')).not.toContainText('Compare the two layouts');
+  await seed(page,'fixture/alpha','other-agent');await page.evaluate(()=>renderNotes());
+  await expect(page.locator('#roomNotesList')).not.toContainText('Compare the two layouts');
+  await page.reload();await seed(page,'fixture/alpha');
+  await page.evaluate(async()=>{await refreshNotes();openPanel('notes');});
+  await expect(page.locator('#roomNotesList')).toContainText('Compare the two layouts');
+  await page.locator('#roomNotesList input').click();
+  await expect(page.locator('#roomNotesCompletedTitle')).toHaveText('Completed · 1');
+  await page.locator('#roomNotesCompletedTitle').click();
+  await expect(page.locator('#roomNotesDoneList')).toContainText('Compare the two layouts');
+  expect(read().state.notes).toEqual([{id:'old-note',text:'Buy filters',done:false}]);
+  expect(read().state.roomNotes[0]).toMatchObject({agent:await page.evaluate(()=>agentId()),room:'fixture/alpha',done:true});
+});
+
+test('delayed room note save keeps its target and other room draft on phone',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  const read=await notesFixture(page);
+  let release,started;const held=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>started=resolve);
+  await page.route('**/api/desktop-state',async route=>{
+    if(route.request().method()==='PUT'){started();await held;}
+    await route.fallback();
+  });
+  await page.locator('#roomNoteText').fill('Alpha note');
+  await page.getByRole('button',{name:'Add room note',exact:true}).click();await ready;
+  await seed(page,'fixture/beta');await page.evaluate(()=>renderNotes());
+  await page.locator('#roomNoteText').fill('Unfinished beta note');
+  release();await expect(page.locator('#notesStatus')).toHaveText('Saved');
+  await expect(page.locator('#roomNoteText')).toHaveValue('Unfinished beta note');
+  await expect(page.locator('#roomNotesList')).not.toContainText('Alpha note');
+  expect(read().state.roomNotes[0]).toMatchObject({room:'fixture/alpha',text:'Alpha note'});
+  await seed(page,'fixture/alpha');await page.evaluate(()=>renderNotes());
+  await expect(page.locator('#roomNoteText')).toHaveValue('');
+  await expect(page.locator('#roomNotesList')).toContainText('Alpha note');
+  await seed(page,'fixture/beta');await page.evaluate(()=>renderNotes());
+  await expect(page.locator('#roomNoteText')).toHaveValue('Unfinished beta note');
+  await page.screenshot({path:'/tmp/ux46-two-notes-phone-v1.png'});
+});
