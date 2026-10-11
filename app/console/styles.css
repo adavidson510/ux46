@@ -1860,3 +1860,6 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .concierge-mark{position:relative;display:inline-flex;color:#b59af9;flex:none}
 .concierge-mark .avatar{width:30px;height:30px;border-radius:10px}
 .concierge-voice-mark{position:absolute;right:-5px;bottom:-3px;width:13px;height:13px;padding:2px;border-radius:5px;background:#141a26;stroke:currentColor;fill:none;stroke-width:1.6}
+
+.notes-section + .notes-section{border-top:1px solid var(--line);margin-top:24px;padding-top:20px;}
+.notes-section h3{font:600 16px/1.4 var(--sans);margin:8px 0;}

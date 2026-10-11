@@ -3022,28 +3022,50 @@ function resetNewConversation() {
   renderNewState();
 }
 
-/* Notes belong to the owner, independent of the selected agent or layout.
-   Reuse the versioned owner store; every write reads latest and preserves all
-   unrelated fields. Checking a box never invokes an agent. */
+/* Personal notes retain the original owner-wide store. Room notes use a
+   separate collection so older clients cannot display them as global notes.
+   A room is agent + room ID, never a label or the selected desktop. */
 let notesSaving = false;
-function renderNotes() {
-  const host = $("#notesList"), doneHost = $("#notesDoneList");
-  if (!host || !doneHost) return;
-  const notes = Array.isArray(state.desk.raw?.notes) ? state.desk.raw.notes : [];
+let notesRoomKey = "";
+const roomNoteDrafts = new Map();
+function renderNoteList(notes, prefix, roomScoped = false) {
+  const host = $("#" + prefix + "List"), doneHost = $("#" + prefix + "DoneList");
   host.replaceChildren(); doneHost.replaceChildren();
   for (const note of [...notes].reverse()) {
     if (!note || typeof note.text !== "string" || !note.id) continue;
     const checkbox = el("input", {type: "checkbox", "aria-label":
       (note.done ? "Reopen: " : "Complete: ") + note.text});
     checkbox.checked = !!note.done; checkbox.disabled = notesSaving;
-    checkbox.addEventListener("change", () => changeNote(note.id, checkbox.checked));
+    checkbox.addEventListener("change", () => changeNote(note.id, checkbox.checked,
+      roomScoped ? {agent: note.agent, room: note.room} : null));
     const row = el("label", {class: "notes-row" + (note.done ? " done" : "")},
       [checkbox, el("span", {text: note.text})]);
     (note.done ? doneHost : host).appendChild(row);
   }
-  if (!host.childElementCount) host.appendChild(el("p", {class: "notes-empty", text: "Nothing waiting. Add a note whenever it comes to you."}));
-  $("#notesCompleted").hidden = !doneHost.childElementCount;
-  $("#notesCompletedTitle").textContent = "Completed · " + doneHost.childElementCount;
+  if (!host.childElementCount) host.appendChild(el("p", {class: "notes-empty",
+    text: roomScoped ? "No notes for this room yet." : "Nothing waiting. Add a note whenever it comes to you."}));
+  $("#" + prefix + "Completed").hidden = !doneHost.childElementCount;
+  $("#" + prefix + "CompletedTitle").textContent = "Completed · " + doneHost.childElementCount;
+}
+function renderNotes() {
+  if (!$("#notesList")) return;
+  const raw = state.desk.raw || {};
+  renderNoteList(Array.isArray(raw.notes) ? raw.notes : [], "notes");
+  const agent = agentId(), room = state.room;
+  const key = room ? JSON.stringify([agent, room]) : "";
+  const input = $("#roomNoteText");
+  if (key !== notesRoomKey) {
+    notesRoomKey = key;
+    input.value = roomNoteDrafts.get(key) || "";
+  }
+  const tab = room && findTab(agent, room);
+  $("#roomNotesTarget").textContent = room
+    ? (tab ? tabLabel(tab) : state.detail?.title || room) + " · Shared across your devices."
+    : "Open a conversation to keep notes with it.";
+  input.disabled = !room;
+  $("#roomNotesForm button").disabled = !room || notesSaving;
+  renderNoteList((Array.isArray(raw.roomNotes) ? raw.roomNotes : [])
+    .filter(note => note && note.agent === agent && note.room === room), "roomNotes", true);
 }
 async function writeNote(mutate, description) {
   if (notesSaving) return false;
@@ -3054,13 +3076,33 @@ async function writeNote(mutate, description) {
   $("#notesStatus").textContent = result.ok ? "Saved" : result.message;
   return result.ok;
 }
-async function changeNote(id, done) {
+async function changeNote(id, done, target = null) {
   await writeNote(raw => {
-    const note = (raw.notes || []).find(n => n.id === id);
+    const list = target ? raw.roomNotes : raw.notes;
+    const note = (list || []).find(n => n.id === id && (!target ||
+      (n.agent === target.agent && n.room === target.room)));
     if (!note) throw new Error("This note no longer exists. Reopen Notes to refresh.");
     note.done = done; note.updated_at = new Date().toISOString();
   }, "That note");
 }
+window.addEventListener("ux46-room", renderNotes);
+$("#roomNoteText").addEventListener("input", event => {
+  if (notesRoomKey) roomNoteDrafts.set(notesRoomKey, event.target.value);
+});
+$("#roomNotesForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const input = $("#roomNoteText"), text = input.value.trim();
+  const agent = agentId(), room = state.room, key = notesRoomKey, snapshot = input.value;
+  if (!text || !room || notesSaving) return;
+  const note = {id: clientId(), agent, room, text, done: false, created_at: new Date().toISOString()};
+  if (await writeNote(raw => {
+    if (!Array.isArray(raw.roomNotes)) raw.roomNotes = [];
+    raw.roomNotes.push(note);
+  }, "New room note")) {
+    if (roomNoteDrafts.get(key) === snapshot) roomNoteDrafts.delete(key);
+    if (notesRoomKey === key && input.value === snapshot) input.value = "";
+  }
+});
 async function refreshNotes() {
   try {
     adoptDesktopState(await api(DESKTOP_PATH, {absolute: true}));

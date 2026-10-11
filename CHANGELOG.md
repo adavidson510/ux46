@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.45 · October 11, 2026
+
+- **Two places for notes.** Personal notes stay visible across rooms. Room notes follow the selected conversation and sync across devices, with separate completed lists.
+- **Existing notes stay personal.** Nothing is moved or deleted. Room notes use the conversation and agent identity; renaming a tab does not change them. Unfinished room-note text stays with its room while switching within an open page.
+- **After updating:** refresh open UX46 pages. No native agent restart is needed.
+- **Verification:** browser journeys cover existing notes, room/agent isolation, saved notes after reload, and switching rooms during a delayed save. Physical phone verification remains pending.
+
 ## v0.2.0-alpha.44 · October 8, 2026
 
 - **Useful email preparation errors.** A missing brief-writer executable or runtime is reported as a launch problem rather than a mail-account problem. Scheduled failures retain a safe explanation.

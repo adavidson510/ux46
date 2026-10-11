@@ -429,17 +429,33 @@
 
       <section class="panel" id="panelNotes" hidden>
 <div class="panel-scroll notes-body">
-  <p class="notes-sub">Little things to come back to. Shared across your devices.</p>
-  <form class="desk-save notes-add" id="notesForm">
-    <label class="sr-only" for="noteText">New note</label>
-    <input id="noteText" maxlength="1000" placeholder="Make a note…" autocomplete="off" required />
-    <button class="iconbtn" type="submit" aria-label="Add note" title="Add note">
-      <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
-    </button>
-  </form>
+  <section class="notes-section" aria-labelledby="personalNotesTitle">
+    <h3 id="personalNotesTitle">Personal notes</h3>
+    <p class="notes-sub">Your jot-down space, across all rooms and devices.</p>
+    <form class="desk-save notes-add" id="notesForm">
+      <label class="sr-only" for="noteText">New personal note</label>
+      <input id="noteText" maxlength="1000" placeholder="Jot something down…" autocomplete="off" required />
+      <button class="iconbtn" type="submit" aria-label="Add personal note" title="Add personal note">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+      </button>
+    </form>
+    <div id="notesList" class="notes-list"></div>
+    <details id="notesCompleted"><summary id="notesCompletedTitle">Completed</summary><div id="notesDoneList" class="notes-list"></div></details>
+  </section>
+  <section class="notes-section" aria-labelledby="roomNotesTitle">
+    <h3 id="roomNotesTitle">Room notes</h3>
+    <p id="roomNotesTarget" class="notes-sub"></p>
+    <form class="desk-save notes-add" id="roomNotesForm">
+      <label class="sr-only" for="roomNoteText">New room note</label>
+      <input id="roomNoteText" maxlength="1000" placeholder="A note for this room…" autocomplete="off" required />
+      <button class="iconbtn" type="submit" aria-label="Add room note" title="Add room note">
+        <svg class="ic" aria-hidden="true" viewBox="0 0 20 20"><use href="#i-plus" /></svg>
+      </button>
+    </form>
+    <div id="roomNotesList" class="notes-list"></div>
+    <details id="roomNotesCompleted"><summary id="roomNotesCompletedTitle">Completed</summary><div id="roomNotesDoneList" class="notes-list"></div></details>
+  </section>
   <p id="notesStatus" class="notes-sub" role="status"></p>
-  <div id="notesList" class="notes-list"></div>
-  <details id="notesCompleted"><summary id="notesCompletedTitle">Completed</summary><div id="notesDoneList" class="notes-list"></div></details>
 
 </div>
       </section>
