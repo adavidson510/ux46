@@ -5,6 +5,14 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.49 · October 12, 2026
+
+- **One microphone for conversation.** In the assistant room, tap the existing microphone to speak, then tap again to finish and send. The assistant holds your speech through pauses and corrections. Cancel sends nothing; microphone failures keep the words heard available.
+- **A chief-of-staff assistant.** New room helpers read dated status and recent history without waking specialists, send concise briefs, and change model/reasoning with native readback. Watched rooms only control background updates.
+- **Quiet until asked.** You can watch zero rooms and still receive replies to your requests. No model call runs for unchanged checks.
+- **After updating:** refresh open pages and configure the dedicated assistant with the documented role and installed helper paths. Existing assistant models and instructions are not silently changed.
+- **Verification:** synthetic browser and native-adapter tests cover Done, cancellation, navigation, microphone failure, clean briefs, partial settings changes and unavailable history. Physical headset/phone testing and response-latency measurements remain open; this does not add full duplex voice or locked-phone microphone support.
+
 ## v0.2.0-alpha.48 · October 12, 2026
 
 - **New models work in existing conversations.** If the picker offers a model but an older Codex connection explicitly rejects it, UX46 refreshes only that conversation and applies your selection once. Busy conversations wait in the command queue; other conversations keep running.

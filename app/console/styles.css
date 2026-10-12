@@ -1864,3 +1864,6 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 
 .notes-section + .notes-section{border-top:1px solid var(--line);margin-top:24px;padding-top:20px;}
 .notes-section h3{font:600 16px/1.4 var(--sans);margin:8px 0;}
+
+.concierge-strip .concierge-heard{flex-basis:100%;max-height:5em;overflow:auto;white-space:pre-wrap;color:var(--muted,#aab2c0)}
+.concierge-strip [hidden]{display:none}

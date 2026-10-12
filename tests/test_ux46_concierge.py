@@ -66,6 +66,11 @@ class ConciergeTest(unittest.TestCase):
   self.s.tick();cfg=self.s.settings();draft='Draft paragraph. '*600
   self.s.handoffs.save({'id':'readback','at':time.time(),'state':'answered','source':cfg['target'],'destination':{'agent':'local','room':'p/unwatched','title':'Writing','thread':'writing'},'request':'Read my draft','reply':draft,'reply_id':'draft','readback':True,'reply_complete':True})
   self.s.tick();self.assertIn(draft,self.c.sent[0]['body']);self.assertEqual(len(self.s.settings()['sources']),1)
+ def test_no_watched_rooms_still_returns_requested_replies(self):
+  self.s.change({'action':'configure','base_revision':1,'target':{'agent':'local','room':'p/desk'},'sources':[]},lambda _:self.c)
+  cfg=self.s.settings();cfg['enabled']=True;self.s.save(cfg)
+  self.s.handoffs.save({'id':'ask','at':time.time(),'state':'answered','source':cfg['target'],'destination':{'agent':'local','room':'p/work','title':'Work','thread':'src'},'request':'Check','reply':'Checked','reply_id':'answer'})
+  self.s.tick();self.assertEqual(len(self.c.sent),1);self.assertIn('Checked',self.c.sent[0]['body'])
  def test_same_native_source_alias_rejected(self):
   self.c.target_thread='src'
   with self.assertRaises(ValueError):self.s.change({'action':'configure','base_revision':1,'target':{'agent':'local','room':'p/desk'},'sources':[{'agent':'local','room':'p/work'}]},lambda _:self.c)

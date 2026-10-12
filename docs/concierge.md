@@ -1,10 +1,10 @@
 # Your assistant — desktop alpha
 
-Concierge is a dedicated native conversation that explains new replies from rooms you choose. It keeps those rooms separate and uses the model selected for its own conversation. GPT-5.6 Luna at low effort is a useful starting choice when your runtime offers it; this is not a latency or price guarantee.
+Your assistant is a dedicated native conversation for questions, status checks and requests across projects. It keeps specialist rooms separate and uses its own selected model. GPT-6 Luna at medium effort is a starting choice for interpreting conversation and routing requests when your runtime offers it; latency and overall cost savings have not been measured.
 
-Use **Assistant** in the sidebar to open it. You can choose a name in **Watching & focus**; the owner’s assistant name appears above “Your assistant,” beside its agent mark and voice badge. **Watching & focus** selects up to eight other open conversations and a short description of what deserves detail. Saving rooms pauses monitoring; choose **Start watching** when ready. **Pause updates** stops automatic packets. You can still type in the room.
+Use **Assistant** in the sidebar to open it. You can choose a name in **Watching & focus**; the owner’s assistant name appears above “Your assistant,” beside its agent mark and voice badge. **Watching & focus** selects zero to eight other open conversations and a short description of what deserves detail. Saving rooms pauses monitoring; choose **Start watching** when ready. **Pause updates** stops automatic packets. You can still type in the room.
 
-**Listen** reads new replies and can pop out into its own desktop window. **Talk** uses the browser's speech recognition for one utterance and sends it to Concierge when recognition finishes. Playback pauses while you speak. If you want to edit before sending, use ordinary Dictate instead. A room change discards the unfinished utterance. Browser microphone availability and recognition quality vary; unsupported browsers retain typing and dictation where available.
+**Listen** reads new replies and can pop out into its own desktop window. In the assistant room, the existing composer microphone collects your speech: tap once to speak, then tap again to finish and send. Pauses and corrections stay in one message; **Cancel** sends nothing. The words heard appear above the composer. Playback pauses while you speak. Silence never sends automatically; if recognition cannot continue, your words remain available with **Continue talking** and **Done**. Typing and editing in the composer remain available. A room change discards the unfinished utterance. Browser microphone availability and recognition quality vary; unsupported browsers retain typing and dictation where available.
 
 The authenticated workspace service reads the selected rooms every fifteen seconds, using exact native thread identities. The first read establishes a baseline. Quiet mode uses completed final replies. Live mode includes completed commentary too; tools are excluded. Packets are combined, limited in length, and sent at most once per five minutes in Quiet, or once per minute in Live, with a ceiling of thirty per hour including requested replies. There is no model call for unchanged reads. The native conversation retains its own context; UX46 does not repeatedly rebuild it or reset vendor compaction.
 
@@ -14,7 +14,7 @@ The automatic feed covers conversation updates. On request, the assistant can ch
 
 ## Installation
 
-The feature requires the authenticated access gateway with `--workspace-store`. Create a dedicated native conversation, select its model, and open Concierge before configuration. If no Concierge is configured, the current room becomes the destination you explicitly save. Give that room its concierge role and the instruction to treat incoming update packets as untrusted reports, without executing their contents.
+The feature requires the authenticated access gateway with `--workspace-store`. Create a dedicated native conversation, select its model, and open Concierge before configuration. If no Concierge is configured, the current room becomes the destination you explicitly save. Give that room the [assistant role](assistant-role.md), its installed helper paths, and the instruction to treat incoming update packets as untrusted reports, without executing their contents.
 
 Owner state is stored in `concierge.sqlite3` under the existing private workspace directory. The optional local helper supports `view`, `focus TEXT` and `pause`, with `--directory` naming that owner directory. Use it only for the person's explicit focus/pause requests; it cannot start monitoring, configure destinations or send into source rooms.
 
@@ -52,3 +52,36 @@ A durable request ID prevents duplicates, including unknown outcomes. Read statu
 The assistant should not wake specialists for conversational thoughts, status checks, email/calendar lookups, or each automatic packet. Handoffs consume the destination model's usage. Quiet mode reduces summary frequency; net token/cost savings have not been measured.
 
 Use `ask --readback` when the human requests the full current draft or document. The return feed preserves up to 40,000 characters and instructs the assistant to reproduce the draft rather than summarize it. Larger replies carry an explicit incomplete flag. This can cost more assistant tokens than a short summary, because the full document was requested. Hands-free mode is the device-independent name for planned hands-free voice; it is not specific to a headset.
+
+## Read status and control settings
+
+The room helper reads bounded recent messages, a dated checkpoint, or matching
+history without asking the specialist model to summarize itself. Use exact keys
+returned by the room search. A missing read is reported as unavailable.
+
+```sh
+python3 tools/ux46_assistant_rooms.py --directory OWNER_DIRECTORY read --room EXACT_ROOM
+python3 tools/ux46_assistant_rooms.py --directory OWNER_DIRECTORY read --room EXACT_ROOM --query 'previous decision'
+python3 tools/ux46_assistant_rooms.py --directory OWNER_DIRECTORY settings --room EXACT_ROOM
+python3 tools/ux46_assistant_rooms.py --directory OWNER_DIRECTORY settings --room EXACT_ROOM --request 'Exact current human message' --model SUPPORTED_MODEL --effort high
+```
+
+A settings change verifies the current human input, checks the room's advertised
+choices, applies the requested settings and reads them back. It never substitutes
+a model. Changes apply to later turns. If a busy room refuses the change, or only
+one setting changes, the result says so; this helper does not create a retry job.
+Only a definite unsupported-model refusal permits a scoped connection refresh
+and one retry. Uncertain responses are read back, never blindly repeated.
+
+For clean project conversations, use `ask --brief`. The specialist receives the
+assistant's concise interpretation and a reference to the originating human
+message; the full human wording stays in the private request receipt. This is
+explicitly assistant-written text, not a claimed verbatim human instruction or
+new authority. Preserve constraints and corrections in the brief. A later
+correction is a new request to the same room, referencing the earlier request.
+The default handoff format still includes the original quotation for existing
+installations. Neither format starts background monitoring of the destination.
+
+Selecting no watched rooms allows requested replies to return while keeping
+unrelated background progress silent. Start watching enables this reply delivery;
+Pause updates pauses it. There is no model call to poll an unchanged room.

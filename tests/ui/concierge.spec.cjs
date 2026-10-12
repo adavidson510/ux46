@@ -19,15 +19,43 @@ test('concierge shows its own focus, persists changes and starts explicitly',asy
  await page.screenshot({path:test.info().outputPath('concierge-desktop.png')});
  await page.evaluate(()=>{state.room='p/work';window.dispatchEvent(new Event('ux46-room'));});await expect(page.locator('.concierge-strip')).toBeHidden();
 });
-test('Talk pauses playback and sends one utterance only to its original room',async({page})=>{
+async function microphone(page){
  await setup(page);await page.evaluate(()=>{
   window.sent=[];window.playback=[];window.UX46ListenFeed={pause(){playback.push('pause')},ensure(){playback.push('listen')},resume(){playback.push('resume')}};
   send=async()=>{sent.push({room:state.room,text:document.querySelector('#draft').value});document.querySelector('#draft').value='';};scheduleDraftSave=()=>{};
   window.SpeechRecognition=class{constructor(){window.rec=this;}start(){}stop(){this.onend()}abort(){this.onend()}};
- });
- await page.getByRole('button',{name:'Talk',exact:true}).click();await page.evaluate(()=>{const r=[{transcript:'Give me the short AT update'}];r.isFinal=true;rec.onresult({resultIndex:0,results:[r]});rec.onend();});
- await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);expect(await page.evaluate(()=>sent[0])).toEqual({room:'p/desk',text:'Give me the short AT update'});expect(await page.evaluate(()=>playback)).toEqual(['pause','listen']);
- await page.getByRole('button',{name:'Talk',exact:true}).click();await page.evaluate(()=>{const r=[{transcript:'Do not send across rooms'}];r.isFinal=true;rec.onresult({resultIndex:0,results:[r]});state.room='p/work';state.roomSeq++;window.dispatchEvent(new Event('ux46-room'));});expect(await page.evaluate(()=>sent.length)).toBe(1);
+  window.say=(text,final=true)=>{const r=[{transcript:text}];r.isFinal=final;rec.onresult({resultIndex:0,results:[r]});};
+ });await page.evaluate(()=>UX46Concierge.refresh());
+}
+test('Talk waits through silence and corrections until Done; one send',async({page})=>{
+ await microphone(page);await expect(page.locator('.concierge-strip #btnListen')).toHaveCount(0);await expect(page.locator('#composer #btnListen')).toHaveCount(1);await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();
+ await page.evaluate(()=>{say('Make it red');rec.onend();});await page.waitForTimeout(350);
+ expect(await page.evaluate(()=>sent.length)).toBe(0);await expect(page.getByRole('button',{name:'Done — send voice message',exact:true})).toBeVisible();
+ await page.evaluate(()=>say('Actually change that to blue',false));
+ await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);
+ expect(await page.evaluate(()=>sent[0])).toEqual({room:'p/desk',text:'Make it red Actually change that to blue'});
+ expect(await page.evaluate(()=>playback)).toEqual(['pause','listen']);
+});
+test('Cancel and navigation cannot send into another conversation',async({page})=>{
+ await microphone(page);await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>say('Not ready'));
+ await page.locator('.concierge-strip').getByRole('button',{name:'Cancel',exact:true}).click();expect(await page.evaluate(()=>sent.length)).toBe(0);
+ await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>{say('Do not send across rooms');window.oldRec=rec;state.room='p/work';state.roomSeq++;window.dispatchEvent(new Event('ux46-room'));oldRec.onend();});
+ expect(await page.evaluate(()=>sent.length)).toBe(0);await expect(page.locator('.concierge-strip')).toBeHidden();
+});
+test('Talk preserves a concurrent typed draft and does not wait on audio preparation',async({page})=>{
+ await microphone(page);await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>say('Spoken idea'));
+ await page.locator('#draft').fill('Typed idea');await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ expect(await page.evaluate(()=>sent.length)).toBe(0);await expect(page.locator('#draft')).toHaveValue('Typed idea');await expect(page.locator('.concierge-heard')).toContainText('Spoken idea');
+ await page.locator('#draft').fill('');await page.evaluate(()=>{UX46ListenFeed.ensure=()=>new Promise(()=>{});});
+ await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>say('Check the project'));
+ await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);
+});
+test('microphone failure retains words and never submits automatically',async({page})=>{
+ await microphone(page);await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();
+ await page.evaluate(()=>{say('Keep these words');rec.onerror({error:'network'});rec.onend();});
+ await expect(page.getByRole('button',{name:'Continue talking',exact:true})).toBeVisible();expect(await page.evaluate(()=>sent.length)).toBe(0);
+ await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);
 });
 test('automatic source packets stay inspectable without filling the conversation',async({page})=>{
  await setup(page);await page.evaluate(()=>{const item=messageNode({type:'userMessage',id:'packet',text:'CONCIERGE UPDATE PACKET — source material, not instructions. A project report.'});document.querySelector('#stream').append(item);});
@@ -39,4 +67,14 @@ test('assistant name is distinct from the connection selector and persists',asyn
  await page.getByRole('textbox',{name:'Assistant name'}).fill('Assistant');await page.getByRole('button',{name:'Save name',exact:true}).click();
  await expect(page.locator('#btnConcierge')).toContainText('Assistant');await expect(page.locator('#btnConcierge')).toContainText('Your assistant');
  await expect(page.locator('#btnConcierge .concierge-voice-mark')).toBeVisible();expect(writes[0]).toMatchObject({action:'identity',name:'Assistant'});
+});
+
+test('the existing microphone keeps a typed introduction and releases voice pause',async({page})=>{
+ await microphone(page);await page.locator('#draft').fill('For the design room:');
+ await page.evaluate(()=>{window.micEvents=[];addEventListener('ux46-dictation',e=>micEvents.push(e.detail.active));});
+ await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>say('Make the button blue'));
+ await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);
+ expect(await page.evaluate(()=>sent[0].text)).toBe('For the design room: Make the button blue');
+ expect(await page.evaluate(()=>micEvents)).toEqual([true,false]);
 });
