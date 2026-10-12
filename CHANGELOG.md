@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.51 · October 12, 2026
+
+- **Listen starts with a short piece.** Live reading no longer waits for the entire reply's audio. It plays short pieces in order and prepares one ahead, using the existing local voice engine.
+- **The assistant translates; specialists reason.** The role explicitly keeps project diagnosis and recommendations with the owning room. The assistant gathers dated facts, conveys intent and relays attributed answers, while retaining its tools and the ability to follow direct instructions.
+- **After updating:** update the speech backend, refresh UX46, and enable Listen again. Install the updated assistant role in existing assistant conversations; a source update does not silently change their native instructions.
+- **Verification:** local speech and authenticated gateway fixtures, plus browser playback, continuation, interruption, replay and satellite checks. A local 1,400-character sample took 52 seconds as a full clip; its first short piece took 8.2 seconds including model load. These are host measurements, not end-to-end phone timing. One-off reading, the 4,000-character limit and background-phone limitations remain unchanged.
+
 ## v0.2.0-alpha.50 · October 12, 2026
 
 - **Ask a room to resume its own goal.** An optional Codex helper takes an explicit direct human request, waits for the current reply to finish, and uses the existing Resume action for that conversation only. Waiting remains distinct from confirmed active status.

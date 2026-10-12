@@ -1572,11 +1572,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             item = agent.console.message_for_speech(speech_match.group(1), item_id)
             text = native._item_text(item)
             try:
-                speech = service.voice.speak(text, str(body.get("voice") or voice.DEFAULT_VOICE),
-                                             start_offset=body.get("start_offset"))
+                wanted = str(body.get("voice") or voice.DEFAULT_VOICE)
+                speech = (service.voice.speak_part(text, wanted, part=body['part'], start_offset=body.get('start_offset'), version=body.get('part_version'))
+                          if 'part' in body else service.voice.speak(text, wanted, start_offset=body.get("start_offset")))
             except voice.VoiceError as exc:
                 raise ApiError(HTTPStatus.BAD_REQUEST, exc.code, str(exc))
-            payload = speech.as_json()
+            payload = speech if isinstance(speech, dict) else speech.as_json()
             payload.update(room=speech_match.group(1), item_id=item_id, type=item.get("type"), agent=agent.id)
             return self._json(HTTPStatus.OK, payload)
         result = service.agents.proxy(
@@ -2207,12 +2208,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             raise ApiError(HTTPStatus.CONFLICT, "nothing_to_read",
                            "that item has no text to read aloud")
         try:
-            speech = service.voice.speak(text, wanted, start_offset=body.get("start_offset"))
+            speech = (service.voice.speak_part(text, wanted, part=body['part'], start_offset=body.get('start_offset'), version=body.get('part_version'))
+                      if 'part' in body else service.voice.speak(text, wanted, start_offset=body.get("start_offset")))
         except voice.VoiceError as exc:
             status = (HTTPStatus.SERVICE_UNAVAILABLE if exc.code == "voice_unavailable"
                       else HTTPStatus.BAD_REQUEST)
             raise ApiError(status, exc.code, str(exc))
-        payload = speech.as_json()
+        payload = speech if isinstance(speech, dict) else speech.as_json()
         payload.update({"room": room.id, "item_id": item_id, "type": item.get("type")})
         return self._json(HTTPStatus.OK, payload)
 

@@ -161,6 +161,27 @@ class SynthesisReceivesCleanTextTests(unittest.TestCase):
         finally:
             voice.SPEECH_VERSION = saved
 
+    def test_parts_start_small_and_preserve_all_words_and_offsets(self):
+        source = ('Read **this sentence**. Then keep all of these words in order. ' * 12)
+        result = self.service.speak_part(source)
+        self.assertLessEqual(len(self.fake.heard[0]), 180)
+        while result['next_part'] is not None:
+            result = self.service.speak_part(source, part=result['next_part'], version=result['part_version'])
+        # Cache reuse may omit repeated synthesis; compare each selected piece
+        # in a fresh cache with unique sentence contents for coverage below.
+        unique = ' '.join('Sentence number %s has its own words to read aloud.' % i for i in range(30))
+        self.fake.heard.clear(); result = self.service.speak_part(unique)
+        while result['next_part'] is not None:
+            result = self.service.speak_part(unique, part=result['next_part'], version=result['part_version'])
+        self.assertEqual(''.join(self.fake.heard), voice.speech_text(unique))
+        self.assertTrue(result['complete'])
+        with self.assertRaises(voice.VoiceError): self.service.speak_part(unique+' changed', part=1, version=result['part_version'])
+        for bad in (-1, True, 64, '0'):
+            with self.assertRaises(voice.VoiceError): self.service.speak_part(unique, part=bad)
+        self.fake.heard.clear()
+        self.service.speak_part('Earlier words. **Chosen words** start here.', start_offset=17)
+        self.assertEqual(self.fake.heard, ['Chosen words start here.'])
+
     def test_markdown_that_says_nothing_is_refused(self):
         with self.assertRaises(voice.VoiceError) as caught:
             self.service.speak("```\n```")

@@ -62,7 +62,7 @@ class VoiceAPI:
             raw = handler.rfile.read(length); consumed = True
             if len(raw) != length: raise ValueError('Incomplete speech request')
             args = json.loads(raw)
-            if not isinstance(args, dict) or set(args) - {'item_id', 'voice', 'start_offset'}:
+            if not isinstance(args, dict) or set(args) - {'item_id', 'voice', 'start_offset', 'part', 'part_version'}:
                 raise ValueError('Supply a native message ID, optional voice and starting position only')
             item_id = args.get('item_id')
             if not isinstance(item_id, str) or not 0 < len(item_id) <= 256:
@@ -74,8 +74,12 @@ class VoiceAPI:
                 return self.read(handler, agent_prefix, '/api/room/' + room + '/history?' + urlencode(query))
             item = find_message(page, item_id)
             text = _item_text(item)
-            speech = self.voice.speak(text, str(args.get('voice') or DEFAULT_VOICE),
-                                      start_offset=args.get('start_offset')).as_json()
+            if 'part' in args:
+                speech = self.voice.speak_part(text, str(args.get('voice') or DEFAULT_VOICE),
+                    part=args['part'], start_offset=args.get('start_offset'), version=args.get('part_version'))
+            else:
+                speech = self.voice.speak(text, str(args.get('voice') or DEFAULT_VOICE),
+                                          start_offset=args.get('start_offset')).as_json()
             speech.update(room=room, item_id=item_id, type=item.get('type'))
             self.io._reply(handler, 200, speech)
         except PermissionError as exc:
@@ -88,7 +92,7 @@ class VoiceAPI:
             handler.close_connection = True
             self.io._reply(handler, 404 if exc.code == 'item_unknown' else 503, {'error':exc.code, 'message':str(exc)})
         except VoiceError as exc:
-            status = 400 if exc.code in {'bad_start', 'empty_text', 'bad_voice'} else 503
+            status = 400 if exc.code in {'bad_start', 'bad_part', 'speech_changed', 'empty_text', 'bad_voice'} else 503
             self.io._reply(handler, status, {'error':exc.code, 'message':str(exc) if status == 400 else 'Voice is unavailable. Try again.'})
         except (OSError, RemoteError):
             handler.close_connection = True

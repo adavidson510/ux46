@@ -121,3 +121,5 @@ Listen must be on and unmuted, and the browser must allow playback. A one-off
 speaker button reads only that selected message. Background suspension or a
 locked phone can interrupt playback; this is not a guarantee of continuous
 phone audio or streaming speech while a sentence is still being generated.
+
+Live Listen prepares short speech pieces and starts playing the first while the next is generated locally. It still waits for each written message to be complete, and the existing 4,000-character reading limit applies. One-off playback keeps its full-clip seek controls. Update the speech backend and refresh the browser together. Heavy local load, queued speech jobs, network delay and browser autoplay can still delay playback; this is not a guarantee of instant speech.
