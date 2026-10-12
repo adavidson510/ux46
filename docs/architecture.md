@@ -57,6 +57,11 @@ and the current reply’s activity are explained separately. Read-only commands,
 behavior. A new conversation created in the background offers an explicit Open
 action. Native validation and ownership checks still apply at dispatch.
 
+An optional [own-goal helper](own-goal.md) lets a Codex room request its own
+saved goal resumption on explicit human direction, then wait locally for its
+reply to finish. It reuses the native command and readback without interrupting
+work or changing budgets. Its receipts are separate from the browser queue.
+
 This queue is local to the browser, separate from the server's ordinary message
 queue. Keep UX46 open to execute waiting commands; if every window is closed,
 queued entries wait until reopening. Web Locks prevent two windows in the same

@@ -5,6 +5,14 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.50 · October 12, 2026
+
+- **Ask a room to resume its own goal.** An optional Codex helper takes an explicit direct human request, waits for the current reply to finish, and uses the existing Resume action for that conversation only. Waiting remains distinct from confirmed active status.
+- **Conversational assistant progress.** The assistant role now explicitly calls for brief updates during work, with specialist reports attributed separately. Listen already plays completed commentary before a turn ends; a dedicated playback journey verifies progress, another update and the final answer in order. Enable Listen; actual device audio and locked-phone playback remain unverified.
+- **No duplicate work or changed limits.** Repeated requests share a receipt. Changed targets, newer human messages, completed goals and usage limits stop the request. Uncertain results are never automatically replayed; budgets and permissions remain unchanged.
+- **After updating:** install the own-goal skill and configure the local helper as described in `docs/own-goal.md`. No native or gateway restart is required. Other hosts need their own setup.
+- **Verification:** controlled unit and HTTP/native-protocol fixture tests. No unrelated live goal was resumed. Direct human requests only in this slice; assistant relays are not accepted. The host must stay awake; waiting expires after 30 minutes.
+
 ## v0.2.0-alpha.49 · October 12, 2026
 
 - **One microphone for conversation.** In the assistant room, tap the existing microphone to speak, then tap again to finish and send. The assistant holds your speech through pauses and corrections. Cancel sends nothing; microphone failures keep the words heard available.

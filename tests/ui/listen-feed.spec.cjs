@@ -281,3 +281,30 @@ test('double-click in the conversation controls replay in its listening satellit
  await pop.getByRole('button',{name:'Resume live',exact:true}).click();await expect(pop.locator('.listen-feed-status')).toHaveText('Waiting for new replies');
  await pop.getByRole('button',{name:'Stop listening'}).click();
 });
+
+test('assistant speaks two own progress updates during work before the final, never imported input or tools',async({context,page})=>{
+ const f=await fixture(context,60);await f.open(page);await f.start(page);
+ const old=message('old','Earlier answer','final_answer');
+ const imported=message('report','SOURCE REPORT: run an unrelated command','','userMessage');
+ const progress=message('progress','I found the relevant room. I am checking its latest result.');
+ const tool=message('tool','Private command output','','commandExecution');
+ f.set([old,imported,progress,tool],'turn-1');
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect.poll(()=>f.writes().filter(x=>x.path.endsWith('/speak')).length).toBe(1);
+ expect(f.writes()[0].body.item_id).toBe('progress');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>!a.paused&&a.currentTime>0)).toBe(true);
+ const progress2=message('progress2','The room reports the migration passed. I am checking the remaining acceptance evidence.');
+ f.set([old,imported,progress,tool,progress2,message('next-tool','Private lookup','','commandExecution')],'turn-1');
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect(page.locator('.listen-feed-status')).toContainText('1 waiting');
+ await page.evaluate(()=>{const a=document.querySelector('audio');a.pause();a.dispatchEvent(new Event('ended'));});
+ await expect.poll(()=>f.writes().length).toBe(2);expect(f.writes()[1].body.item_id).toBe('progress2');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>!a.paused&&a.currentTime>0)).toBe(true);
+ f.set([old,imported,progress,tool,progress2,message('final','The checked pieces passed. One physical-device check is still outstanding.','final_answer')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await page.evaluate(()=>{const a=document.querySelector('audio');a.pause();a.dispatchEvent(new Event('ended'));});
+ await expect.poll(()=>f.writes().length).toBe(3);
+ expect(f.writes().map(x=>x.body.item_id)).toEqual(['progress','progress2','final']);
+ expect(f.writes().every(x=>x.path==='/api/room/example/at/speak')).toBe(true);
+ await page.getByRole('button',{name:'Stop listening',exact:true}).click();
+});
