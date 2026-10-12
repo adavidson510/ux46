@@ -5355,6 +5355,18 @@ async function attemptDraftSave(roomId, seq, text, entry) {
     return true;
   } catch (error) {
     if (error.code === "draft_conflict" && error.detail) {
+      // A lost acknowledgement or another window saving identical words can
+      // advance the version without competing text. Adopt that acknowledgement;
+      // any newer local typing stays dirty and queued against its version.
+      if (error.detail.body === text) {
+        entry.version = Number(error.detail.version) || 0;
+        if (mine()) {
+          state.draft = {body: text, version: entry.version};
+          state.draftDirty = $("#draft").value !== text;
+          reportDraftState();
+        }
+        return true;
+      }
       // The base was a version this browser had been given, so something else
       // really did write in between. Both texts are kept; nothing is saved
       // again for this room until the person chooses.
