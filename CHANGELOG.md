@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.46 · October 12, 2026
+
+- **Listening recovers from brief interruptions.** Voice failures retry twice, hung reads have time limits, and stalled playback reloads from its last position. A late error from a skipped clip cannot stop the next reading. Persistent failures keep the unread response available for retry or skipping.
+- **Reopen where you left off.** Each device remembers its last conversation in each desktop. Reloading an existing window preserves that window's view. An installed phone app's old launch URL cannot resurrect a closed tab; explicit browser links still open their conversation.
+- **After updating:** refresh open UX46 pages and select the conversation you want remembered. No native agent restart is needed.
+- **Verification:** repeated browser playback, temporary and persistent failures, hung requests, stale playback errors, and device/window startup restoration. Physical iPhone listening and relaunch verification remain pending; locked-screen playback is not guaranteed.
+
 ## v0.2.0-alpha.45 · October 11, 2026
 
 - **Two places for notes.** Personal notes stay visible across rooms. Room notes follow the selected conversation and sync across devices, with separate completed lists.

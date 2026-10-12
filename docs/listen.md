@@ -62,7 +62,13 @@ response. Locked-phone playback is not guaranteed. The local voice currently
 reads up to 4,000 cleaned characters per response; a partial reading is labelled
 with the spoken and total character counts. Full text remains available.
 
-Failures retain the response for retry or skipping. The feed holds up to 100
+Temporary voice failures retry twice automatically, retaining the same response.
+Hung history reads time out after 15 seconds; voice preparation after two
+minutes. Playback that stops advancing for 15 seconds reloads the prepared clip
+from its last position. A browser permission refusal still needs **Play / retry**.
+If automatic recovery fails, the controls retain the unread response for retry
+or skipping; nothing is silently marked as read. Stop and Mute take precedence
+over recovery. The feed holds up to 100
 waiting replies and checks at most 400 recent native items per catch-up. If it
 falls further behind, it explains the gap and asks you to stop and restart from
 now rather than silently claim it read everything.
