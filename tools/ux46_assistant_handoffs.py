@@ -34,7 +34,7 @@ def rooms(clients, query='', limit=20):
             'truncated':len(found)>limit or any(t for _,_,t in results)}
 
 
-def resolve(cfg, room, clients):
+def resolve(cfg, room, clients, *, allow_self=False):
     if room.count('/')==2:
         agent,project,session=room.split('/');dst={'agent':agent,'room':project+'/'+session}
     else:
@@ -49,7 +49,7 @@ def resolve(cfg, room, clients):
     if code!=200 or not tid:raise ValueError('This room has no available native conversation')
     if dst.get('thread') and dst['thread']!=tid:raise ValueError('Destination changed; search rooms again')
     dst.update(thread=tid,title=detail.get('title') or dst.get('title') or dst['room'])
-    if dst['agent']==cfg['target']['agent'] and tid==cfg['target']['thread']:raise ValueError('Answer in this assistant conversation directly')
+    if not allow_self and dst['agent']==cfg['target']['agent'] and tid==cfg['target']['thread']:raise ValueError('Answer in this assistant conversation directly')
     return dst
 
 
@@ -67,19 +67,11 @@ class Handoffs:
     def save(self, item):
         with self.db() as c: c.execute('INSERT OR REPLACE INTO requests VALUES (?,?)', (item['id'], json.dumps(item)))
 
-    def ask(self, cfg, room, request, body, clients, readback=False):
+    def ask(self, cfg, room, request, body, clients, readback=False, brief=False):
         dst = resolve(cfg,room,clients); src = cfg['target']
         if not request.strip() or not body.strip() or len(body)>6000: raise ValueError('A short human request is required')
-        sender = clients[src['agent']]; receiver = clients[dst['agent']]
-        code, detail = sender.request('GET','/api/room/'+src['room']+'?inspect=1')
-        if code!=200 or detail.get('native',{}).get('thread_id')!=src['thread']: raise ValueError('Assistant identity changed')
-        code, history = sender.request('GET','/api/room/'+src['room']+'/history?limit=100&direction=desc')
-        if code!=200 or history.get('unavailable'): raise ValueError('Cannot verify the human request')
-        human = next((x for x in history.get('items',[]) if x.get('type')=='userMessage'),None)
-        # The newest input must be this human request, not an update packet or
-        # an old request retrieved from memory. This also bounds accidental loops.
-        if not human or human.get('text','').strip()!=request.strip() or request.lstrip().startswith('CONCIERGE UPDATE PACKET'):
-            raise ValueError('Only the current human message can send a handoff')
+        receiver = clients[dst['agent']]
+        human = current_human(cfg, request, clients)
         ident = 'ask-' + hashlib.sha256((src['thread']+'\0'+str(human['id'])+'\0'+dst['agent']+'\0'+dst['thread']).encode()).hexdigest()[:40]
         with self.db() as c:
             c.execute('BEGIN IMMEDIATE')
@@ -88,7 +80,7 @@ class Handoffs:
                 old=json.loads(old[0])
                 if old['request']!=body: raise ValueError('This request was already sent with different wording; inspect its receipt')
                 return old
-            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'human_message':human.get('text','').strip(),'state':'checking','readback':bool(readback)}
+            item={'id':ident,'at':time.time(),'source':src,'destination':dst,'request':body,'human_message':human.get('text','').strip(),'human_id':human['id'],'state':'checking','readback':bool(readback),'brief':bool(brief)}
             c.execute('INSERT INTO requests VALUES (?,?)',(ident,json.dumps(item)))
         dispatched=False
         try:
@@ -97,7 +89,8 @@ class Handoffs:
             # The normal native submit path steers active work, starts idle work,
             # and preserves native approvals. It never interrupts a running turn.
             item['state']='sending';self.save(item);dispatched=True
-            message=relay_message(cfg.get('name','Assistant'),human.get('text',''),body)
+            message=(brief_message(cfg.get('name','Assistant'),src,human['id'],body) if brief
+                     else relay_message(cfg.get('name','Assistant'),human.get('text',''),body))
             code, result = receiver.request('POST','/api/room/'+dst['room']+'/submit',
                 {'client_id':ident,'thread_id':dst['thread'],'body':message})
             submission=result.get('submission',{})
@@ -144,6 +137,26 @@ class Handoffs:
 
 
 HUMAN_QUOTE_LIMIT=6000
+
+
+def current_human(cfg, request, clients):
+    """Verify the current source input without interpreting it as blanket authority."""
+    src=cfg['target'];sender=clients[src['agent']]
+    code,detail=sender.request('GET','/api/room/'+src['room']+'?inspect=1')
+    if code!=200 or detail.get('native',{}).get('thread_id')!=src['thread']:raise ValueError('Assistant identity changed')
+    code,history=sender.request('GET','/api/room/'+src['room']+'/history?limit=100&direction=desc')
+    if code!=200 or history.get('unavailable'):raise ValueError('Cannot verify the human request')
+    human=next((x for x in history.get('items',[]) if x.get('type')=='userMessage'),None)
+    if not human or human.get('text','').strip()!=request.strip() or request.lstrip().startswith('CONCIERGE UPDATE PACKET'):
+        raise ValueError('Only the current human message can request an action')
+    return human
+
+
+def brief_message(name, source, human_id, body):
+    return ('Request brief from '+name+' (assistant-written, not a verbatim human message).\n'
+            'Source: '+source['agent']+'/'+source['room']+'; human message: '+str(human_id)+'.\n'
+            'The original request is retained in the assistant receipt. This brief does not expand action authority.\n'
+            'Answer in this room; the assistant will bring your reply back. Preserve existing work and action boundaries.\n\n'+quoted(body))
 
 
 def quoted(text):
@@ -194,13 +207,13 @@ def main():
     from ux46_concierge import Concierge
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',required=True)
     p.add_argument('action',choices=['rooms','ask','status']);p.add_argument('--room');p.add_argument('--request');p.add_argument('--text')
-    p.add_argument('--query',default='');p.add_argument('--readback',action='store_true')
+    p.add_argument('--query',default='');p.add_argument('--readback',action='store_true');p.add_argument('--brief',action='store_true')
     a=p.parse_args();store=Handoffs(a.directory);cfg=Concierge(a.directory).settings()
     try:
         if a.action=='rooms':result=rooms(local_clients(a.directory,cfg),a.query)
         elif a.action=='ask':
             if not a.room or not a.request or not a.text:raise ValueError('Use --room, --request (exact human wording), and --text')
-            result=store.ask(cfg,a.room,a.request,a.text,local_clients(a.directory,cfg),a.readback)
+            result=store.ask(cfg,a.room,a.request,a.text,local_clients(a.directory,cfg),a.readback,a.brief)
         else:
             store.track(local_clients(a.directory,cfg));result={'requests':store.view()[:10]}
         print(json.dumps(result,ensure_ascii=False))

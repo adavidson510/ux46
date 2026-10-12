@@ -66,7 +66,7 @@ class Concierge:
             cfg=dict(old)
             if op=='configure':
                 dst=target(args['target']);src=[target(v) for v in args['sources']]
-                if not src or len(src)>8 or len({key(s) for s in src})!=len(src) or key(dst) in {key(s) for s in src}:raise ValueError('Choose one to eight other conversations')
+                if len(src)>8 or len({key(s) for s in src})!=len(src) or key(dst) in {key(s) for s in src}:raise ValueError('Choose up to eight other conversations')
                 if not factory:raise ValueError('An authenticated connection is required')
                 clients={v['agent']:factory(v['agent']) for v in [dst,*src]}
                 # Bind exact native threads once; a renamed/replaced record cannot redirect writes.
