@@ -11164,20 +11164,23 @@ const uploadMenu = $("#plusMenu");
 const uploadOptions = $("#plusOptions");
 
 function renderUploadChips() {
-  const entries = currentUploads();
+  const owner = agentId(), room = state.room;
+  const entries = currentUploads(room, owner);
   uploadChips.replaceChildren();
   for (const entry of entries) {
     const chip = el("span", {class: "fchip " + (CHIP_TONE[entry.status] || "")});
     const preview = managedUploadUrl(entry.file && entry.file.preview_url);
     if (preview && String(entry.file.mime).startsWith("image/")) {
-      chip.append(el("img", {src: preview, alt: ""}));
+      chip.append(el("button", {class: "linkbtn", type: "button", text: "Preview",
+        "aria-label": "Preview " + entry.name, on: {click: event => openAttachmentUrls(
+          preview, managedUploadUrl(entry.file.download_url), event.currentTarget, entry.name)}}));
     }
     chip.append(el("span", {class: "chip-text"}, [
       el("b", {text: entry.name, title: entry.name}),
       el("span", {class: "sz", text: chipNote(entry)}),
     ]));
     if (entry.file && managedUploadUrl(entry.file.download_url)) {
-      chip.append(el("a", {class: "dl", href: entry.file.download_url, download: entry.name,
+      chip.append(el("a", {class: "dl", href: entry.file.download_url, download: entry.name, target: "_blank", rel: "noopener",
         title: "Download " + entry.name, "aria-label": "Download " + entry.name},
         [replyIcon("download")]));
     }
@@ -11188,15 +11191,19 @@ function renderUploadChips() {
     if (entry.attempt) {
       chip.append(el("button", {class: "retry", type: "button", text: "Check",
         "aria-label": "Check delivery of " + entry.name,
-        on: {click: () => checkUploadMessage(entry.attempt, state.room)}}));
-    } else {
-      chip.append(el("button", {class: "x closebtn", type: "button", title: "Remove " + entry.name,
-        "aria-label": "Remove " + entry.name,
-        on: {click: () => {
-          uploadDrafts.set(state.room, currentUploads().filter(e => e !== entry));
-          saveUploadDrafts(); renderUploadChips(); reportDraftState();
-        }}}, [useIcon("i-close")]));
+        on: {click: () => checkUploadMessage(entry.attempt, room, owner)}}));
     }
+    chip.append(el("button", {class: "linkbtn", type: "button", text: "Remove",
+      "aria-label": "Remove " + entry.name + " from draft",
+      title: "Remove from this draft; does not undo an earlier send",
+      on: {click: () => {
+        uploadBuckets(owner).set(room, currentUploads(room, owner).filter(e => e !== entry));
+        saveUploadDrafts(owner);
+        if (owner === agentId() && room === state.room) {
+          renderUploadChips(); reportDraftState();
+          if (entry.attempt) setReceipt("Removed from this draft. The earlier send has not been cancelled.", "warn");
+        }
+      }}}));
     uploadChips.append(chip);
   }
   // Files chosen in another session are neither lost nor silently sent here.
@@ -11802,10 +11809,10 @@ function attachmentViewerNode() {
   if (attachmentViewer) return attachmentViewer;
   const dialog = el("dialog", {class: "file-dialog", "aria-label": "Attachment"});
   const image = el("img", {class: "file-full", alt: "Image attachment, full size"});
-  const download = el("a", {class: "linkbtn", download: "", text: "Download"});
-  const close = el("button", {class: "linkbtn", type: "button", text: "Close",
+  const download = el("a", {class: "linkbtn", download: "", text: "Download", target: "_blank", rel: "noopener"});
+  const close = el("button", {class: "linkbtn", type: "button", text: "Back to conversation",
     on: {click: () => dialog.close()}});
-  dialog.append(el("div", {class: "file-dialog-bar"}, [download, close]), image);
+  dialog.append(el("div", {class: "file-dialog-bar"}, [close, download]), image);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener("close", () => {                 // Escape closes the same way
     image.removeAttribute("src");
@@ -11819,9 +11826,15 @@ function attachmentViewerNode() {
 
 function openAttachment(id, opener) {
   if (!ATTACHMENT_FILE_ID.test(String(id))) return;
+  openAttachmentUrls(attachmentUrl(id, "preview"), attachmentUrl(id, "download"), opener);
+}
+
+function openAttachmentUrls(preview, download, opener, name = "Image attachment, full size") {
+  if (!managedUploadUrl(preview) || !managedUploadUrl(download)) return;
   const viewer = attachmentViewerNode();
-  viewer.image.src = attachmentUrl(id, "preview");
-  viewer.download.href = attachmentUrl(id, "download");
+  viewer.image.src = preview;
+  viewer.image.alt = name;
+  viewer.download.href = download;
   attachmentOpener = opener || null;
   viewer.dialog.showModal();
   viewer.close.focus();
