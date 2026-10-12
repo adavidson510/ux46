@@ -86,18 +86,32 @@
   clearTimeout(c.timer);capture=null;window.UX46VoiceAwake?.set('assistant-mic',false);window.dispatchEvent(new CustomEvent('ux46-dictation',{detail:{active:false}}));markTalk();cancelTalk.hidden=true;retryTalk.hidden=true;heard.hidden=true;
  }
  function cancelCapture(){
-  const c=capture;if(!c)return;resetCapture(c);c.r?.abort();window.UX46ListenFeed?.resume();
+  const c=capture;if(!c)return;resetCapture(c);c.r?.abort();void endInterruption(c,'cancel');
+ }
+ async function endInterruption(c,action){
+  const handled=await window.UX46ListenFeed?.interruption?.(action,{agent:c.agent,room:c.room});
+  if(!handled&&action==='cancel')window.UX46ListenFeed?.resume();
+  return handled;
  }
  async function finishCapture(c){
   if(capture!==c)return;
   const text=captureText(c),valid=sameRoom(c);resetCapture(c);
-  if(!valid||!text){window.UX46ListenFeed?.resume();return;}
+  if(!valid||!text){await endInterruption(c,'cancel');return;}
   const draft=document.querySelector('#draft');
   if(draft.value!==c.draftBefore){
    // Do not overwrite text typed while the microphone was open.
    heard.hidden=false;heard.textContent='Spoken text was not sent: '+text;
-   window.UX46ListenFeed?.resume();flash('Your typed draft is still here. Spoken text is shown above it.');return;
+   await endInterruption(c,'cancel');flash('Your typed draft is still here. Spoken text is shown above it.');return;
   }
+  // Only an isolated playback phrase with a saved bookmark is local. Mixed
+  // requests and 'continue building' still go to the full native assistant.
+  if(!c.draftBefore&&/^(?:please\s+)?(?:continue|resume)(?:\s+(?:the\s+)?briefing)?(?:\s+please)?[.!?]*$/i.test(text.trim())){
+   if(await endInterruption(c,'continue')){flash('Continuing your briefing.');return;}
+  }
+  if(!sameRoom(c)){await endInterruption(c,'cancel');return;}
+  await endInterruption(c,'answer');
+  if(!sameRoom(c))return;
+  if(draft.value!==c.draftBefore){heard.hidden=false;heard.textContent='Spoken text was not sent: '+text;return;}
   draft.value=[c.draftBefore,text].filter(Boolean).join(' ').trim();scheduleDraftSave();
   // Start playback readiness in this click path, without letting slow audio
   // preparation prevent the human message from being sent.
@@ -141,7 +155,9 @@
   if(!(window.SpeechRecognition||window.webkitSpeechRecognition)){flash('Voice input is unavailable in this browser. Use Dictate or type here.');return;}
   stopDictation();
   const c={agent:agentId(),room:state.room,seq:state.roomSeq,draftBefore:document.querySelector('#draft').value,saved:'',final:'',interim:'',restarts:0};capture=c;
-  window.UX46ListenFeed?.pause();window.UX46VoiceAwake?.set('assistant-mic',true);window.dispatchEvent(new CustomEvent('ux46-dictation',{detail:{active:true}}));markTalk();cancelTalk.hidden=false;heard.hidden=false;showHeard(c);startRecognition(c);
+  const held=await window.UX46ListenFeed?.interruption?.('begin',{agent:c.agent,room:c.room});
+  if(capture!==c||!sameRoom(c)){await endInterruption(c,'cancel');return;}
+  if(!held)window.UX46ListenFeed?.pause();window.UX46VoiceAwake?.set('assistant-mic',true);window.dispatchEvent(new CustomEvent('ux46-dictation',{detail:{active:true}}));markTalk();cancelTalk.hidden=false;heard.hidden=false;showHeard(c);startRecognition(c);
  }
  window.addEventListener('ux46-room',()=>{paint();void refresh();});
  window.UX46Concierge={refresh,open,configure};

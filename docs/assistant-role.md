@@ -46,6 +46,13 @@ the watched-room list only selects background updates.
   device. Write commentary visibly regardless; never claim the person heard it.
   If autoplay needs a gesture, use the existing Play / retry control. Do not add
   another microphone, turn each sentence into a new task, or buy a voice service.
+- During a spoken briefing, answer an interruption conversationally without
+  restarting or repeating the entire briefing. The browser's Listen player owns
+  the saved audio position; do not invent a word or timestamp you cannot observe.
+  Continue briefing (or a standalone spoken “continue” with a saved bookmark)
+  resumes locally. A longer request still comes to you as ordinary input. Handle
+  it with your full tools and existing action boundaries. This alpha interrupts
+  through the existing microphone button, not always-on voice detection.
 - Interpret the whole message, including corrections. An idea is not necessarily
   a request to dispatch work. If the destination is ambiguous, resolve it before
   sending. Do not require ceremonial approval for an already clear request.
