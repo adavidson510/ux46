@@ -929,3 +929,71 @@ test('delayed room note save keeps its target and other room draft on phone',asy
   await expect(page.locator('#roomNoteText')).toHaveValue('Unfinished beta note');
   await page.screenshot({path:'/tmp/ux46-two-notes-phone-v1.png'});
 });
+
+for (const remote of ['same', 'different']) {
+  test(`draft save reconciliation preserves ${remote} remote text`, async ({page}) => {
+    await fixture(page);
+    await page.route('**/api/room/fixture/alpha/draft', route => route.fulfill({status:409,json:{
+      error:'draft_conflict',message:'version moved',detail:{body:remote==='same'?'unsent words':'other device text',version:7}
+    }}));
+    await page.evaluate(async()=>{state.draft={body:'previous draft',version:1};state.draftDirty=true;await flushDraft();});
+    await expect(page.locator('#draft')).toHaveValue('unsent words');
+    if(remote==='same') {
+      await expect(page.locator('#conflict')).toBeHidden();
+      expect(await page.evaluate(()=>({dirty:state.draftDirty,version:state.draft.version}))).toEqual({dirty:false,version:7});
+    } else {
+      await expect(page.locator('#conflict')).toBeVisible();
+      await expect(page.locator('#conflict')).toContainText('other device text');
+      expect(await page.evaluate(()=>state.draftDirty)).toBe(true);
+    }
+  });
+}
+
+test('matching draft acknowledgement retains newer typing and saves it against the acknowledged version',async({page})=>{
+  await fixture(page);
+  let release,started;
+  const gate=new Promise(r=>release=r), sent=new Promise(r=>started=r);
+  const writes=[];
+  await page.route('**/api/room/fixture/alpha/draft',async route=>{
+    const body=route.request().postDataJSON();writes.push(body);
+    if(writes.length===1){started();await gate;return route.fulfill({status:409,json:{error:'draft_conflict',detail:{body:'unsent words',version:7}}});}
+    return route.fulfill({json:{body:body.body,version:8}});
+  });
+  await page.evaluate(()=>{state.draft={body:'previous draft',version:1};state.draftDirty=true;window.savingDraft=flushDraft();});
+  await sent;
+  await page.evaluate(()=>{document.querySelector('#draft').value='newer words';state.draftDirty=true;queueDraftSave(state.room,state.roomSeq,'newer words');});
+  release();await page.evaluate(()=>window.savingDraft);
+  await expect(page.locator('#draft')).toHaveValue('newer words');
+  await expect(page.locator('#conflict')).toBeHidden();
+  expect(writes[1]).toMatchObject({body:'newer words',base_version:7});
+  expect(await page.evaluate(()=>state.draftDirty)).toBe(false);
+});
+
+test('stuck image can be removed without losing text or resending, including after reload', async ({page}) => {
+  await fixture(page); await page.setViewportSize({width:390,height:844});
+  const writes=[];page.on('request',r=>{if(r.method()!=='GET') writes.push(r.url());});
+  await page.evaluate(()=>{
+    currentUploads().push({name:'example.png',size:123,status:'unconfirmed',attempt:'uncertain-1',file:{id:'fixture-file',mime:'image/png',preview_url:'/api/atlas/files/fixture-file/preview',download_url:'/api/atlas/files/fixture-file/download'}});
+    saveUploadDrafts();renderUploadChips();
+  });
+  await page.getByRole('button',{name:'Remove example.png from draft',exact:true}).click();
+  await expect(page.locator('#cchips')).not.toContainText('example.png');
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  expect(await page.evaluate(()=>currentUploads().length)).toBe(0);expect(writes).toEqual([]);
+  await page.reload();await seed(page,'fixture/alpha');
+  expect(await page.evaluate(()=>currentUploads().length)).toBe(0);
+});
+
+test('draft image preview stays in app and has a reachable return control on phone', async ({page}) => {
+  await fixture(page);await page.setViewportSize({width:390,height:844});
+  await page.route('**/api/atlas/files/fixture-file/preview',r=>r.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=','base64')}));
+  await page.evaluate(()=>{currentUploads().push({name:'example.png',size:123,status:'ready',file:{id:'fixture-file',mime:'image/png',preview_url:'/api/atlas/files/fixture-file/preview',download_url:'/api/atlas/files/fixture-file/download'}});renderUploadChips();});
+  const url=page.url();await page.getByRole('button',{name:'Preview example.png',exact:true}).click();
+  const back=page.getByRole('button',{name:'Back to conversation',exact:true});await expect(back).toBeInViewport();
+  await expect(page.locator('.file-dialog')).toBeVisible();expect(page.url()).toBe(url);
+  await page.screenshot({path:test.info().outputPath('image-preview-phone.png')});
+  await back.click();await expect(page.locator('.file-dialog')).not.toBeVisible();
+  await expect(page.locator('#draft')).toHaveValue('unsent words');
+  await page.getByRole('button',{name:'Remove example.png from draft',exact:true}).click();
+  await expect(page.locator('#cchips')).not.toContainText('example.png');
+});

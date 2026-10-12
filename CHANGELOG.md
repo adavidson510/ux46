@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.53 · October 12, 2026
+
+- **Clear a stuck attachment.** Remove stays available after an uncertain file send and clears only that draft attachment, preserving your words. It does not cancel an earlier delivery. Image previews stay inside the conversation with a visible Back to conversation control; downloads open separately. Phone-sized Chromium and WebKit journeys cover removal, persistence and returning from preview.
+
+- **Fewer false draft conflicts.** If a save returns a newer version containing exactly the words just submitted, UX46 accepts that saved version. Newer typing stays intact and saves against the acknowledged version; genuinely different drafts still require your choice.
+- **After updating:** refresh UX46 after preserving unsaved input. Browser checks cover identical text, competing device text, and typing while a save is pending. This change does not claim to resolve every upload or connection failure.
+
 ## v0.2.0-alpha.52 · October 12, 2026
 
 - **Interrupt a briefing without losing your place.** In the assistant room, the existing microphone holds Listen's current audio position and unread briefing while your question is answered. Say “continue” through that microphone or choose Continue briefing to return; the standalone playback command uses no model call.
