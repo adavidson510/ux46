@@ -2,13 +2,14 @@ const {test,expect}=require('@playwright/test');
 const fs=require('node:fs'),path=require('node:path');
 const root=process.env.UX46_TEST_UI_ROOT||path.resolve(__dirname,'../..');
 const message=(id,text,phase='commentary',type='agentMessage')=>({id,text,phase,type,turn_id:'turn-1'});
-async function fixture(context,duration=30){
+async function fixture(context,duration=30,assistant=false){
  let items=[message('old','Earlier answer','final_answer')],active=null,fail=false;const calls=[];
  const wav=Buffer.alloc(44+8000*2*duration);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url());if(u.origin!=='https://fixture.test')return route.abort();
   if(u.pathname.startsWith('/api/')){
    calls.push({path:u.pathname,method:req.method(),body:req.method()==='POST'?req.postDataJSON():null});
+   if(u.pathname==='/api/concierge/view')return route.fulfill({json:{settings:{target:{agent:'keel',room:'example/at'},sources:[],name:'Assistant'},running:false}});
    if(u.pathname.endsWith('/speak')){if(fail)return route.fulfill({status:503,json:{message:'Voice unavailable'}});return route.fulfill({json:{audio_url:'/api/audio/test.wav',complete:true}});}
    if(u.pathname==='/api/audio/test.wav'){
     const range=req.headers()['range'];const match=range&&/^bytes=(\d+)-(\d*)$/.exec(range);
@@ -21,7 +22,7 @@ async function fixture(context,duration=30){
    return route.fulfill({json:{}});
   }
   const name=u.pathname==='/'?'index.html':u.pathname.slice(1),file=path.join(root,'app/console',name);if(!fs.existsSync(file))return route.fulfill({status:404});let body=fs.readFileSync(file,'utf8');
-  if(name==='index.html')body=body.replace(/<script src="\/(?!app.js|listen-feed.js)[^"]+"><\/script>/g,'');
+  if(name==='index.html')body=body.replace(assistant?/<script src="\/(?!app.js|listen-feed.js|concierge.js)[^"]+"><\/script>/g:/<script src="\/(?!app.js|listen-feed.js)[^"]+"><\/script>/g,'');
   if(name==='app.js')body=body.replace('\nboot();','\n/* fixture boot */');
   return route.fulfill({body,contentType:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html'});
  });
@@ -68,6 +69,8 @@ test('desktop player hands its reply, queue and position to a real window and do
  f.set([message('old','Earlier'),message('a','First complete reply'),message('b','Second complete reply')]);
  await page.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>f.writes().length).toBe(1);
  await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ // Metadata may precede play() resolving: pause an actually playing clip.
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThan(0);
  await page.locator('audio').evaluate(a=>{a.pause();a.currentTime=7;});
  await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
  const popupWait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await popupWait;
@@ -345,5 +348,85 @@ test('speech pieces continue once in order before advancing to the next reply',a
  await finishReading(page);await expect.poll(()=>parts.length).toBe(4);
  await expect(page.locator('.listen-feed-text')).toHaveText('Next response');
  expect(parts.map(p=>[p.item_id,p.part])).toEqual([['a',0],['a',1],['a',2],['b',0]]);
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('assistant microphone saves briefing, plays the answer, and spoken Continue restores media time without a prompt',async({context,page})=>{
+ const f=await fixture(context,30,true);await f.open(page);
+ await page.evaluate(()=>{
+  // The target uses the fixture's actual default agent on private/public builds.
+  window.SpeechRecognition=class{constructor(){window.rec=this;}start(){}stop(){this.onend()}abort(){this.onend()}};
+  window.say=text=>{const r=[{transcript:text}];r.isFinal=true;rec.onresult({results:[r]});};
+  window.sent=[];send=async()=>{sent.push(document.querySelector('#draft').value);document.querySelector('#draft').value='';};scheduleDraftSave=()=>{};
+ });
+ const owner=await page.evaluate(()=>DEFAULT_AGENT);
+ await page.route('**/api/concierge/view',r=>r.fulfill({json:{settings:{target:{agent:owner,room:'example/at'},sources:[],name:'Assistant'},running:false}}));
+ await page.evaluate(()=>UX46Concierge.refresh());await f.start(page);
+ f.set([message('old','Earlier'),message('briefing','The long briefing.'),message('next','The next project.')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.locator('.listen-feed-text')).toHaveText('The long briefing.');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ await page.locator('audio').evaluate(a=>{a.currentTime=9;});
+ await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Continue briefing',exact:true})).toBeDisabled();
+ await page.evaluate(()=>say('What does that mean?'));await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(1);
+ await expect(page.locator('.listen-feed-status')).toContainText('Briefing paused');
+ f.set([message('old','Earlier'),message('briefing','The long briefing.'),message('next','The next project.'),message('question','What does that mean?','','userMessage'),message('answer','Here is what it means.','final_answer')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.locator('.listen-feed-text')).toHaveText('Here is what it means.');
+ await page.locator('audio').evaluate(a=>{a.pause();a.dispatchEvent(new Event('ended'));});
+ await expect(page.locator('.listen-feed-status')).toContainText('Briefing paused');
+ await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(()=>say('Continue.'));
+ await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ await expect(page.locator('.listen-feed-text')).toHaveText('The long briefing.');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(9);
+ expect(await page.evaluate(()=>sent)).toEqual(['What does that mean?']);
+ expect(f.writes().map(c=>c.body.item_id)).toEqual(['briefing','answer']);
+ await page.locator('audio').evaluate(a=>{a.pause();a.dispatchEvent(new Event('ended'));});
+ await expect(page.locator('.listen-feed-text')).toHaveText('The next project.');
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('briefing bookmark stays scoped, survives satellite transfer, and cancel restores the pause',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ f.set([message('old','Earlier'),message('briefing','Saved briefing')]);await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ await page.locator('audio').evaluate(a=>{a.currentTime=7;});
+ expect(await page.evaluate(()=>UX46ListenFeed.interruption('begin',{agent:DEFAULT_AGENT,room:'unrelated/room'}))).toBe(false);
+ await page.evaluate(()=>UX46ListenFeed.interruption('begin',{agent:DEFAULT_AGENT,room:state.room}));
+ await page.evaluate(()=>UX46ListenFeed.interruption('cancel',{agent:DEFAULT_AGENT,room:state.room}));
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
+ await expect(page.getByRole('button',{name:'Continue briefing'})).toBeHidden();
+ const popupWait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await popupWait;
+ await expect(pop.locator('.listen-feed')).toBeVisible();
+ await page.evaluate(()=>UX46ListenFeed.interruption('begin',{agent:DEFAULT_AGENT,room:state.room}));
+ await page.evaluate(()=>UX46ListenFeed.interruption('answer',{agent:DEFAULT_AGENT,room:state.room}));
+ await expect(pop.locator('.listen-feed-status')).toContainText('Briefing paused');
+ await pop.close();await expect(page.locator('.listen-feed')).toBeVisible();
+ await page.getByRole('button',{name:'Continue briefing'}).click();
+ await expect(page.locator('.listen-feed-text')).toHaveText('Saved briefing');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
+ expect(f.writes()).toHaveLength(1);await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('interruption on a later speech piece resumes that piece, not the whole reply',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);const parts=[];
+ await page.route('**/speak',async route=>{
+  const body=route.request().postDataJSON();parts.push(body);
+  await route.fulfill({json:{audio_url:'/api/audio/test.wav',complete:true,next_part:body.item_id==='briefing'&&body.part<2?body.part+1:null,part_version:'stable'}});
+ });
+ f.set([message('old','Earlier'),message('briefing','A long briefing split into pieces')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>parts.length).toBe(2);
+ await finishReading(page);await expect.poll(()=>parts.length).toBe(3);
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ await page.locator('audio').evaluate(a=>{a.currentTime=6;});
+ await page.evaluate(()=>UX46ListenFeed.interruption('begin',{agent:DEFAULT_AGENT,room:state.room}));
+ await page.evaluate(()=>UX46ListenFeed.interruption('answer',{agent:DEFAULT_AGENT,room:state.room}));
+ f.set([message('old','Earlier'),message('briefing','A long briefing split into pieces'),message('answer','Answer to interruption')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.locator('.listen-feed-text')).toHaveText('Answer to interruption');
+ await page.getByRole('button',{name:'Continue briefing'}).click();
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(6);
+ await finishReading(page);await expect(page.locator('.listen-feed-text')).toHaveText('A long briefing split into pieces');
+ expect(parts.filter(p=>p.item_id==='briefing'&&p.part===0)).toHaveLength(1);
+ expect(parts.filter(p=>p.item_id==='briefing'&&p.part===1)).toHaveLength(1);
  await page.getByRole('button',{name:'Stop listening'}).click();
 });

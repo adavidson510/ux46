@@ -5,6 +5,12 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.52 · October 12, 2026
+
+- **Interrupt a briefing without losing your place.** In the assistant room, the existing microphone holds Listen's current audio position and unread briefing while your question is answered. Say “continue” through that microphone or choose Continue briefing to return; the standalone playback command uses no model call.
+- **Same player, including satellites.** Cancel restores the reading, the bookmark travels with the listening window, and unrelated rooms and native work remain untouched. Stop or reload clears the device-local bookmark.
+- **After updating:** refresh UX46 and enable Listen again. This is tap-to-talk, not always-on voice interruption. Browser checks cover position, answers, cancellation, short speech pieces and satellite handoff; physical microphone/headset and iPhone acceptance remain unverified.
+
 ## v0.2.0-alpha.51 · October 12, 2026
 
 - **Listen starts with a short piece.** Live reading no longer waits for the entire reply's audio. It plays short pieces in order and prepares one ahead, using the existing local voice engine.

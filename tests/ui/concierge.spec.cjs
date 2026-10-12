@@ -78,3 +78,13 @@ test('the existing microphone keeps a typed introduction and releases voice paus
  expect(await page.evaluate(()=>sent[0].text)).toBe('For the design room: Make the button blue');
  expect(await page.evaluate(()=>micEvents)).toEqual([true,false]);
 });
+
+test('Continue without a bookmark and longer work instructions still reach the full assistant',async({page})=>{
+ await microphone(page);
+ for(const text of ['Continue.','Continue building the app, then check its status']){
+  await page.getByRole('button',{name:'Talk to your assistant',exact:true}).click();await page.evaluate(t=>say(t),text);
+  await page.getByRole('button',{name:'Done — send voice message',exact:true}).click();
+ }
+ await expect.poll(()=>page.evaluate(()=>sent.length)).toBe(2);
+ expect(await page.evaluate(()=>sent.map(s=>s.text))).toEqual(['Continue.','Continue building the app, then check its status']);
+});

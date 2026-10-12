@@ -39,6 +39,27 @@ The existing local voice generates the selected portion; it sends no prompt.
 Replies still being written must finish first. If the word cannot be matched to
 native history, choose another word or Resume live.
 
+## Interrupt your assistant and return to a briefing
+
+In your configured assistant room, tap the existing composer microphone while
+Listen is reading. Playback stops and saves the current speech piece, its media
+position and the remaining briefing. Tap the microphone again to send your
+question. The assistant's new replies can play while the briefing stays paused.
+
+When ready, say **continue** or **resume briefing** into that microphone and tap
+again, or choose **Continue briefing** in the player. With a saved briefing,
+those standalone phrases resume the recorded audio position locally without a
+model prompt. Without one, they are ordinary messages. Longer instructions such
+as “continue building the app” are always sent normally. Cancel or empty speech
+returns to the reading without sending anything. Your typed draft is preserved.
+
+The bookmark stays with this device's reader, including its listening satellite.
+It is a playback position, not an interruption of a native agent's running work.
+Stop, reload or switching the listening feed clears it. This first slice uses
+tap-to-talk; it does not detect your voice over the speaker automatically or add
+always-on microphone access. New source updates still follow the normal feed;
+there is no claim that every queued reply is an answer to the interruption.
+
 ## A separate listening window
 
 Choose **Pop out listening** (↗) beside the volume control. This opens a real
