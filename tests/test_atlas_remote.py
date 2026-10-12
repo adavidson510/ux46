@@ -365,8 +365,8 @@ class WorkspaceSpeechTests(unittest.TestCase):
         class Voice:
             def status(self):
                 return {"enabled": True, "voices": ["af_heart"]}
-            def speak(self, text, wanted):
-                captured.append(text)
+            def speak(self, text, wanted, start_offset=None):
+                captured.append((text, start_offset))
                 return Speech()
         try:
             h.local.service.voice = Voice()
@@ -378,13 +378,17 @@ class WorkspaceSpeechTests(unittest.TestCase):
             status, reply = h.call("POST", f"/api/agents/agent2/api/room/{ROOM}/speak",
                                    body={"item_id": "i4", "text": "never trust these browser words"})
             self.assertEqual(status, 200)
-            self.assertEqual(captured, [item["text"]])
+            self.assertEqual(captured, [(item["text"], None)])
+            status, _ = h.call("POST", f"/api/agents/agent2/api/room/{ROOM}/speak",
+                               body={"item_id": "i4", "start_offset": 2})
+            self.assertEqual(status, 200)
+            self.assertEqual(captured[-1], (item["text"], 2))
             self.assertTrue(reply["audio_url"].startswith("/api/audio/"))
             self.assertEqual(h.remote.service.workers.attached(), {})
             bad, _ = h.call("POST", f"/api/agents/agent2/api/room/{ROOM}/speak",
                              body={"item_id": "absent", "text": "never speak this"})
             self.assertNotEqual(bad, 200)
-            self.assertEqual(len(captured), 1)
+            self.assertEqual(len(captured), 2)
         finally:
             h.close()
 

@@ -270,15 +270,32 @@ class VoiceService:
             raise VoiceError("that is not an audio key", code="bad_key")
         return self.cache_dir / f"{key}.wav"
 
-    def speak(self, text: str, voice: str = DEFAULT_VOICE, speed: float = 1.0) -> Speech:
+    def speak(self, text: str, voice: str = DEFAULT_VOICE, speed: float = 1.0,
+              start_offset: int | None = None) -> Speech:
         if voice not in VOICES:
             raise VoiceError(f"unknown voice: {voice}", code="bad_voice")
-        source = (text or "").strip()
-        if not source:
+        source = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        if start_offset is None:
+            source = (text or "").strip()
+        if not source.strip():
             raise VoiceError("there is no text to read", code="empty_text")
         # Clean first: the length limit and the cache key are both about the
         # words that will actually be said, not the markers around them.
-        prepared = speech_text(source)
+        if start_offset is None:
+            prepared = speech_text(source)
+        else:
+            if type(start_offset) is not int or not 0 <= start_offset < len(source):
+                raise VoiceError("Choose a word in this reply.", code="bad_start")
+            # Keep the whole Markdown structure while cleaning it. Cutting the
+            # raw string first would leave closing emphasis/fence markers aloud.
+            marker = "\ufdd0UX46START\ufdd1"
+            while marker in source:
+                marker += "\ufdd1"
+            marked = speech_text(source[:start_offset] + marker + source[start_offset:])
+            _, found, prepared = marked.partition(marker)
+            if not found:
+                raise VoiceError("Choose a word in the reply text.", code="bad_start")
+            prepared = prepared.lstrip()
         if not prepared:
             raise VoiceError("there is no text to read", code="empty_text")
         total = len(prepared)

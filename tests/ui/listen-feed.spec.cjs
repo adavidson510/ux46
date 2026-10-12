@@ -217,3 +217,67 @@ test('persistent voice failure retries twice then holds the unread response with
  await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
  await page.getByRole('button',{name:'Stop listening'}).click();
 });
+
+async function displayReplies(page,rows){
+ await page.evaluate(rows=>{state.items=rows;document.querySelector('#thread').replaceChildren(...rows.map(messageNode));},rows);
+}
+async function wordPoint(page,id,word){
+ const body=page.locator('.msg.agent[data-mid="'+id+'"] > .body');await body.scrollIntoViewIfNeeded();
+ return body.evaluate((body,word)=>{const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT);let node;while(node=walker.nextNode()){const at=node.data.indexOf(word);if(at<0)continue;const range=document.createRange();range.setStart(node,at+1);range.setEnd(node,at+2);const r=range.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};}throw Error('Word missing');},word);
+}
+async function finishReading(page){await page.locator('audio').evaluate(a=>{a.pause();a.dispatchEvent(new Event('ended'));});}
+
+test('double-click a rendered word replays older replies, skips tools and catches up to live updates',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);
+ const source='😀 Earlier words. **Chosen words** follow. Chosen words again.';
+ const rows=[message('old',source),message('tool','Do not read','','commandExecution'),message('next','Next completed reply','final_answer')];
+ f.set(rows);await displayReplies(page,rows);await f.start(page);
+ const point=await wordPoint(page,'old','Chosen');await page.mouse.dblclick(point.x,point.y);
+ await expect.poll(()=>f.writes().length).toBe(1);
+ expect(f.writes()[0].body).toMatchObject({item_id:'old',start_offset:Array.from(source.slice(0,source.indexOf('Chosen'))).length});
+ await expect(page.getByRole('button',{name:'Resume live',exact:true})).toBeVisible();
+ rows.push(message('new','Arrived during replay'));f.set(rows);await page.evaluate(()=>UX46ListenFeed.poll());
+ await finishReading(page);await expect.poll(()=>f.writes().length).toBe(2);expect(f.writes()[1].body.item_id).toBe('next');
+ await finishReading(page);await expect.poll(()=>f.writes().length).toBe(3);expect(f.writes()[2].body.item_id).toBe('new');
+ await expect(page.getByRole('button',{name:'Resume live',exact:true})).toBeHidden();
+ await finishReading(page);await expect(page.locator('.listen-feed-status')).toHaveText('Waiting for new replies');
+ expect(f.writes().every(c=>c.path.endsWith('/speak'))).toBe(true);await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('Resume live returns to the interrupted audio position and retains new replies',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);const rows=[message('old','An earlier answer to replay')];f.set(rows);await displayReplies(page,rows);await f.start(page);
+ rows.push(message('current','Current live answer'));f.set(rows);await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.readyState)).toBeGreaterThan(0);
+ await page.locator('audio').evaluate(a=>{a.pause();a.currentTime=7;});
+ const point=await wordPoint(page,'old','earlier');await page.mouse.dblclick(point.x,point.y);
+ await expect.poll(()=>f.writes().length).toBe(2);
+ rows.push(message('new','Next live answer'));f.set(rows);await page.evaluate(()=>UX46ListenFeed.poll());
+ await page.getByRole('button',{name:'Resume live',exact:true}).click();
+ await expect(page.locator('.listen-feed-text')).toHaveText('Current live answer');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>a.currentTime)).toBeGreaterThanOrEqual(7);
+ expect(f.writes()).toHaveLength(2);await finishReading(page);
+ await expect.poll(()=>f.writes().length).toBe(3);expect(f.writes()[2].body.item_id).toBe('new');
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('phone double-tap uses the existing reply and keeps the composer accessible',async({context,page})=>{
+ await page.setViewportSize({width:390,height:844});const f=await fixture(context);await f.open(page);
+ const rows=[message('old','Start here. Read from this word onward.')];f.set(rows);await displayReplies(page,rows);await f.start(page);
+ const point=await wordPoint(page,'old','word');
+ await page.evaluate(point=>{const node=document.elementFromPoint(point.x,point.y);for(let i=0;i<2;i++)node.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,pointerType:'touch',clientX:point.x,clientY:point.y}));},point);
+ await expect.poll(()=>f.writes().length).toBe(1);expect(f.writes()[0].body.start_offset).toBe(rows[0].text.indexOf('word'));
+ await expect(page.locator('.listen-feed')).toBeHidden();await page.locator('#draft').fill('Still able to type');
+ await page.locator('#btnListenFeed').click();await expect(page.getByRole('button',{name:'Resume live',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Resume live',exact:true}).click();await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('double-click in the conversation controls replay in its listening satellite',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);const rows=[message('old','Read this earlier reply')];f.set(rows);await displayReplies(page,rows);await f.start(page);
+ const wait=page.waitForEvent('popup');await page.getByRole('button',{name:'Pop out listening'}).click();const pop=await wait;
+ await expect(pop.locator('.listen-feed')).toBeVisible();await expect(page.locator('audio')).toHaveCount(0);
+ const point=await wordPoint(page,'old','earlier');await page.mouse.dblclick(point.x,point.y);
+ await expect.poll(()=>f.writes().length).toBe(1);expect(f.writes()[0].body.start_offset).toBe(rows[0].text.indexOf('earlier'));
+ await expect(pop.locator('.listen-feed-text')).toHaveText('earlier reply');await expect(page.locator('audio')).toHaveCount(0);
+ await pop.getByRole('button',{name:'Resume live',exact:true}).click();await expect(pop.locator('.listen-feed-status')).toHaveText('Waiting for new replies');
+ await pop.getByRole('button',{name:'Stop listening'}).click();
+});

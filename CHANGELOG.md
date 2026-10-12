@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.47 · October 12, 2026
+
+- **Listen from a word.** With Listen on, double-click a word in an existing assistant reply, or double-tap on a phone. Reading starts there and continues through completed replies. Tool activity stays silent.
+- **Return to live updates.** New replies wait during replay. Resume live restores the interrupted reading and its queue; catching up does this automatically. The same interaction works with the desktop listening window.
+- **After updating:** update the speech service and refresh open UX46 pages. A configured voice gateway can be updated without restarting native agents.
+- **Verification:** browser journeys cover the word position, formatted text, replay order, live queue and interrupted playback position in Chromium and WebKit. Native speech and request validation checks pass. Physical phone double-tap and locked-screen playback remain unverified; the existing 4,000-character speech limit applies to the selected portion.
+
 ## v0.2.0-alpha.46 · October 12, 2026
 
 - **Listening recovers from brief interruptions.** Voice failures retry twice, hung reads have time limits, and stalled playback reloads from its last position. A late error from a skipped clip cannot stop the next reading. Persistent failures keep the unread response available for retry or skipping.

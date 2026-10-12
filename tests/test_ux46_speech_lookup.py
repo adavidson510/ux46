@@ -88,3 +88,10 @@ class SpeechGateway(GateCase):
     def test_missing_message_does_not_synthesize_another_reply(self):
         self.assertEqual(self.speak({'item_id':'other-room-id'})[0],404)
         self.assertEqual(self.fake.heard,[])
+    def test_starting_position_only_speaks_existing_native_suffix(self):
+        status,_,raw=self.speak({'item_id':'reply','start_offset':11})
+        self.assertEqual(status,200,raw)
+        self.assertEqual(self.fake.heard,['native response.'])
+        self.assertEqual(self.speak({'item_id':'reply','start_offset':-1})[0],400)
+        self.assertEqual(self.speak({'item_id':'reply','start_offset':True})[0],400)
+        self.assertEqual(self.speak({'item_id':'reply','start_offset':0,'text':'invented'})[0],400)
