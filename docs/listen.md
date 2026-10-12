@@ -2,7 +2,7 @@
 
 Open a conversation and choose **Listen** beside its model control. New progress
 messages and final answers play aloud in order on this device. Tool activity,
-reasoning and your own messages are skipped. Existing history is not replayed.
+reasoning and your own messages are skipped. Existing history stays silent until you choose it.
 Text stays in the conversation. On desktop, the controls dock beside **Listen**;
 click **Listening** to reveal the current response. On a phone, the controls
 stay tucked into **Listening** so they do not cover the conversation. Tap it
@@ -24,6 +24,20 @@ the reading. Once the player appears, Play is available even if the browser
 has only loaded the duration. If automatic playback needs another tap, it says
 **Ready · press Play to listen**. A stalled start offers **Reload audio** after
 eight seconds; there is no need to switch away from the page.
+
+## Read from a word
+
+While Listen is on, double-click a word in an assistant reply in the conversation.
+On a phone, double-tap it. Reading starts at that word and continues through the
+following completed replies, skipping tools and your messages. New live replies
+wait while you catch up. **Resume live** in the listening controls returns to
+the interrupted live reading and its waiting updates; reaching the end of the
+replay does this automatically. Links and buttons keep their usual behavior.
+
+This also works in the original conversation when its player is popped out.
+The existing local voice generates the selected portion; it sends no prompt.
+Replies still being written must finish first. If the word cannot be matched to
+native history, choose another word or Resume live.
 
 ## A separate listening window
 
@@ -83,4 +97,7 @@ Operators using the private access gateway can set `--voice-model-dir` to their
 existing local voice model and `--voice-cache-dir` to a private cache directory.
 This serves speech independently of running native workers, with the existing
 identity, login, origin and CSRF checks. It downloads no model. The browser
-sends only the message ID and chosen voice; the server retrieves the text.
+sends the message ID, chosen voice and optional starting position; the server
+retrieves the text. Positions count Unicode characters in native text after
+normalizing line endings. The selected suffix has the same 4,000-character
+reading limit. Replay searches up to 4,000 native items.

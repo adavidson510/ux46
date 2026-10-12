@@ -1843,6 +1843,7 @@ body.nav-dragging .navgrip{cursor:grabbing;}
 .listen-window body{display:block;height:100dvh;overflow:auto;margin:0;padding:12px;box-sizing:border-box;}
 .listen-window .listen-feed{position:static;max-width:none;width:100%;box-sizing:border-box;box-shadow:none;}
 .listen-window .listen-feed-text{max-height:none;overflow:visible;}
+.listen-word-mode .msg.agent > .body{touch-action:manipulation;}
 #listenWindowNotice{font:13px/1.5 var(--sans);color:var(--text-mute);margin:0 0 10px;}
 #listenWindowNotice:empty{display:none;}
 

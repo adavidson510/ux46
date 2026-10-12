@@ -112,6 +112,21 @@ class FakeKokoro:
 
 
 class SynthesisReceivesCleanTextTests(unittest.TestCase):
+    def test_selected_word_keeps_markdown_structure_and_unicode_offsets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = voice.VoiceService('/unused', tmp)
+            fake = FakeKokoro(); service._kokoro = fake
+            for source, word, expected in [
+                ('😀 Earlier. Read **chosen words** from here.', 'chosen', 'chosen words from here.'),
+                ('  # A heading\n\nRead *selected words* next.', 'selected', 'selected words next.'),
+                ('First word. First word. Third.', 'Third', 'Third.'),
+                ('```python\nprint("hello")\n```\nNext.', 'print', 'print("hello")\nNext.'),
+            ]:
+                service.speak(source, start_offset=source.index(word))
+                self.assertEqual(fake.heard[-1], expected)
+            for offset in [-1, 10000, True, 1.5, '2']:
+                with self.assertRaises(voice.VoiceError):service.speak('Read this.', start_offset=offset)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.service = voice.VoiceService("/tmp/atlas-voice-does-not-exist",

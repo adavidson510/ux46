@@ -1572,7 +1572,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             item = agent.console.message_for_speech(speech_match.group(1), item_id)
             text = native._item_text(item)
             try:
-                speech = service.voice.speak(text, str(body.get("voice") or voice.DEFAULT_VOICE))
+                speech = service.voice.speak(text, str(body.get("voice") or voice.DEFAULT_VOICE),
+                                             start_offset=body.get("start_offset"))
             except voice.VoiceError as exc:
                 raise ApiError(HTTPStatus.BAD_REQUEST, exc.code, str(exc))
             payload = speech.as_json()
@@ -2206,7 +2207,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             raise ApiError(HTTPStatus.CONFLICT, "nothing_to_read",
                            "that item has no text to read aloud")
         try:
-            speech = service.voice.speak(text, wanted)
+            speech = service.voice.speak(text, wanted, start_offset=body.get("start_offset"))
         except voice.VoiceError as exc:
             status = (HTTPStatus.SERVICE_UNAVAILABLE if exc.code == "voice_unavailable"
                       else HTTPStatus.BAD_REQUEST)

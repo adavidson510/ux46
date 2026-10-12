@@ -11,7 +11,7 @@ function clearSpeech() {}
 function replyIcon() {const icon=document.createElement('span');icon.textContent='◖';icon.setAttribute('aria-hidden','true');return icon;}
 function flash(message) {document.querySelector('#listenWindowNotice').textContent=message;}
 async function api(path,options={}) {
-  const response=await fetch(path,{method:options.method||'GET',credentials:'same-origin',cache:'no-store',
+  const response=await fetch(path,{method:options.method||'GET',signal:options.signal,credentials:'same-origin',cache:'no-store',
     headers:options.body?{'Content-Type':'application/json','X-Atlas-CSRF':state.csrf}:{},body:options.body?JSON.stringify(options.body):undefined});
-  const result=await response.json();if(!response.ok)throw Error(result.message||'Could not read this conversation');return result;
+  const result=await response.json();if(!response.ok){const error=new Error(result.message||'Could not read this conversation');error.status=response.status;error.code=result.error;throw error;}return result;
 }
