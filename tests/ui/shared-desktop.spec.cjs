@@ -97,6 +97,37 @@ test('startup ignores a closed restored tab, honors a fresh link, and keeps an e
   expect(await page.evaluate(()=>state.tabs)).toEqual([]);
 });
 
+test('phone launch restores its last view and never resurrects a closed launch tab',async({page})=>{
+ const envelope=makeEnvelope();await fixture(page,envelope,390);
+ await page.evaluate(()=>{
+  state.tabs=[{agent:'local',room:'project/keep'},{agent:'local',room:'project/launch'}];
+  state.room='project/keep';rememberRoom(state.room);
+ });
+ await page.reload();
+ const result=await page.evaluate(()=>{
+  state.agents=[{id:'local'}];selectLiveDesktop('default');
+  Object.defineProperty(navigator,'standalone',{value:true,configurable:true});
+  const tabs=[{agent:'local',room:'project/keep'},{agent:'local',room:'project/other'}];
+  const layout={tabs,active:tabs[1]};
+  return [sharedStartupTarget(layout,'local','project/launch',[],'navigate'),sharedStartupTarget(layout,'local','',[],'navigate')];
+ });
+ expect(result).toEqual(Array(2).fill({agent:'local',room:'project/keep'}));
+ expect(await page.evaluate(()=>sharedStartupTarget({tabs:[],active:null},'local','project/launch',[],'navigate'))).toEqual({agent:'local',room:''});
+});
+
+test('last view belongs to the device and desktop; an explicit browser link still wins',async({context,page})=>{
+ const envelope=makeEnvelope();await fixture(page,envelope);
+ await page.evaluate(()=>rememberRoom('project/keep'));
+ const other=await context.newPage();await fixture(other,envelope);
+ await other.evaluate(()=>{state.tabs.push({agent:'local',room:'project/other'});state.room='project/other';rememberRoom(state.room);});
+ expect(await page.evaluate(()=>{
+  const tabs=[{agent:'local',room:'project/keep'},{agent:'local',room:'project/other'}],layout={tabs,active:tabs[1]};
+  return [sharedStartupTarget(layout,'local','project/keep',tabs,'reload'),sharedStartupTarget(layout,'local','',tabs,'navigate'),sharedStartupTarget(layout,'local','project/keep',tabs,'navigate')];
+ })).toEqual([{agent:'local',room:'project/keep'},{agent:'local',room:'project/other'},{agent:'local',room:'project/keep'}]);
+ expect(await page.evaluate(()=>{selectLiveDesktop('another-desktop');return readLastView(true);})).toBeNull();
+ await other.close();
+});
+
 test('shared names beat stale tab copies and renaming persists across phone, reload and saved layouts', async ({browser}) => {
   const envelope=makeEnvelope();
   envelope.state.aliases=[{agent:'local',room:'project/keep',label:'Already saved'}];

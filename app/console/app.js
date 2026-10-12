@@ -1146,13 +1146,32 @@ function layoutRecord(raw) {
 
 function layoutKeys(tabs) { return tabs.map((tab) => tabKey(tab.agent, tab.room)); }
 
+function lastViewKey() { return 'atlas.last-view.1.'+(deviceOnlyLayout()?'device':selectedLiveDesktopId()); }
+function readLastView(windowFirst) {
+  for (const storage of windowFirst ? ['sessionStorage','localStorage'] : ['localStorage']) {
+    try {
+      const saved=JSON.parse(window[storage].getItem(lastViewKey())||'null');
+      if(saved && configuredIds().has(saved.agent) && typeof saved.room==='string' && ROOM_ID_SHAPE.test(saved.room))return saved;
+    } catch (e) { /* Storage can be unavailable in private mode. */ }
+  }
+  return null;
+}
 function sharedStartupTarget(layout, agent, room, previousTabs, navigationType) {
   const present = layout.tabs.some(tab => tab.agent === agent && tab.room === room);
   const previouslyOpen = previousTabs.some(tab => tab.agent === agent && tab.room === room);
   // Reloading an old URL or reopening a saved browser view is not a request
   // to reverse another device's close. A fresh, deliberate deep link can open.
-  const restoring = previouslyOpen || navigationType === "reload" || navigationType === "back_forward";
-  if (room && (present || !restoring)) return {agent, room};
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const restoring = previouslyOpen || standalone || navigationType === "reload" || navigationType === "back_forward";
+  // An installed app may launch its original saved URL on every open. Restore
+  // this device/window's last view, but only if it is still in the desktop.
+  // A deliberate browser deep link still wins; a closed tab is never revived
+  // by the stored last-view record.
+  const saved=readLastView(standalone || navigationType==='reload' || navigationType==='back_forward');
+  if (room && present && !standalone && navigationType==='navigate')return {agent,room};
+  if (room && !restoring) return {agent, room};
+  if (saved && layout.tabs.some(tab=>tab.agent===saved.agent&&tab.room===saved.room))return saved;
+  if (room && present) return {agent, room};
   return layout.active || (layout.tabs[0] ? {agent:layout.tabs[0].agent,room:layout.tabs[0].room} : {agent,room:""});
 }
 
@@ -4940,6 +4959,12 @@ function rememberRoom(roomId) {
     if (roomId) window.localStorage.setItem(agentKey("atlas.room"), roomId);
     else window.localStorage.removeItem(agentKey("atlas.room"));
   } catch (e) { /* private mode: the deep link still works */ }
+  if (roomId && findTab(agentId(),roomId)) {
+    const value=JSON.stringify({agent:agentId(),room:roomId});
+    for(const storage of ['sessionStorage','localStorage']) {
+      try {window[storage].setItem(lastViewKey(),value);} catch(e) { /* private mode */ }
+    }
+  }
   try {
     const url = new URL(window.location.href);
     if (roomId) url.searchParams.set("room", roomId);
@@ -10036,8 +10061,8 @@ async function boot() {
     return;
   }
 
-  // A deep link chooses the agent, then the workspace's own layout, then this
-  // device's last choice.
+  // Explicit links choose a room. Ordinary launches restore this device's last
+  // view within the shared desktop before using its shared startup suggestion.
   let linkAgent = "";
   let linkRoom = "";
   try {

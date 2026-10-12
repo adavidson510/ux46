@@ -27,8 +27,8 @@
   phone.addEventListener('change',()=>showControls(false));
   const label=make('strong'),status=make('span','','listen-feed-status');status.setAttribute('role','status');
   const mute=button('Mute',()=>{if(!feed)return;feed.muted=!feed.muted;if(feed.muted)feed.audio.pause();else {clearSpeech();void pump(feed);}paint();});
-  const retry=button('Play / retry',()=>{if(!feed)return;feed.error='';feed.muted=false;clearSpeech();void pump(feed);void poll();});retry.hidden=true;
-  const skip=button('Skip response',()=>{if(!feed)return;const f=feed;f.audio.pause();f.audio.removeAttribute('src');f.audio.load();f.current=null;f.preparing=false;++f.speechGeneration;f.error='';void pump(f);paint();});skip.hidden=true;
+  const retry=button('Play / retry',()=>{if(!feed)return;feed.error='';feed.retries=0;feed.muted=false;clearSpeech();void pump(feed);void poll();});retry.hidden=true;
+  const skip=button('Skip response',()=>{if(!feed)return;const f=feed;cancelReading(f);f.audio.pause();f.audio.removeAttribute('src');f.audio.load();f.current=null;f.error='';void pump(f);paint();});skip.hidden=true;
   if(!satellite){for(const [control,name,glyph] of [[retry,'Play / retry','▶'],[skip,'Skip response','⏭']]){control.textContent=glyph;control.setAttribute('aria-label',name);control.title=name;}}
   const volume=make('input');volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value='1';volume.setAttribute('aria-label','Listening volume');volume.oninput=()=>{if(feed)feed.audio.volume=Number(volume.value);};
   const words=make('details'),summary=make('summary','Response being read'),text=make('div','','listen-feed-text');words.append(summary,text);
@@ -92,7 +92,7 @@
     ++generation;
     showControls(false);
     if(satellite&&!transferring&&parent&&!parent.closed)parent.postMessage({type:"ux46-listen-stopped",channel},location.origin);
-    if(feed){feed.audio.pause();feed.audio.removeAttribute('src');feed.audio.load();feed.audio.remove();feed=null;}
+    if(feed){cancelReading(feed);feed.historyRequest?.abort();feed.audio.pause();feed.audio.removeAttribute('src');feed.audio.load();feed.audio.remove();feed=null;}
     if(releaseLock){releaseLock();releaseLock=null;}paint();
   }
   async function start(saved=null){
@@ -107,7 +107,7 @@
       const held=new Promise(resolve=>{releaseLock=resolve;});
       clearSpeech();
       const audio=make('audio');audio.hidden=true;audio.preload='auto';audio.volume=Number(volume.value);document.body.append(audio);
-      const f={...target,audio,seen:new Set(),queue:[],current:null,anchor:null,initialized:false,polling:false,preparing:false,muted:false,error:'',partial:'',speechGeneration:0};feed=f;
+      const f={...target,audio,seen:new Set(),queue:[],current:null,anchor:null,initialized:false,polling:false,preparing:false,muted:false,error:'',partial:'',speechGeneration:0,lastProgress:Date.now(),position:0};feed=f;
       if(saved){
         Object.assign(f,{queue:saved.queue,current:saved.current,anchor:saved.anchor,initialized:saved.initialized,muted:saved.muted,error:saved.error,partial:saved.partial,lastText:saved.lastText,seen:new Set(saved.seen)});
         audio.volume=saved.volume;volume.value=String(saved.volume);
@@ -116,38 +116,72 @@
           audio.addEventListener('loadedmetadata',()=>{if(feed===f&&Number.isFinite(saved.position))audio.currentTime=Math.min(saved.position,Number.isFinite(audio.duration)?audio.duration:saved.position);},{once:true});
         }
       }
-      audio.addEventListener('ended',()=>{if(feed!==f)return;f.lastText=f.current?.text||'';f.current=null;f.error='';void pump(f);paint();});
-      audio.addEventListener('error',()=>{if(feed===f&&f.current){f.error='Audio could not load. Play / retry or skip this response.';paint();}});
+      audio.addEventListener('ended',()=>{if(feed!==f)return;cancelReading(f);f.lastText=f.current?.text||'';f.current=null;f.error='';void pump(f);paint();});
+      audio.addEventListener('timeupdate',()=>{if(feed===f&&audio.currentTime!==f.position){f.position=audio.currentTime;f.lastProgress=Date.now();}});
+      audio.addEventListener('error',()=>{if(feed===f&&f.current&&!f.error)recover(f,'Audio could not load.');});
       paint();if(saved)void pump(f);await poll();await held;
     }).catch(e=>flash('Could not start listening: '+e.message));
   }
+  function cancelReading(f){
+    ++f.speechGeneration;f.speechRequest?.abort();f.preparing=false;f.starting=false;
+  }
+  // Retry brief interruptions, but never loop indefinitely or silently discard
+  // a response. Late failures from a skipped/stopped clip cannot block the next.
+  function recover(f,message,automatic=true){
+    cancelReading(f);f.audio.pause();f.reload=Boolean(f.current?.url);
+    f.retries=(f.retries||0)+1;
+    f.retryAt=automatic&&f.retries<=2?Date.now()+(f.retries===1?2000:8000):0;
+    f.error=message+(f.retryAt?' Retrying automatically…':' Play / retry or skip this response.');paint();
+  }
+  async function request(f,key,path,options,timeout){
+    const controller=new AbortController();f[key]=controller;
+    const timer=setTimeout(()=>controller.abort(),timeout);
+    try{return await api(path,{...options,signal:controller.signal});}
+    finally{clearTimeout(timer);if(f[key]===controller)f[key]=null;}
+  }
   async function pump(f){
-    if(feed!==f||f.muted||f.preparing||f.error)return;
-    if(!f.current){f.current=f.queue.shift();f.partial='';}
+    if(feed!==f||f.muted||f.preparing)return;
+    if(f.error){if(!f.retryAt||Date.now()<f.retryAt)return;f.error='';f.retryAt=0;}
+    if(!f.current){f.current=f.queue.shift();f.partial='';f.retries=0;f.reload=false;f.position=0;f.lastProgress=Date.now();}
     if(!f.current){paint();return;}
+    if(f.starting||f.current.url&&!f.audio.paused){
+      if(Date.now()-f.lastProgress>15000)recover(f,'Audio stopped progressing.');
+      return;
+    }
+    const current=f.current,seq=++f.speechGeneration;
     if(!f.current.url){
-      f.preparing=true;const seq=++f.speechGeneration;paint();
+      f.preparing=true;paint();
       try{
-        const speech=await api(agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/')+'/speak'),{absolute:true,method:'POST',body:{item_id:f.current.id,voice:f.voice||undefined}});
+        const speech=await request(f,'speechRequest',agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/')+'/speak'),{absolute:true,method:'POST',body:{item_id:current.id,voice:f.voice||undefined}},120000);
         if(feed!==f||seq!==f.speechGeneration)return;
         if(!/^\/api\/audio\/[a-zA-Z0-9_-]+\.wav$/.test(speech.audio_url||''))throw Error('Invalid audio response');
         f.current.url=agentPath(f.agent,speech.audio_url);f.audio.src=f.current.url;
         f.partial=speech.complete===false?'Partial reading: '+speech.spoken_chars+' of '+speech.total_chars+' characters':'';
-      }catch(e){if(feed===f&&seq===f.speechGeneration){f.error='Could not prepare this response. '+e.message;paint();}return;}
+      }catch(e){if(feed===f&&seq===f.speechGeneration)recover(f,'Could not prepare this response. '+(e.name==='AbortError'?'Voice preparation timed out.':e.message),!e.status||e.status>=500||e.status===408||e.status===429||e.code==='item_unknown');return;}
       finally{if(feed===f&&seq===f.speechGeneration)f.preparing=false;}
     }
     if(feed!==f||f.muted||f.error)return;
-    try{await f.audio.play();}catch(e){if(feed===f)f.error='Tap Play / retry to allow audio on this device.';}
+    if(f.reload){
+      f.reload=false;const position=f.position||0;
+      f.audio.addEventListener('loadedmetadata',()=>{if(feed===f&&f.current===current&&seq===f.speechGeneration)f.audio.currentTime=Math.min(position,Number.isFinite(f.audio.duration)?f.audio.duration:position);},{once:true});
+      f.audio.src=current.url;f.audio.load();
+    }
+    f.starting=true;f.lastProgress=Date.now();
+    try{await f.audio.play();}
+    catch(e){if(feed===f&&seq===f.speechGeneration&&!f.muted){
+      if(e.name==='NotAllowedError'){f.error='Tap Play / retry to allow audio on this device.';f.retryAt=0;}
+      else recover(f,'Audio was interrupted.');
+    }}finally{if(seq===f.speechGeneration)f.starting=false;}
     paint();
   }
   async function poll(){
     const f=feed;if(!f||f.polling||f.queue.length>=100)return;f.polling=true;
     try{
       const path=agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/'));
-      const room=await api(path,{absolute:true});if(feed!==f)return;if(room.id!==f.room)throw Error('Conversation could not be checked');
+      const room=await request(f,'historyRequest',path,{absolute:true},15000);if(feed!==f)return;if(room.id!==f.room)throw Error('Conversation could not be checked');
       let rows=[],cursor=null,page;
       for(let count=0;count<10;count++){
-        page=await api(path+'/history?limit=40&direction=desc'+(cursor?'&cursor='+encodeURIComponent(cursor):''),{absolute:true});
+        page=await request(f,'historyRequest',path+'/history?limit=40&direction=desc'+(cursor?'&cursor='+encodeURIComponent(cursor):''),{absolute:true},15000);
         if(feed!==f)return;
         if(page.unavailable||!Array.isArray(page.items))throw Error('History could not be checked');
         rows.push(...page.items);
@@ -175,7 +209,7 @@
         f.seen.add(item.id);f.queue.push({id:item.id,text:item.text});
       }
       f.anchor=newest;
-      if(!f.error)void pump(f);paint();
+      void pump(f);paint();
     }catch(e){if(feed===f){f.connectionNote='Waiting for connection · '+e.message;paint();}}
     finally{f.polling=false;}
   }
@@ -198,6 +232,10 @@
       }catch(error){flash(error.message);}
     })();
   }
-  setInterval(()=>{paint();void poll();},5000);
+  // Audio recovery is independent of history availability. A slow history read
+  // must not prevent already queued responses from continuing.
+  function tick(){if(feed)void pump(feed);paint();void poll();}
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')tick();});
+  setInterval(tick,5000);
   paint();
 })();

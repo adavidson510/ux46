@@ -2,9 +2,9 @@ const {test,expect}=require('@playwright/test');
 const fs=require('node:fs'),path=require('node:path');
 const root=process.env.UX46_TEST_UI_ROOT||path.resolve(__dirname,'../..');
 const message=(id,text,phase='commentary',type='agentMessage')=>({id,text,phase,type,turn_id:'turn-1'});
-async function fixture(context){
+async function fixture(context,duration=30){
  let items=[message('old','Earlier answer','final_answer')],active=null,fail=false;const calls=[];
- const wav=Buffer.alloc(44+8000*2*30);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
+ const wav=Buffer.alloc(44+8000*2*duration);wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(8000,24);wav.writeUInt32LE(16000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);
  await context.route('**/*',async route=>{
   const req=route.request(),u=new URL(req.url());if(u.origin!=='https://fixture.test')return route.abort();
   if(u.pathname.startsWith('/api/')){
@@ -59,7 +59,7 @@ test('only one window listens and stopping during synthesis discards late audio'
 });
 test('browser autoplay refusal offers a direct play button without skipping the response',async({context,page})=>{
  const f=await fixture(context);await f.open(page);await f.start(page);
- await page.evaluate(()=>{window.originalPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=()=>Promise.reject(Error('autoplay blocked'));});
+ await page.evaluate(()=>{window.originalPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=()=>Promise.reject(new DOMException('autoplay blocked','NotAllowedError'));});
  f.set([message('old','Earlier'),message('new','Read this')]);await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.getByRole('button',{name:'Play / retry',exact:true})).toBeVisible();expect(f.writes()).toHaveLength(1);
  await page.evaluate(()=>{HTMLMediaElement.prototype.play=window.originalPlay;});await page.getByRole('button',{name:'Play / retry',exact:true}).click();await expect(page.locator('.listen-feed-status')).toHaveText('Reading');expect(f.writes()).toHaveLength(1);await page.getByRole('button',{name:'Stop listening'}).click();
 });
@@ -142,4 +142,78 @@ test('phone listening stays docked while reading and typing; controls dismiss wi
  await page.getByRole('button',{name:'Stop listening',exact:true}).click();
  await expect(page.locator('audio')).toHaveCount(0);
  expect(f.writes()).toHaveLength(1);
+});
+
+test('a temporary voice failure after several readings recovers without restarting Listen',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ const rows=[message('old','Earlier')];
+ for(let i=1;i<=6;i++){
+  rows.push(message('reply-'+i,'Update '+i));f.set(rows.slice());
+  if(i===4)f.fail(true);
+  await page.evaluate(()=>UX46ListenFeed.poll());
+  if(i===4){
+   await expect(page.locator('.listen-feed-status')).toContainText('Could not prepare');
+   f.fail(false);
+  }
+  await expect(page.locator('.listen-feed-status')).toHaveText('Reading',{timeout:12000});
+  await expect(page.locator('.listen-feed-text')).toHaveText('Update '+i);
+  await page.locator('audio').evaluate(a=>{a.pause();a.dispatchEvent(new Event('ended'));});
+  await expect(page.locator('.listen-feed-status')).toHaveText('Waiting for new replies');
+ }
+ expect(f.writes().map(c=>c.body.item_id)).toEqual(['reply-1','reply-2','reply-3','reply-4','reply-4','reply-5','reply-6']);
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('eight real audio endings advance the queue exactly once each',async({context,page})=>{
+ const f=await fixture(context,.3);await f.open(page);await f.start(page);
+ f.set([message('old','Earlier'),...Array.from({length:8},(_,i)=>message('r'+i,'Reply '+i))]);
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect.poll(()=>f.writes().length).toBe(8);
+ await expect(page.locator('.listen-feed-status')).toHaveText('Waiting for new replies');
+ expect(f.writes().map(c=>c.body.item_id)).toEqual(Array.from({length:8},(_,i)=>'r'+i));
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('a late rejected play from a skipped response cannot poison the next reading',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ await page.evaluate(()=>{const play=HTMLMediaElement.prototype.play;let first=true;HTMLMediaElement.prototype.play=function(){if(first){first=false;return new Promise((_,reject)=>window.rejectOldPlay=reject);}return play.call(this);};});
+ f.set([message('old','Earlier'),message('a','Skip me'),message('b','Keep reading')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await page.waitForFunction(()=>window.rejectOldPlay);
+ await page.getByRole('button',{name:'Skip response',exact:true}).click();
+ await expect(page.locator('.listen-feed-text')).toHaveText('Keep reading');
+ await page.evaluate(()=>rejectOldPlay(new DOMException('replaced','AbortError')));
+ await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
+ await expect(page.getByRole('button',{name:'Play / retry',exact:true})).toBeHidden();
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('hung history releases its polling slot and a hung playback start recovers',async({context,page})=>{
+ await page.clock.install();const f=await fixture(context);await f.open(page);await f.start(page);
+ let historyRequests=0;
+ await page.route('**/history?*',async route=>{historyRequests++;if(historyRequests===1)return;await route.fulfill({json:{items:[message('a','New after connection returned'),message('old','Earlier')],complete:true}});});
+ await page.evaluate(()=>{const play=HTMLMediaElement.prototype.play;window.playStarts=0;HTMLMediaElement.prototype.play=function(){if(++playStarts===1)return new Promise(()=>{});return play.call(this);};void UX46ListenFeed.poll();});
+ await expect.poll(()=>historyRequests).toBe(1);
+ await page.clock.runFor(16000);
+ await expect(page.locator('.listen-feed-status')).toContainText('Waiting for connection');
+ await page.evaluate(()=>UX46ListenFeed.poll());await page.waitForFunction(()=>playStarts===1);
+ await page.clock.runFor(25000);
+ await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
+ await expect.poll(()=>page.locator('audio').evaluate(a=>!a.paused)).toBe(true);
+ expect(f.writes()).toHaveLength(1);
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('persistent voice failure retries twice then holds the unread response without a request loop',async({context,page})=>{
+ await page.clock.install();const f=await fixture(context);await f.open(page);await f.start(page);
+ f.fail(true);f.set([message('old','Earlier'),message('new','Do not discard this')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect(page.locator('.listen-feed-status')).toContainText('Retrying automatically');
+ await page.clock.runFor(5000);await expect.poll(()=>f.writes().length).toBe(2);
+ await expect(page.locator('.listen-feed-status')).toContainText('Retrying automatically');
+ await page.clock.runFor(10000);await expect.poll(()=>f.writes().length).toBe(3);
+ await expect(page.locator('.listen-feed-status')).toContainText('Play / retry or skip');
+ await page.clock.runFor(60000);expect(f.writes()).toHaveLength(3);
+ await expect(page.locator('.listen-feed-text')).toHaveText('Do not discard this');
+ f.fail(false);await page.getByRole('button',{name:'Play / retry',exact:true}).click();
+ await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
+ await page.getByRole('button',{name:'Stop listening'}).click();
 });
