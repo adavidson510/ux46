@@ -131,6 +131,8 @@ class Requests:
                     human_hash=hashlib.sha256(wording.encode()).hexdigest(),
                     goal_key=goal_key(goal), goal=goal, state=WAITING,
                     message='Resume requested. Waiting for this reply to finish; the goal has not been changed.')
+        if goal['status'] == 'active' and detail['native'].get('active_turn'):
+            item.update(state='resumed', message='Native goal is already active and this reply is running. No change was needed.')
         with self.db() as db:
             db.execute('INSERT OR IGNORE INTO requests VALUES(?,?,?)', (ident, thread, json.dumps(item)))
         return self.get(ident, thread)
@@ -147,6 +149,10 @@ class Requests:
                 raise ValueError('The saved goal changed; nothing was resumed')
             if goal.get('status') not in ('paused', 'blocked', 'active'):
                 raise ValueError('The goal completed or reached a limit; nothing was resumed')
+            if goal['status'] == 'active' and detail['native'].get('active_turn'):
+                item.update(state='resumed', message='Native goal is already active and a reply is running. No change was needed.')
+                self.save(item, WAITING)
+                return self.get(item['id'], item['thread'])
             if time.time() - item['at'] > 1800:
                 raise ValueError('Resume expired after 30 minutes; ask again when ready')
             if detail['native'].get('active_turn') or detail.get('approvals'):
@@ -211,6 +217,9 @@ def client_for(directory):
 
 
 def run_waiter(store, client, thread, ident):
+    if len(ident) != 40 or any(c not in '0123456789abcdef' for c in ident):
+        raise ValueError('Invalid request receipt')
+    store.get(ident, thread)
     lock = store.root / ('own-goal-' + ident + '.lock')
     with lock.open('a') as fd:
         lock.chmod(0o600)

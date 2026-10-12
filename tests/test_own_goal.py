@@ -52,6 +52,11 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.client.resumes[0]['thread_id'], 'own-thread')
         self.assertEqual(self.request()['state'], 'resumed')
         self.store.step(self.client, done); self.assertEqual(len(self.client.resumes), 1)
+    def test_already_active_running_goal_needs_no_waiter_or_mutation(self):
+        self.client.goal['status'] = 'active'
+        self.assertEqual(self.request()['state'], 'resumed')
+        self.assertFalse(self.client.resumes)
+
     def test_no_current_thread_or_other_thread_cannot_target_room(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(ValueError): calling_thread()
