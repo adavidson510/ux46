@@ -177,9 +177,9 @@ def relay_message(name, human, body):
             'Relayed by '+name+" — assistant's wording, not the human's:\n"+quoted(body))
 
 
-def local_clients(directory, cfg):
+def local_clients(directory, cfg, *, host_file='assistant-host.json'):
     """Reuse the installation's owner-authenticated loopback adapter boundary."""
-    config=json.loads((Path(directory)/'assistant-host.json').read_text())
+    config=json.loads((Path(directory)/host_file).read_text())
     base=urlsplit(config['console'])
     if base.scheme!='http' or base.hostname not in ('127.0.0.1','localhost','::1'):raise ValueError('Use the existing local console')
     origin=config['origin'];host=urlsplit(origin).netloc

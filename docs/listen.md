@@ -101,3 +101,23 @@ sends the message ID, chosen voice and optional starting position; the server
 retrieves the text. Positions count Unicode characters in native text after
 normalizing line endings. The selected suffix has the same 4,000-character
 reading limit. Replay searches up to 4,000 native items.
+
+## Your assistant's progress
+
+Listen includes the selected assistant's own completed commentary during a
+running turn, as well as its final answer. It does not wait for the entire turn
+when a later native item establishes that the progress message is finished.
+The newest still-streaming message waits so its ending is not cut off. Checks
+run about every five seconds; speech preparation and queued audio add delay.
+
+The assistant must actually write those progress messages. Its
+[role](assistant-role.md) asks for short conversational updates while doing
+useful work. Importing a specialist's report is separate: quiet/live feed
+settings choose which source reports reach the assistant, not whether Listen
+reads the assistant's own commentary. Tool output and incoming human/relay
+messages are never read by this feed.
+
+Listen must be on and unmuted, and the browser must allow playback. A one-off
+speaker button reads only that selected message. Background suspension or a
+locked phone can interrupt playback; this is not a guarantee of continuous
+phone audio or streaming speech while a sentence is still being generated.
