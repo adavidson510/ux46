@@ -272,6 +272,11 @@ class VoiceService:
 
     def speak(self, text: str, voice: str = DEFAULT_VOICE, speed: float = 1.0,
               start_offset: int | None = None) -> Speech:
+        prepared, source_chars = self._prepare(text, voice, start_offset)
+        return self._synthesize(prepared, voice, speed, source_chars)
+
+    @staticmethod
+    def _prepare(text, voice, start_offset):
         if voice not in VOICES:
             raise VoiceError(f"unknown voice: {voice}", code="bad_voice")
         source = (text or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -298,6 +303,35 @@ class VoiceService:
             prepared = prepared.lstrip()
         if not prepared:
             raise VoiceError("there is no text to read", code="empty_text")
+        return prepared, len(source)
+
+    def speak_part(self, text, voice=DEFAULT_VOICE, *, part=0, start_offset=None, version=None):
+        if type(part) is not int or not 0 <= part < 128:
+            raise VoiceError("Invalid speech part", code="bad_part")
+        # Use the same Markdown/word-offset preparation as one-off playback,
+        # but synthesize only one short piece. No text comes from the browser.
+        prepared, source_chars = self._prepare(text, voice, start_offset)
+        digest = hashlib.sha256(prepared.encode()).hexdigest()
+        if version is not None and version != digest:
+            raise VoiceError("This reply changed; restart its reading", code="speech_changed")
+        remaining = prepared[:MAX_CHARS]; parts = []
+        while remaining:
+            end = min(180, len(remaining))
+            if end < len(remaining):
+                stops = list(re.finditer(r'[.!?]\s+', remaining[:end]))
+                stop = stops[-1].end() if stops else 0
+                space = remaining.rfind(' ', 0, end)
+                end = stop if stop >= 60 else space + 1 if space >= 60 else end
+            parts.append(remaining[:end]); remaining = remaining[end:]
+        if part >= len(parts):
+            raise VoiceError("Invalid speech part", code="bad_part")
+        clip = self._synthesize(parts[part], voice, 1.0, source_chars).as_json()
+        clip.update(part=part, next_part=part+1 if part+1<len(parts) else None,
+                    part_version=digest, complete=len(prepared)<=MAX_CHARS,
+                    spoken_chars=min(len(prepared), MAX_CHARS), total_chars=len(prepared))
+        return clip
+
+    def _synthesize(self, prepared, voice, speed, source_chars):
         total = len(prepared)
         spoken = prepared[:MAX_CHARS]
         key = self.key_for(spoken, voice)
@@ -305,13 +339,13 @@ class VoiceService:
         if path.is_file():
             duration, rate = _wav_info(path)
             return Speech(key, path, voice, rate, duration, len(spoken), total,
-                          True, 0, len(source))
+                          True, 0, source_chars)
 
         with self._lock:                       # one ONNX session, one job at a time
             if path.is_file():                 # another request just made it
                 duration, rate = _wav_info(path)
                 return Speech(key, path, voice, rate, duration, len(spoken), total,
-                              True, 0, len(source))
+                              True, 0, source_chars)
             kokoro = self._ensure_ready()
             started = time.time()
             try:
@@ -328,7 +362,7 @@ class VoiceService:
             self._prune()
         duration, rate = _wav_info(path)
         return Speech(key, path, voice, rate, duration, len(spoken), total,
-                      False, synth_ms, len(source))
+                      False, synth_ms, source_chars)
 
     def _prune(self) -> None:
         try:

@@ -308,3 +308,42 @@ test('assistant speaks two own progress updates during work before the final, ne
  expect(f.writes().every(x=>x.path==='/api/room/example/at/speak')).toBe(true);
  await page.getByRole('button',{name:'Stop listening',exact:true}).click();
 });
+
+
+test('short speech starts before the next piece is ready and skip discards its pending continuation',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);
+ const parts=[];let release;const held=new Promise(r=>release=r);
+ await page.route('**/speak',async route=>{
+  const body=route.request().postDataJSON();parts.push(body);
+  if(body.item_id==='a'&&body.part===1)await held;
+  await route.fulfill({json:{audio_url:'/api/audio/test.wav',complete:true,part:body.part,next_part:body.item_id==='a'&&body.part===0?1:null,part_version:'stable'}});
+ });
+ f.set([message('old','Earlier'),message('a','A longer progress reply'),message('b','Next reply')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());
+ await expect(page.locator('.listen-feed-status')).toContainText('Reading');
+ await expect.poll(()=>parts.length).toBe(2);
+ expect(parts[1]).toMatchObject({item_id:'a',part:1,part_version:'stable'});
+ expect(await page.locator('audio').evaluate(a=>!a.paused)).toBe(true);
+ await page.getByRole('button',{name:'Skip response',exact:true}).click();
+ await expect(page.locator('.listen-feed-text')).toHaveText('Next reply');
+ release();await expect(page.locator('.listen-feed-status')).toHaveText('Reading');
+ expect(parts.map(p=>[p.item_id,p.part])).toEqual([['a',0],['a',1],['b',0]]);
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});
+
+test('speech pieces continue once in order before advancing to the next reply',async({context,page})=>{
+ const f=await fixture(context);await f.open(page);await f.start(page);const parts=[];
+ await page.route('**/speak',async route=>{
+  const body=route.request().postDataJSON();parts.push(body);
+  await route.fulfill({json:{audio_url:'/api/audio/test.wav',complete:true,part:body.part,next_part:body.item_id==='a'&&body.part<2?body.part+1:null,part_version:'stable'}});
+ });
+ f.set([message('old','Earlier'),message('a','Long response'),message('b','Next response')]);
+ await page.evaluate(()=>UX46ListenFeed.poll());await expect.poll(()=>parts.length).toBe(2);
+ await finishReading(page);await expect.poll(()=>parts.length).toBe(3);
+ await expect(page.locator('.listen-feed-text')).toHaveText('Long response');
+ await finishReading(page);await expect(page.locator('.listen-feed-status')).toContainText('Reading');
+ await finishReading(page);await expect.poll(()=>parts.length).toBe(4);
+ await expect(page.locator('.listen-feed-text')).toHaveText('Next response');
+ expect(parts.map(p=>[p.item_id,p.part])).toEqual([['a',0],['a',1],['a',2],['b',0]]);
+ await page.getByRole('button',{name:'Stop listening'}).click();
+});

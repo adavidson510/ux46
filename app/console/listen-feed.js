@@ -121,7 +121,11 @@
           audio.addEventListener('loadedmetadata',()=>{if(feed===f&&Number.isFinite(saved.position))audio.currentTime=Math.min(saved.position,Number.isFinite(audio.duration)?audio.duration:saved.position);},{once:true});
         }
       }
-      audio.addEventListener('ended',()=>{if(feed!==f)return;cancelReading(f);f.lastText=f.current?.text||'';
+      audio.addEventListener('ended',()=>{if(feed!==f)return;
+        if(f.current?.nextPart!==null&&Number.isInteger(f.current?.nextPart)){
+          f.current.part=f.current.nextPart;f.current.url=null;f.current.nextPart=null;f.position=0;f.error='';void pump(f);paint();return;
+        }
+        cancelReading(f);f.lastText=f.current?.text||'';
         if(f.replay&&f.current){f.seen.add(f.current.id);f.queue=f.queue.filter(item=>item.id!==f.current.id);if(f.replay.liveCurrent?.item?.id===f.current.id)f.replay.liveCurrent=null;}
         f.current=null;f.error='';void pump(f);paint();});
       audio.addEventListener('timeupdate',()=>{if(feed===f&&audio.currentTime!==f.position){f.position=audio.currentTime;f.lastProgress=Date.now();}});
@@ -130,7 +134,7 @@
     }).catch(e=>flash('Could not start listening: '+e.message));
   }
   function cancelReading(f){
-    ++f.speechGeneration;f.speechRequest?.abort();f.preparing=false;f.starting=false;
+    ++f.speechGeneration;f.speechRequest?.abort();f.prefetchRequest?.abort();f.prefetch=null;f.preparing=false;f.starting=false;
   }
   // Retry brief interruptions, but never loop indefinitely or silently discard
   // a response. Late failures from a skipped/stopped clip cannot block the next.
@@ -146,6 +150,19 @@
     try{return await api(path,{...options,signal:controller.signal});}
     finally{clearTimeout(timer);if(f[key]===controller)f[key]=null;}
   }
+  function fetchPart(f,current,part,key='speechRequest'){
+    return request(f,key,agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/')+'/speak'),
+      {absolute:true,method:'POST',body:{item_id:current.id,voice:f.voice||undefined,start_offset:current.startOffset,
+        part,part_version:current.partVersion}},120000);
+  }
+  function prefetchPart(f,current){
+    if(!Number.isInteger(current.nextPart)||feed!==f||f.current!==current||f.muted||f.prefetch)return;
+    const part=current.nextPart;
+    // One piece ahead, never a whole backlog. Catch errors until this piece is
+    // needed, so an optional prefetch cannot interrupt current playback.
+    const promise=fetchPart(f,current,part,'prefetchRequest').then(speech=>({speech}),error=>({error}));
+    f.prefetch={id:current.id,part,promise};
+  }
   async function pump(f){
     if(feed!==f||f.muted||f.preparing||f.replay?.loading||f.replay?.failed)return;
     if(f.error){if(!f.retryAt||Date.now()<f.retryAt)return;f.error='';f.retryAt=0;}
@@ -160,7 +177,13 @@
     if(!f.current.url){
       f.preparing=true;paint();
       try{
-        const speech=await request(f,'speechRequest',agentPath(f.agent,'/api/room/'+String(f.room).split('/').map(encodeURIComponent).join('/')+'/speak'),{absolute:true,method:'POST',body:{item_id:current.id,voice:f.voice||undefined,start_offset:current.startOffset}},120000);
+        const part=current.part||0,prefetch=f.prefetch;
+        let speech;
+        if(prefetch&&prefetch.id===current.id&&prefetch.part===part){
+          f.prefetch=null;const result=await prefetch.promise;if(result.error)throw result.error;speech=result.speech;
+        }else speech=await fetchPart(f,current,part);
+        if(speech.next_part!==undefined&&speech.next_part!==null&&speech.next_part!==part+1)throw Error('Invalid speech continuation');
+        current.nextPart=speech.next_part??null;current.partVersion=speech.part_version;
         if(feed!==f||seq!==f.speechGeneration)return;
         if(!/^\/api\/audio\/[a-zA-Z0-9_-]+\.wav$/.test(speech.audio_url||''))throw Error('Invalid audio response');
         f.current.url=agentPath(f.agent,speech.audio_url);f.audio.src=f.current.url;
@@ -175,7 +198,7 @@
       f.audio.src=current.url;f.audio.load();
     }
     f.starting=true;f.lastProgress=Date.now();
-    try{await f.audio.play();}
+    try{await f.audio.play();prefetchPart(f,current);}
     catch(e){if(feed===f&&seq===f.speechGeneration&&!f.muted){
       if(e.name==='NotAllowedError'){f.error='Tap Play / retry to allow audio on this device.';f.retryAt=0;}
       else recover(f,'Audio was interrupted.');
