@@ -117,7 +117,7 @@
   };
   r.onerror=e=>{
    if(capture!==c||c.r!==r)return;
-   if(e.error!=='no-speech'){c.failed=true;heard.textContent='Microphone stopped. Your words are kept; choose Done or Continue talking.';}
+   if(e.error!=='no-speech'){c.failed=true;heard.textContent='Microphone stopped. Your words are kept; tap the microphone to send, or Continue talking.';}
   };
   r.onend=()=>{
    if(capture!==c||c.r!==r)return;
@@ -128,7 +128,7 @@
    // Silence never sends. Restart a bounded number of times, then offer retry.
    c.timer=setTimeout(()=>startRecognition(c),250);
   };
-  try{r.start();}catch(e){c.r=null;c.failed=true;retryTalk.hidden=false;heard.textContent='Microphone unavailable. Choose Done to keep what was heard, or Cancel.';}
+  try{r.start();}catch(e){c.r=null;c.failed=true;retryTalk.hidden=false;heard.textContent='Microphone unavailable. Tap the microphone to send what was heard, or Cancel.';}
  }
  async function speak(){
   if(capture){
