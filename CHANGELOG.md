@@ -5,6 +5,13 @@ that release; later entries may replace its behavior. Optional integrations stil
 require their own setup. These public versions do not identify which version a
 customized installation is running.
 
+## v0.2.0-alpha.48 · October 12, 2026
+
+- **New models work in existing conversations.** If the picker offers a model but an older Codex connection explicitly rejects it, UX46 refreshes only that conversation and applies your selection once. Busy conversations wait in the command queue; other conversations keep running.
+- **Clearer model errors.** A confirmed unsupported model or effort is shown as a refusal instead of an unknown result. Lost responses are never automatically retried.
+- **After updating:** refresh open UX46 pages. The agent host must have a Codex version and login that support the model; this does not install or unlock models on remote machines.
+- **Verification:** browser journeys cover successful recovery, queued selections, persistent refusal, uncertain replies, changed native targets, and navigation during recovery. No model inference is started by these checks.
+
 ## v0.2.0-alpha.47 · October 12, 2026
 
 - **Listen from a word.** With Listen on, double-click a word in an existing assistant reply, or double-tap on a phone. Reading starts there and continues through completed replies. Tool activity stays silent.

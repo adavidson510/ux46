@@ -10441,12 +10441,12 @@ async function drainCommandQueue() {
         saveQueuedCommand({...entry,state:'running',message:'Running against the original conversation.'});renderCommandQueue();
         let result;
         try {
-          result=await api(path+'/command',{absolute:true,method:'POST',signal:AbortSignal.timeout(30000),body:{command:entry.command,client_id:entry.id,thread_id:entry.thread_id}});
+          result=await runRoomCommand(entry.agent,entry.room,{command:entry.command,client_id:entry.id,thread_id:entry.thread_id},detail);
         } catch (error) {
           // A settings/compact refusal says no work started. Goal resume can
           // report busy after starting a turn, so never blindly replay it.
           const waiting=error.code==='connection_busy' && entry.command.trim()!=='/goal resume';
-          const uncertain=!error.status || error.status>=500 || (error.code==='connection_busy' && !waiting);
+          const uncertain=!knownCommandRefusal(error) || (error.code==='connection_busy' && !waiting);
           saveQueuedCommand({...entry,state:waiting?'pending':uncertain?'uncertain':'failed',message:waiting?'Waiting for the current turn.':uncertain?'The result could not be confirmed. Check the session; this command will not be repeated.':error.message});
           continue;
         }
@@ -10465,6 +10465,39 @@ async function drainCommandQueue() {
 }
 window.addEventListener('storage',event=>{if(event.key?.startsWith(COMMAND_QUEUE_PREFIX)){renderCommandQueue();scheduleCommandQueue();}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden){renderCommandQueue();scheduleCommandQueue();}});
+
+// A reader may learn about a newly released model before an already attached
+// writer does. Only an explicit model refusal can trigger this recovery; a
+// lost response must never replay a command. The server enforces idle refresh.
+function knownCommandRefusal(error) {
+  return ['unsupported_model', 'unsupported_effort', 'connection_busy'].includes(error.code)
+    || (error.status >= 400 && error.status < 500);
+}
+async function runRoomCommand(owner, room, attempt, detail, onRefresh = () => {}) {
+  const path = agentPath(owner, roomApiPath(room));
+  const send = () => api(path + '/command', {absolute:true, method:'POST',
+    signal:AbortSignal.timeout(30000), body:attempt});
+  try { return await send(); }
+  catch (error) {
+    const model = /^\/model\s+(\S+)\s*$/.exec(attempt.command)?.[1];
+    if (error.code !== 'unsupported_model' || !model || detail?.runtime !== 'codex'
+        || !attempt.thread_id || detail.id !== room
+        || detail.native?.thread_id !== attempt.thread_id
+        || !detail.native?.catalog?.models?.some(item => item.model === model)) throw error;
+    // Re-read the original target, never whichever tab is selected now.
+    const current = await api(path, {absolute:true, signal:AbortSignal.timeout(10000)});
+    if (current.id !== room || current.native?.thread_id !== attempt.thread_id
+        || current.runtime !== 'codex' || current.ownership?.state !== 'atlas_owned') throw error;
+    onRefresh();
+    const refreshed = await api(agentPath(owner, '/api/connection/refresh'),
+      {absolute:true, method:'POST', signal:AbortSignal.timeout(90000), body:{room}});
+    if (refreshed.connection?.state !== 'refreshed' || refreshed.connection?.scope !== 'conversation'
+        || refreshed.connection?.room !== room) throw error;
+    const after = await api(path, {absolute:true, signal:AbortSignal.timeout(10000)});
+    if (after.id !== room || after.native?.thread_id !== attempt.thread_id) throw error;
+    return send(); // One retry after a confirmed refusal and successful refresh.
+  }
+}
 
 async function sendCommand(command, fromDraft) {
   if (state.sending || state.roomRefreshing || !state.detail) {
@@ -10524,7 +10557,9 @@ async function sendCommand(command, fromDraft) {
   }
   state.sending = true; clearTimeout(draftTimer); closeCommands(); renderTarget(); setSendState("Running " + name + "…","ok");
   try {
-    const result = await api(agentPath(commandAgent, roomApiPath(roomId) + "/command"), {absolute:true,method:"POST",body:attempt});
+    const result = await runRoomCommand(commandAgent, roomId, attempt, state.detail, () => {
+      if (stillCurrent()) setSendState('Refreshing this conversation for the selected model…', 'ok');
+    });
     const outcome = result.command || {}, sameRoom = stillCurrent();
     const refused = ["unsupported","failed","uncertain","needs_input","needs_idle","needs_sign_in"].includes(outcome.state);
     if (outcome.state !== "uncertain") {try {localStorage.removeItem(key);} catch(e) {}}
@@ -10558,7 +10593,7 @@ async function sendCommand(command, fromDraft) {
     if (sameRoom && commandAgent === agentId()) setReceipt(text,["partial","unconfirmed"].includes(outcome.state) ? "warn" : "saved"); else flash(text);
     return {ok: true};
   } catch(error) {
-    const known = error.status && error.status >= 400 && error.status < 500;
+    const known = knownCommandRefusal(error);
     if (known) {try {localStorage.removeItem(key);} catch(e) {}}
     const busy = error.code === "connection_busy";
     let text = busy ? name + " could not run yet. " + error.message
