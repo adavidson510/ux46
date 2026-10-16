@@ -34,6 +34,17 @@ async function fixture(page, search, {boot = false} = {}) {
 const roomRequests = () => seen.filter(p => p.includes('/api/room/') || p.includes('/agents/'));
 const confined = p => /^\/api\/room\/[^/?#]+\/[^/?#]+(\/[a-z-]+)?(\?|$)/.test(p);
 
+test('unbound native approvals explain where to answer without offering unsafe controls', async ({page}) => {
+  await fixture(page, '');
+  await page.evaluate(() => document.querySelector('#stream').append(approvalNode({
+    key:'hermes-request',kind:'command',params:{command:'example'},answer_supported:false,
+    answer_notice:'Answer in Hermes. This request cannot be safely approved from UX46 yet.'
+  })));
+  await expect(page.locator('[data-approval="hermes-request"]')).toContainText('Answer in Hermes');
+  await expect(page.getByRole('button',{name:'Accept once',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'Decline',exact:true})).toHaveCount(0);
+});
+
 const bad = ['../agents/remote1/api/room/p/s', '../x', 'p/s?x', 'p/s#x', 'p/..', './s', 'p\\..\\x/s', 'p/s/t'];
 
 for (const room of bad) {
